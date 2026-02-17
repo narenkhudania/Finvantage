@@ -1,0 +1,477 @@
+
+import React, { useState, useMemo } from 'react';
+import { FinanceState, Loan, LoanType, LoanSourceType } from '../types';
+import { 
+  Plus, Trash2, Home, CreditCard, Car, Landmark, User, 
+  Calendar, Percent, ArrowUpRight, TrendingDown, Info, 
+  ChevronRight, ChevronDown, Activity, ShieldCheck, Calculator,
+  ExternalLink, ArrowDownToLine, Zap, History, MessageSquare,
+  AlertTriangle, Lightbulb, BarChart3
+} from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell } from 'recharts';
+
+const LOAN_TYPES: { type: LoanType, icon: any }[] = [
+  { type: 'Home Loan', icon: Home },
+  { type: 'Car Loan', icon: Car },
+  { type: 'Property Purchase', icon: Landmark },
+  { type: 'Personal Loan', icon: User },
+  { type: 'Credit Card EMI', icon: CreditCard },
+  { type: 'OD', icon: Landmark },
+];
+
+const SOURCE_TYPES: LoanSourceType[] = ['Bank', 'NBFC', 'Friends & Family'];
+
+const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
+  const [showAdd, setShowAdd] = useState(false);
+  const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
+  const [lumpSumAmount, setLumpSumAmount] = useState<string>('');
+  
+  const [newLoan, setNewLoan] = useState<Partial<Loan>>({
+    type: 'Home Loan',
+    sourceType: 'Bank',
+    owner: 'self',
+    source: '',
+    sanctionedAmount: 0,
+    outstandingAmount: 0,
+    interestRate: 8.5,
+    remainingTenure: 120,
+    emi: 0,
+    notes: '',
+    lumpSumRepayments: []
+  });
+
+  const handleAdd = () => {
+    const loan = { ...newLoan, id: Math.random().toString(36).substr(2, 9) } as Loan;
+    updateState({ loans: [...state.loans, loan] });
+    setShowAdd(false);
+    setNewLoan({ type: 'Home Loan', sourceType: 'Bank', owner: 'self', source: '', sanctionedAmount: 0, outstandingAmount: 0, interestRate: 8.5, remainingTenure: 120, emi: 0, notes: '', lumpSumRepayments: [] });
+  };
+
+  const removeLoan = (id: string) => {
+    updateState({ loans: state.loans.filter(l => l.id !== id) });
+  };
+
+  const addLumpSum = (loanId: string) => {
+    const amount = parseFloat(lumpSumAmount);
+    if (isNaN(amount) || amount <= 0) return;
+
+    updateState({
+      loans: state.loans.map(l => {
+        if (l.id === loanId) {
+          const newOutstanding = Math.max(0, l.outstandingAmount - amount);
+          return {
+            ...l,
+            outstandingAmount: newOutstanding,
+            lumpSumRepayments: [...(l.lumpSumRepayments || []), { year: new Date().getFullYear(), amount }]
+          };
+        }
+        return l;
+      })
+    });
+    setLumpSumAmount('');
+  };
+
+  const totalOutstanding = state.loans.reduce((sum, l) => sum + l.outstandingAmount, 0);
+  const totalEMI = state.loans.reduce((sum, l) => sum + l.emi, 0);
+
+  // Amortization Calculator with Lump Sum Projection
+  const calculateProjections = (loan: Loan, simulateExtra: number = 0) => {
+    const monthlyRate = loan.interestRate / 12 / 100;
+    const balance = loan.outstandingAmount - simulateExtra;
+    
+    let tempBalance = balance;
+    let totalInterest = 0;
+    let months = 0;
+    const schedule = [];
+    
+    // Calculate for next 12 months for the table/chart
+    let monthCounter = balance;
+    for (let i = 1; i <= 12; i++) {
+      if (monthCounter <= 0) break;
+      const interest = monthCounter * monthlyRate;
+      const principal = Math.min(monthCounter, loan.emi - interest);
+      monthCounter -= principal;
+      schedule.push({ 
+        month: `Mo ${i}`, 
+        interest: Math.round(interest), 
+        principal: Math.round(principal), 
+        balance: Math.max(0, Math.round(monthCounter)) 
+      });
+    }
+
+    // Full projection to calculate total interest and tenure
+    let fullBalance = balance;
+    while (fullBalance > 0 && months < 600) { 
+      const interest = fullBalance * monthlyRate;
+      const principal = Math.min(fullBalance, loan.emi - interest);
+      fullBalance -= principal;
+      totalInterest += interest;
+      months++;
+    }
+
+    return { schedule, totalInterest, monthsRemaining: months };
+  };
+
+  // Consolidation suggestions
+  const consolidationInsights = useMemo(() => {
+    const highInterestLoans = state.loans.filter(l => l.interestRate > 11 && l.outstandingAmount > 50000);
+    const lowInterestLoans = state.loans.filter(l => l.interestRate < 9.5);
+    
+    const insights = [];
+    if (highInterestLoans.length > 0 && lowInterestLoans.some(l => l.type === 'Home Loan')) {
+      const homeLoan = lowInterestLoans.find(l => l.type === 'Home Loan')!;
+      insights.push({
+        type: 'Consolidation',
+        text: `High interest debt detected (${highInterestLoans.map(l => l.type).join(', ')}). Consider consolidating into a Top-up on your ${homeLoan.source} Home Loan to save ~${(highInterestLoans[0].interestRate - homeLoan.interestRate).toFixed(1)}% in interest.`,
+        priority: 'high'
+      });
+    }
+
+    const personalLoans = state.loans.filter(l => l.type === 'Personal Loan' && l.interestRate > 12);
+    if (personalLoans.length > 0) {
+      insights.push({
+        type: 'Refinancing',
+        text: `Your ${personalLoans[0].source} Personal Loan at ${personalLoans[0].interestRate}% is above market average. Check balance transfer options to reduce rates to 10.5%.`,
+        priority: 'medium'
+      });
+    }
+
+    return insights;
+  }, [state.loans]);
+
+  return (
+    <div className="space-y-10 animate-in fade-in duration-700 pb-24">
+      {/* Header Strategy Block */}
+      <div className="bg-[#0b0f1a] p-12 md:p-16 rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12 text-left">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+              <Activity size={14}/> Liability Architecture
+            </div>
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Debt <br/><span className="text-indigo-500">Inventory.</span></h2>
+            <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
+              Monitoring <span className="text-white font-bold">{state.loans.length} active lines</span> for <span className="text-white font-bold">{state.profile.firstName} {state.profile.lastName}</span>.
+            </p>
+          </div>
+          <button 
+            onClick={() => setShowAdd(true)}
+            className="px-12 py-8 bg-indigo-600 hover:bg-indigo-50 text-white hover:text-indigo-600 rounded-[2.5rem] transition-all flex items-center gap-4 font-black uppercase text-sm tracking-[0.25em] shadow-2xl active:scale-95 shrink-0"
+          >
+            <Plus size={22} /> Add Loan Profile
+          </button>
+        </div>
+      </div>
+
+      {/* Insights Section */}
+      {consolidationInsights.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 px-2">
+            <Lightbulb className="text-amber-500" size={18} />
+            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Smart Debt Optimization</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {consolidationInsights.map((insight, i) => (
+              <div key={i} className={`p-6 rounded-[2.5rem] border flex gap-4 items-start bg-white shadow-sm transition-all hover:shadow-md ${insight.priority === 'high' ? 'border-amber-200 bg-amber-50/30' : 'border-indigo-100 bg-indigo-50/30'}`}>
+                <div className={`p-3 rounded-2xl ${insight.priority === 'high' ? 'bg-amber-100 text-amber-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                  <Zap size={20} />
+                </div>
+                <div className="text-left">
+                  <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-60">{insight.type}</p>
+                  <p className="text-sm font-bold text-slate-800 leading-relaxed">{insight.text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-center text-left">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Outstanding</p>
+          <h4 className="text-3xl font-black text-rose-600 tracking-tighter">₹{totalOutstanding.toLocaleString()}</h4>
+        </div>
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-center text-left">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Monthly EMI Load</p>
+          <h4 className="text-3xl font-black text-slate-900 tracking-tighter">₹{totalEMI.toLocaleString()}</h4>
+        </div>
+        <div className="bg-slate-950 p-8 rounded-[2.5rem] text-white flex flex-col justify-center relative overflow-hidden group text-left">
+           <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingDown size={80}/></div>
+           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Debt-to-Income</p>
+           <h4 className="text-3xl font-black text-indigo-400 tracking-tighter">
+             {state.profile.income.salary > 0 ? ((totalEMI / state.profile.income.salary) * 100).toFixed(1) : 0}%
+           </h4>
+        </div>
+        <div className="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100 flex flex-col justify-center text-left">
+           <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Status</p>
+           <h4 className="text-2xl font-black text-emerald-700 tracking-tighter">Serviceable</h4>
+           <p className="text-[9px] font-bold text-emerald-500 uppercase mt-1">Within Safe Limits</p>
+        </div>
+      </div>
+
+      {/* Loan Inventory List */}
+      <div className="space-y-6">
+        {state.loans.map((loan) => {
+          const Icon = LOAN_TYPES.find(lt => lt.type === loan.type)?.icon || Landmark;
+          const isExpanded = expandedLoanId === loan.id;
+          
+          const currentProj = calculateProjections(loan);
+          const simulatedExtra = parseFloat(lumpSumAmount) || 0;
+          const simulatedProj = calculateProjections(loan, simulatedExtra);
+          
+          const { schedule, totalInterest, monthsRemaining } = currentProj;
+          const interestSaved = Math.max(0, currentProj.totalInterest - simulatedProj.totalInterest);
+          const tenureSaved = Math.max(0, currentProj.monthsRemaining - simulatedProj.monthsRemaining);
+
+          const payoffProgress = Math.min(100, Math.round(((loan.sanctionedAmount - loan.outstandingAmount) / (loan.sanctionedAmount || 1)) * 100));
+
+          return (
+            <div key={loan.id} className="bg-white rounded-[3.5rem] border border-slate-200 shadow-sm overflow-hidden hover:border-indigo-300 transition-all">
+              <div 
+                className="p-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-10 cursor-pointer"
+                onClick={() => setExpandedLoanId(isExpanded ? null : loan.id)}
+              >
+                <div className="flex gap-8 flex-1 text-left">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center shrink-0">
+                    <Icon size={28} />
+                  </div>
+                  <div className="space-y-2 flex-1">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg">{loan.source}</span>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{loan.sourceType} • {loan.type}</span>
+                    </div>
+                    <h4 className="text-3xl font-black text-slate-900 tracking-tighter">₹{loan.outstandingAmount.toLocaleString()}</h4>
+                    <div className="w-full max-w-[240px] h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden">
+                       <div className="h-full bg-emerald-500" style={{ width: `${payoffProgress}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-8 text-center shrink-0 border-l border-slate-100 pl-8">
+                   <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">EMI</p>
+                      <p className="text-lg font-black text-slate-900">₹{loan.emi.toLocaleString()}</p>
+                   </div>
+                   <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Rate</p>
+                      <p className="text-lg font-black text-indigo-600">{loan.interestRate}%</p>
+                   </div>
+                   <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ends In</p>
+                      <p className="text-lg font-black text-slate-900">{monthsRemaining} Mo</p>
+                   </div>
+                </div>
+
+                <div className="flex gap-3 shrink-0">
+                  <button onClick={(e) => { e.stopPropagation(); removeLoan(loan.id); }} className="p-3 bg-rose-50 text-rose-400 hover:bg-rose-600 hover:text-white rounded-2xl transition-all"><Trash2 size={18}/></button>
+                  <div className={`p-3 bg-slate-50 text-slate-400 rounded-2xl transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}><ChevronDown size={18}/></div>
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="bg-slate-50 p-10 border-t border-slate-200 animate-in slide-in-from-top-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                     <div className="space-y-8">
+                        {/* Simulation Module */}
+                        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6 text-left">
+                           <h5 className="text-sm font-black text-slate-900 flex items-center gap-2 uppercase tracking-widest"><Zap size={16} className="text-amber-500"/> Lump-sum Simulator</h5>
+                           <p className="text-[11px] text-slate-500 font-medium leading-relaxed">Make an extra payment to see how it slashes your tenure and total interest.</p>
+                           <div className="space-y-4">
+                              <input 
+                                 type="number" 
+                                 value={lumpSumAmount} 
+                                 onChange={e => setLumpSumAmount(e.target.value)} 
+                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-black text-lg outline-none focus:border-indigo-600" 
+                                 placeholder="Amount ₹"
+                                 onClick={e => e.stopPropagation()}
+                              />
+                              <button 
+                                 onClick={(e) => { e.stopPropagation(); addLumpSum(loan.id); }}
+                                 className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                              >
+                                 Record Payment <ArrowDownToLine size={14}/>
+                              </button>
+                           </div>
+
+                           {simulatedExtra > 0 && (
+                             <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 animate-in zoom-in-95">
+                               <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-2"><Lightbulb size={12}/> Projected Savings</p>
+                               <div className="space-y-1">
+                                 <div className="flex justify-between text-xs font-bold text-slate-600"><span>Interest Saved:</span><span className="text-emerald-700">₹{Math.round(interestSaved).toLocaleString()}</span></div>
+                                 <div className="flex justify-between text-xs font-bold text-slate-600"><span>Tenure Saved:</span><span className="text-emerald-700">-{tenureSaved} Months</span></div>
+                               </div>
+                             </div>
+                           )}
+                        </div>
+
+                        {/* Notes Section */}
+                        {loan.notes && (
+                          <div className="bg-indigo-50 p-8 rounded-[2.5rem] border border-indigo-100 text-left">
+                            <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2"><MessageSquare size={14}/> Internal Notes</h5>
+                            <p className="text-sm font-bold text-indigo-900 italic leading-relaxed">"{loan.notes}"</p>
+                          </div>
+                        )}
+
+                        <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white space-y-4 text-left">
+                           <div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase">Projected Total Interest</span><span className="text-sm font-black text-rose-400">₹{Math.round(totalInterest).toLocaleString()}</span></div>
+                           <div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase">Current Ends In</span><span className="text-sm font-black text-emerald-400">{monthsRemaining} Months</span></div>
+                        </div>
+                     </div>
+
+                     <div className="lg:col-span-2 space-y-10">
+                        {/* Visualization: 12 Month Chart */}
+                        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
+                           <div className="flex justify-between items-center mb-8">
+                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><BarChart3 size={16}/> Repayment Curve (Next 12 Mo)</h5>
+                              <div className="flex gap-4">
+                                <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-400"/><span className="text-[9px] font-black text-slate-400 uppercase">Interest</span></div>
+                                <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-400"/><span className="text-[9px] font-black text-slate-400 uppercase">Principal</span></div>
+                              </div>
+                           </div>
+                           <div className="h-[200px] w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={schedule}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                  <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}} />
+                                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}} />
+                                  <Tooltip 
+                                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
+                                    cursor={{ fill: '#f8fafc' }}
+                                  />
+                                  <Bar dataKey="interest" stackId="a" fill="#fb7185" radius={[0, 0, 0, 0]} />
+                                  <Bar dataKey="principal" stackId="a" fill="#34d399" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                              </ResponsiveContainer>
+                           </div>
+                        </div>
+
+                        {/* Amortization Table */}
+                        <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
+                           <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center">
+                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detailed Amortization Node</h5>
+                              <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">12 Month Window</span>
+                           </div>
+                           <div className="overflow-x-auto max-h-[300px] no-scrollbar">
+                              <table className="w-full text-left">
+                                 <thead className="bg-slate-50 sticky top-0 z-10">
+                                    <tr>
+                                       <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase">Period</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Interest</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Principal</th>
+                                       <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Bal. End</th>
+                                    </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-slate-50">
+                                    {schedule.map((row, i) => (
+                                       <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                          <td className="px-8 py-4 text-[10px] font-black text-slate-600">{row.month}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-rose-500 text-right">₹{row.interest.toLocaleString()}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-emerald-500 text-right">₹{row.principal.toLocaleString()}</td>
+                                          <td className="px-8 py-4 text-[10px] font-black text-slate-900 text-right">₹{row.balance.toLocaleString()}</td>
+                                       </tr>
+                                    ))}
+                                 </tbody>
+                              </table>
+                           </div>
+                        </div>
+                     </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {showAdd && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-3xl z-[70] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[4rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 h-[85vh] flex flex-col border border-white/20">
+            <div className="p-12 border-b border-slate-50 flex justify-between items-center bg-white sticky top-0 z-30 text-left">
+              <div className="flex items-center gap-6">
+                <div className="p-4 bg-indigo-50 text-indigo-600 rounded-[1.5rem]"><Calculator size={28}/></div>
+                <div>
+                   <h3 className="text-3xl font-black text-slate-900 tracking-tight">Debt Origination</h3>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Institutional Credit Profile</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAdd(false)} className="p-4 bg-slate-50 hover:bg-rose-50 hover:text-rose-500 rounded-3xl text-slate-400 transition-all"><Plus size={32} className="rotate-45" /></button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-12 space-y-8 no-scrollbar text-left">
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Loan Type</label>
+                    <select 
+                      value={newLoan.type}
+                      onChange={e => setNewLoan({...newLoan, type: e.target.value as LoanType})}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none"
+                    >
+                       {LOAN_TYPES.map(lt => <option key={lt.type}>{lt.type}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Source Type</label>
+                    <select 
+                      value={newLoan.sourceType}
+                      onChange={e => setNewLoan({...newLoan, sourceType: e.target.value as LoanSourceType})}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none"
+                    >
+                       {SOURCE_TYPES.map(st => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+               </div>
+
+               <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Institution Name / Source</label>
+                  <input type="text" value={newLoan.source} onChange={e => setNewLoan({...newLoan, source: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="HDFC, SBI, NBFC Name, etc." />
+               </div>
+
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Sanctioned Amount</label>
+                    <input type="number" value={newLoan.sanctionedAmount || ''} onChange={e => setNewLoan({...newLoan, sanctionedAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Current Outstanding</label>
+                    <input type="number" value={newLoan.outstandingAmount || ''} onChange={e => setNewLoan({...newLoan, outstandingAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
+                  </div>
+               </div>
+
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Monthly EMI</label>
+                    <input type="number" value={newLoan.emi || ''} onChange={e => setNewLoan({...newLoan, emi: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Interest Rate (%)</label>
+                    <input type="number" step="0.1" value={newLoan.interestRate || ''} onChange={e => setNewLoan({...newLoan, interestRate: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Remaining (Mo)</label>
+                    <input type="number" value={newLoan.remainingTenure || ''} onChange={e => setNewLoan({...newLoan, remainingTenure: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                  </div>
+               </div>
+
+               <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><MessageSquare size={12}/> Specific Terms / Comments</label>
+                  <textarea 
+                    value={newLoan.notes} 
+                    onChange={e => setNewLoan({...newLoan, notes: e.target.value})} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-medium outline-none resize-none h-24" 
+                    placeholder="e.g. Floating rate, part-payment allowed after 1yr, etc."
+                  />
+               </div>
+            </div>
+
+            <div className="p-10 border-t border-slate-100 bg-white">
+               <button onClick={handleAdd} className="w-full py-8 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase tracking-[0.4em] text-lg hover:bg-indigo-600 transition-all shadow-2xl flex items-center justify-center gap-6">Secure Credit Record <ArrowUpRight size={32}/></button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Liabilities;
