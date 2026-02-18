@@ -1,9 +1,4 @@
-// App.tsx
-// REPLACE your existing App.tsx with this file.
-// Changes from original:
-//   1. On mount, checks for a live Supabase session and restores state
-//   2. handleLogout now calls supabase.auth.signOut()
-//   3. Everything else is identical
+// App.tsx — Production ready. Diagnostic removed.
 
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
@@ -63,13 +58,12 @@ const INITIAL_STATE: FinanceState = {
 };
 
 const App: React.FC = () => {
-  const [view, setView]                 = useState<View>('dashboard');
-  const [showAuth, setShowAuth]         = useState(false);
+  const [view, setView]                   = useState<View>('dashboard');
+  const [showAuth, setShowAuth]           = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isRestoring, setIsRestoring]   = useState(true); // checking session on load
+  const [isRestoring, setIsRestoring]     = useState(true);
 
   const [financeState, setFinanceState] = useState<FinanceState>(() => {
-    // Attempt to restore from localStorage (works for same-device reload)
     const saved = localStorage.getItem('finvantage_active_session');
     if (saved) {
       try { return JSON.parse(saved); } catch { /* fall through */ }
@@ -77,14 +71,13 @@ const App: React.FC = () => {
     return INITIAL_STATE;
   });
 
-  // ── On mount: verify Supabase session is still valid ─────────
+  // On mount: verify Supabase session is still valid
   useEffect(() => {
     const restoreSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session) {
-          // Session is live — if we don't have local state, load from Supabase
           if (!financeState.isRegistered) {
             const profile = await getProfile();
             if (profile) {
@@ -93,21 +86,21 @@ const App: React.FC = () => {
                 isRegistered: true,
                 profile: {
                   ...prev.profile,
-                  firstName:      profile.first_name,
-                  lastName:       profile.last_name  ?? '',
-                  email:          profile.identifier.includes('@') && !profile.identifier.includes('@auth.finvantage.app')
-                                    ? profile.identifier : '',
-                  mobile:         !profile.identifier.includes('@')
-                                    ? profile.identifier : '',
-                  dob:            profile.dob ?? '',
-                  lifeExpectancy: profile.life_expectancy,
-                  retirementAge:  profile.retirement_age,
-                  pincode:        profile.pincode  ?? '',
-                  city:           profile.city     ?? '',
-                  state:          profile.state    ?? '',
-                  country:        profile.country,
-                  incomeSource:   profile.income_source as IncomeSource,
-                  iqScore:        profile.iq_score,
+                  firstName:       profile.first_name,
+                  lastName:        profile.last_name ?? '',
+                  email:           profile.identifier.includes('@') && !profile.identifier.includes('@auth.finvantage.app')
+                                     ? profile.identifier : '',
+                  mobile:          !profile.identifier.includes('@')
+                                     ? profile.identifier : '',
+                  dob:             profile.dob ?? '',
+                  lifeExpectancy:  profile.life_expectancy,
+                  retirementAge:   profile.retirement_age,
+                  pincode:         profile.pincode ?? '',
+                  city:            profile.city    ?? '',
+                  state:           profile.state   ?? '',
+                  country:         profile.country,
+                  incomeSource:    profile.income_source as IncomeSource,
+                  iqScore:         profile.iq_score,
                   income: { salary: 50000, bonus: 0, reimbursements: 0, business: 0, rental: 0, investment: 0, expectedIncrease: 6 },
                   monthlyExpenses: 20000,
                 },
@@ -115,7 +108,6 @@ const App: React.FC = () => {
             }
           }
         } else {
-          // No valid session — clear any stale localStorage state
           if (financeState.isRegistered) {
             localStorage.removeItem('finvantage_active_session');
             setFinanceState({ ...INITIAL_STATE });
@@ -130,7 +122,6 @@ const App: React.FC = () => {
 
     restoreSession();
 
-    // Listen for auth state changes (tab switches, token refresh, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem('finvantage_active_session');
@@ -142,14 +133,13 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Persist state to localStorage whenever it changes ────────
+  // Persist state to localStorage whenever it changes
   useEffect(() => {
     if (financeState.isRegistered) {
       localStorage.setItem('finvantage_active_session', JSON.stringify(financeState));
     }
   }, [financeState]);
 
-  // ── Logout ────────────────────────────────────────────────────
   const handleLogout = async () => {
     const confirmed = window.confirm('Terminate session? Your data is saved in the cloud.');
     if (confirmed) {
@@ -161,7 +151,7 @@ const App: React.FC = () => {
     }
   };
 
-  // Show a minimal loader while we verify the session
+  // Show spinner while verifying session on reload
   if (isRestoring) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
@@ -191,27 +181,27 @@ const App: React.FC = () => {
 
   const renderView = () => {
     switch (view) {
-      case 'dashboard':      return <Dashboard state={financeState} setView={setView} />;
-      case 'family':         return <Family state={financeState} updateState={handleUpdateState} setView={setView} />;
-      case 'inflow':         return <InflowProfile state={financeState} updateState={handleUpdateState} />;
-      case 'outflow':        return <OutflowProfile state={financeState} updateState={handleUpdateState} />;
-      case 'insurance':      return <Insurances state={financeState} updateState={handleUpdateState} />;
-      case 'assets':         return <Assets state={financeState} updateState={handleUpdateState} />;
-      case 'debt':           return <Liabilities state={financeState} updateState={handleUpdateState} />;
-      case 'risk-profile':   return <RiskProfile state={financeState} updateState={handleUpdateState} />;
-      case 'transactions':   return <Transactions transactions={financeState.transactions} onAddTransaction={(t) => setFinanceState(prev => ({...prev, transactions: [{...t, id: Math.random().toString()}, ...prev.transactions]}))} />;
-      case 'goals':          return <Goals state={financeState} updateState={handleUpdateState} />;
-      case 'goal-summary':   return <GoalSummary state={financeState} />;
-      case 'cashflow':       return <Cashflow state={financeState} />;
+      case 'dashboard':       return <Dashboard state={financeState} setView={setView} />;
+      case 'family':          return <Family state={financeState} updateState={handleUpdateState} setView={setView} />;
+      case 'inflow':          return <InflowProfile state={financeState} updateState={handleUpdateState} />;
+      case 'outflow':         return <OutflowProfile state={financeState} updateState={handleUpdateState} />;
+      case 'insurance':       return <Insurances state={financeState} updateState={handleUpdateState} />;
+      case 'assets':          return <Assets state={financeState} updateState={handleUpdateState} />;
+      case 'debt':            return <Liabilities state={financeState} updateState={handleUpdateState} />;
+      case 'risk-profile':    return <RiskProfile state={financeState} updateState={handleUpdateState} />;
+      case 'transactions':    return <Transactions transactions={financeState.transactions} onAddTransaction={(t) => setFinanceState(prev => ({...prev, transactions: [{...t, id: Math.random().toString()}, ...prev.transactions]}))} />;
+      case 'goals':           return <Goals state={financeState} updateState={handleUpdateState} />;
+      case 'goal-summary':    return <GoalSummary state={financeState} />;
+      case 'cashflow':        return <Cashflow state={financeState} />;
       case 'investment-plan': return <InvestmentPlan state={financeState} />;
-      case 'action-plan':    return <ActionPlan state={financeState} />;
+      case 'action-plan':     return <ActionPlan state={financeState} />;
       case 'monthly-savings': return <MonthlySavingsPlan state={financeState} />;
-      case 'settings':       return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} />;
-      case 'notifications':  return <Notifications state={financeState} updateState={handleUpdateState} />;
-      case 'tax-estate':     return <TaxEstate state={financeState} />;
-      case 'projections':    return <RetirementPlan state={financeState} />;
-      case 'ai-advisor':     return <AIAdvisor state={financeState} />;
-      default:               return <Dashboard state={financeState} setView={setView} />;
+      case 'settings':        return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} />;
+      case 'notifications':   return <Notifications state={financeState} updateState={handleUpdateState} />;
+      case 'tax-estate':      return <TaxEstate state={financeState} />;
+      case 'projections':     return <RetirementPlan state={financeState} />;
+      case 'ai-advisor':      return <AIAdvisor state={financeState} />;
+      default:                return <Dashboard state={financeState} setView={setView} />;
     }
   };
 
