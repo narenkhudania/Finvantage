@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -22,10 +23,10 @@ import ActionPlan from './components/ActionPlan';
 import MonthlySavingsPlan from './components/MonthlySavingsPlan';
 import Settings from './components/Settings';
 import Notifications from './components/Notifications';
+import AIAdvisor from './components/AIAdvisor';
+import Cashflow from './components/Cashflow';
 import { FinanceState, View, DetailedIncome } from './types';
 import { LayoutDashboard, Bell, ListChecks } from 'lucide-react';
-import { supabase } from "./services/supabase";
-
 
 const INITIAL_INCOME: DetailedIncome = {
   salary: 0,
@@ -65,14 +66,7 @@ const INITIAL_STATE: FinanceState = {
   estate: { hasWill: false, nominationsUpdated: false },
   transactions: [],
   notifications: [
-    { 
-      id: 'welcome-1', 
-      title: 'System Online', 
-      message: 'Initialize your financial node to begin long-term projections.', 
-      type: 'success', 
-      timestamp: new Date().toISOString(), 
-      read: false 
-    }
+    { id: 'welcome-1', title: 'System Online', message: 'Initialize your financial node to begin long-term projections.', type: 'success', timestamp: new Date().toISOString(), read: false }
   ],
   riskProfile: undefined
 };
@@ -81,9 +75,8 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>('dashboard'); 
   const [showAuth, setShowAuth] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
   const [financeState, setFinanceState] = useState<FinanceState>(() => {
-    const saved = localStorage.getItem('finvantage_clean_state_v1');
+    const saved = localStorage.getItem('finvantage_active_session');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -94,32 +87,19 @@ const App: React.FC = () => {
     return INITIAL_STATE;
   });
 
-  // ✅ Test Supabase Connection
   useEffect(() => {
-    async function testConnection() {
-      const { data, error } = await supabase
-        .from("users")
-        .select("*");
-
-      console.log("SUPABASE DATA:", data);
-      console.log("SUPABASE ERROR:", error);
+    if (financeState.isRegistered) {
+      localStorage.setItem('finvantage_active_session', JSON.stringify(financeState));
     }
-
-    testConnection();
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('finvantage_clean_state_v1', JSON.stringify(financeState));
   }, [financeState]);
 
   const handleLogout = () => {
-    const confirmed = window.confirm("Terminate session? Local data will be preserved unless you clear browser storage.");
+    const confirmed = window.confirm("Terminate session? Data will remain on this device.");
     if (confirmed) {
-      localStorage.removeItem('finvantage_clean_state_v1');
+      localStorage.removeItem('finvantage_active_session');
       setFinanceState({ ...INITIAL_STATE, isRegistered: false });
       setShowAuth(false);
       setView('dashboard');
-      window.scrollTo(0, 0);
     }
   };
 
@@ -136,8 +116,7 @@ const App: React.FC = () => {
     );
   }
 
-  const handleUpdateState = (data: Partial<FinanceState>) => 
-    setFinanceState(prev => ({ ...prev, ...data }));
+  const handleUpdateState = (data: Partial<FinanceState>) => setFinanceState(prev => ({ ...prev, ...data }));
 
   const renderView = () => {
     switch (view) {
@@ -149,21 +128,10 @@ const App: React.FC = () => {
       case 'assets': return <Assets state={financeState} updateState={handleUpdateState} />;
       case 'debt': return <Liabilities state={financeState} updateState={handleUpdateState} />;
       case 'risk-profile': return <RiskProfile state={financeState} updateState={handleUpdateState} />;
-      case 'transactions': 
-        return (
-          <Transactions 
-            transactions={financeState.transactions} 
-            onAddTransaction={(t) => 
-              setFinanceState(prev => ({
-                ...prev,
-                transactions: [{ ...t, id: Math.random().toString() }, ...prev.transactions]
-              }))
-            } 
-          />
-        );
+      case 'transactions': return <Transactions transactions={financeState.transactions} onAddTransaction={(t) => setFinanceState(prev => ({...prev, transactions: [{...t, id: Math.random().toString()}, ...prev.transactions]}))} />;
       case 'goals': return <Goals state={financeState} updateState={handleUpdateState} />;
       case 'goal-summary': return <GoalSummary state={financeState} />;
-      case 'cashflow': return <GoalFunding state={financeState} />;
+      case 'cashflow': return <Cashflow state={financeState} />;
       case 'investment-plan': return <InvestmentPlan state={financeState} />;
       case 'action-plan': return <ActionPlan state={financeState} />;
       case 'monthly-savings': return <MonthlySavingsPlan state={financeState} />;
@@ -171,6 +139,7 @@ const App: React.FC = () => {
       case 'notifications': return <Notifications state={financeState} updateState={handleUpdateState} />;
       case 'tax-estate': return <TaxEstate state={financeState} />;
       case 'projections': return <RetirementPlan state={financeState} />;
+      case 'ai-advisor': return <AIAdvisor state={financeState} />;
       default: return <Dashboard state={financeState} setView={setView} />;
     }
   };
@@ -181,17 +150,31 @@ const App: React.FC = () => {
         <Sidebar currentView={view} setView={setView} state={financeState} />
       </div>
 
-      <main className="flex-1 lg:ml-[260px] flex flex-col min-h-screen relative h-screen">
-        <Header 
-          onMenuClick={() => setIsSidebarOpen(true)} 
-          title={view} 
-          state={financeState} 
-          setView={setView} 
-          onLogout={handleLogout} 
-        />
+      <div className={`fixed inset-0 z-[60] lg:hidden transition-all duration-500 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />
+        <div className={`absolute left-0 top-0 h-full w-[260px] transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+          <Sidebar currentView={view} setView={setView} onClose={() => setIsSidebarOpen(false)} state={financeState} />
+        </div>
+      </div>
 
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-10 max-w-[1400px] mx-auto w-full">
-          {renderView()}
+      <main className="flex-1 lg:ml-[260px] flex flex-col min-h-screen relative h-screen">
+        <Header onMenuClick={() => setIsSidebarOpen(true)} title={view} state={financeState} setView={setView} onLogout={handleLogout} />
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-10 max-w-[1400px] mx-auto w-full no-scrollbar scroll-smooth">
+           <div key={view} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+             {renderView()}
+           </div>
+        </div>
+
+        <div className="lg:hidden fixed bottom-0 left-0 w-full bg-white border-t border-slate-200 h-16 flex items-center justify-around px-4 z-40 pb-safe shadow-2xl">
+          <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'dashboard' ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-400'}`}>
+            <LayoutDashboard size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Dash</span>
+          </button>
+          <button onClick={() => setView('action-plan')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'action-plan' ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-400'}`}>
+            <ListChecks size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Plan</span>
+          </button>
+          <button onClick={() => setView('notifications')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'notifications' ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-400'}`}>
+            <Bell size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Alerts</span>
+          </button>
         </div>
       </main>
     </div>
