@@ -1,10 +1,10 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FinanceState, IncomeSource } from '../types';
 import { 
   CheckCircle2, ArrowRight, User, MapPin, ShieldCheck,
-  TrendingUp, Zap, ChevronRight, BrainCircuit, Activity, Globe,
-  Shield, Mail, Search, Clock, Lock, Key, AlertCircle, ArrowLeft
+  TrendingUp, Zap, ChevronRight, BrainCircuit, 
+  Lock, Key, AlertCircle, ArrowLeft
 } from 'lucide-react';
 
 interface OnboardingProps {
@@ -51,7 +51,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
     { title: 'Intelligence', icon: BrainCircuit },
   ];
 
-  // Auth Logic 1: Check Existence
   const handleProceedIdentifier = () => {
     if (!formData.identifier.trim()) return;
     setError(null);
@@ -63,10 +62,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
     }
   };
 
-  // Auth Logic 2: Signup
   const handleSignup = () => {
     if (formData.password.length < 8) {
-      setError("Password must be at least 8 characters.");
+      setError("Min 8 characters required.");
       return;
     }
     if (formData.password !== formData.confirmPassword) {
@@ -79,10 +77,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
     }
 
     setIsProcessing(true);
-    // Simulate API Latency
     setTimeout(() => {
       saveMockUser(formData.identifier, { 
-        password: formData.password, // In real world: bcrypt here
+        password: formData.password,
         firstName: formData.firstName,
         lastName: formData.lastName
       });
@@ -92,15 +89,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
     }, 1000);
   };
 
-  // Auth Logic 3: Login
   const handleLogin = () => {
     const users = getMockUsers();
     const user = users[formData.identifier];
     if (user && user.password === formData.password) {
       setIsProcessing(true);
       setTimeout(() => {
-        // Log in user and skip onboarding if profile is already complete
-        // For this demo, we assume login takes you straight to terminal
         onComplete({
           isRegistered: true,
           profile: {
@@ -120,8 +114,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
   const currentAge = useMemo(() => {
     if (!formData.dob) return 30;
     const birthDate = new Date(formData.dob);
-    let age = new Date().getFullYear() - birthDate.getFullYear();
-    return age;
+    return new Date().getFullYear() - birthDate.getFullYear();
   }, [formData.dob]);
 
   const baselineIq = useMemo(() => {
@@ -147,23 +140,23 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
   };
 
   return (
-    <div className="min-h-screen bg-[#05070a] flex flex-col items-center justify-center p-6 selection:bg-indigo-900/30 overflow-hidden text-white font-sans">
+    <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center p-4 sm:p-6 selection:bg-indigo-100 overflow-x-hidden text-slate-900 font-sans">
       
-      {/* HUD Layer - Only shown during onboarding */}
+      {/* Steps HUD */}
       {authStep === 'onboarding' && (
-        <div className="max-w-xl w-full mb-16 flex items-center justify-between px-10 relative">
-          <div className="absolute top-6 left-10 right-10 h-[1px] bg-white/10 -z-0" />
-          <div className="absolute top-6 left-10 h-[1px] bg-indigo-500 -z-0 transition-all duration-1000 ease-in-out" style={{ width: `${(onboardingStep / (stepConfig.length - 1)) * 100}%` }} />
+        <div className="max-w-md w-full mb-6 sm:mb-10 flex items-center justify-between px-6 relative">
+          <div className="absolute top-5 left-6 right-6 h-[2px] bg-slate-200 -z-0" />
+          <div className="absolute top-5 left-6 h-[2px] bg-indigo-600 -z-0 transition-all duration-1000 ease-in-out" style={{ width: `${(onboardingStep / (stepConfig.length - 1)) * 100}%` }} />
           
           {stepConfig.map((s, i) => (
             <div key={i} className="flex flex-col items-center relative z-10">
-              <div className={`w-12 h-12 rounded-[1.25rem] flex items-center justify-center transition-all duration-700 ${
-                onboardingStep >= i ? 'bg-indigo-600 text-white shadow-[0_0_30px_rgba(79,70,229,0.4)]' : 'bg-[#0f1218] text-slate-600 border border-white/5'
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-700 ${
+                onboardingStep >= i ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white text-slate-400 border border-slate-200'
               }`}>
-                <s.icon size={20} />
+                <s.icon size={16} />
               </div>
-              <span className={`text-[8px] font-black uppercase tracking-[0.2em] mt-4 transition-colors duration-500 ${
-                onboardingStep >= i ? 'text-indigo-400' : 'text-slate-700'
+              <span className={`text-[7px] font-black uppercase tracking-[0.1em] mt-2 transition-colors duration-500 ${
+                onboardingStep >= i ? 'text-indigo-600' : 'text-slate-400'
               }`}>
                 {s.title}
               </span>
@@ -172,35 +165,35 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
         </div>
       )}
 
-      <div className="max-w-2xl w-full bg-[#0f1218]/80 backdrop-blur-2xl rounded-[4rem] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] border border-white/5 overflow-hidden relative">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-600/10 blur-[150px] -z-10 rounded-full translate-x-1/2 -translate-y-1/2" />
+      <div className="max-w-xl w-full bg-white rounded-[2.5rem] sm:rounded-[3.5rem] shadow-xl border border-slate-100 overflow-hidden relative">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 blur-[100px] -z-10 rounded-full translate-x-1/2 -translate-y-1/2" />
         
-        <div className="p-12 md:p-20 text-left">
+        <div className="p-8 sm:p-12 lg:p-14 text-left">
           
           {/* STEP 1: Identifier Entry */}
           {authStep === 'identifier' && (
-            <div className="space-y-12 animate-in fade-in zoom-in-95 duration-700">
-              <div className="space-y-4">
-                <div className="inline-flex items-center gap-3 px-3 py-1 bg-indigo-500/10 text-indigo-400 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
-                  <ShieldCheck size={14}/> System Gateway
+            <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-indigo-100">
+                  <ShieldCheck size={12}/> System Gateway
                 </div>
-                <h1 className="text-5xl md:text-7xl font-black tracking-tighter leading-none">Access <br/><span className="text-indigo-500">Terminal.</span></h1>
-                <p className="text-slate-500 font-medium text-lg leading-relaxed">Enter your identifier to establish a node connection.</p>
+                <h1 className="text-4xl sm:text-5xl font-black tracking-tighter leading-none text-slate-950">Access <br/><span className="text-indigo-600">Terminal.</span></h1>
+                <p className="text-slate-500 text-sm font-medium leading-relaxed">Enter your email or mobile to establish a secure connection.</p>
               </div>
 
-              <div className="space-y-8">
-                <div className="space-y-4">
-                  <label className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] ml-2">Email or Mobile</label>
+              <div className="space-y-5">
+                <div className="space-y-2.5">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Email or Mobile</label>
                   <input 
                     type="text" 
                     placeholder="ravindra@wealth.terminal"
-                    className="w-full px-10 py-7 bg-white/5 border border-white/10 rounded-[2.5rem] focus:ring-8 focus:ring-indigo-600/5 focus:border-indigo-600/50 outline-none font-black text-2xl transition-all placeholder:text-white/10"
+                    className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-600 outline-none font-bold text-base transition-all placeholder:text-slate-300"
                     value={formData.identifier}
                     onChange={e => setFormData({...formData, identifier: e.target.value})}
                   />
                 </div>
-                <button onClick={handleProceedIdentifier} className="w-full py-8 bg-indigo-600 text-white rounded-[2.5rem] font-black text-xl hover:bg-indigo-500 transition-all flex items-center justify-center gap-4 group">
-                  Proceed <ArrowRight size={24} className="group-hover:translate-x-2 transition-transform" />
+                <button onClick={handleProceedIdentifier} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 group shadow-lg shadow-indigo-100">
+                  Proceed <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
                 </button>
               </div>
             </div>
@@ -208,36 +201,48 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
 
           {/* STEP 2: Signup Form */}
           {authStep === 'signup' && (
-            <div className="space-y-8 animate-in slide-in-from-right-8 duration-700">
-              <div className="flex items-center gap-4 mb-4">
-                <button onClick={() => setAuthStep('identifier')} className="p-3 bg-white/5 rounded-2xl hover:bg-white/10"><ArrowLeft size={20}/></button>
-                <div className="inline-flex items-center gap-3 px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-emerald-500/20">
-                  <Zap size={14}/> New Node Detection
+            <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+              <div className="flex items-center gap-3">
+                <button onClick={() => setAuthStep('identifier')} className="p-2 bg-slate-50 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors"><ArrowLeft size={16}/></button>
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
+                  <Zap size={12}/> New Identity
                 </div>
               </div>
-              <h1 className="text-4xl font-black tracking-tighter">Initialize <span className="text-indigo-500">Identity.</span></h1>
+              <h1 className="text-3xl font-black tracking-tighter text-slate-950">Initialize <span className="text-indigo-600">Node.</span></h1>
               
               {error && (
-                <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center gap-3 text-rose-400 text-sm font-bold">
-                  <AlertCircle size={18}/> {error}
+                <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold">
+                  <AlertCircle size={14}/> {error}
                 </div>
               )}
 
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <input type="text" placeholder="First Name" className="w-full px-8 py-5 bg-white/5 border border-white/10 rounded-[1.75rem] font-black text-lg outline-none" value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} />
-                  <input type="text" placeholder="Last Name" className="w-full px-8 py-5 bg-white/5 border border-white/10 rounded-[1.75rem] font-black text-lg outline-none" value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} />
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">First Name</label>
+                    <input type="text" placeholder="John" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-indigo-600" value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Last Name</label>
+                    <input type="text" placeholder="Doe" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-indigo-600" value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} />
+                  </div>
                 </div>
-                <div className="relative">
-                  <Lock className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-700" size={20} />
-                  <input type="password" placeholder="Choose Access Key" className="w-full pl-16 pr-8 py-5 bg-white/5 border border-white/10 rounded-[1.75rem] font-black text-lg outline-none" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Choose Key</label>
+                  <div className="relative">
+                    <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input type="password" placeholder="Min 8 characters" className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-indigo-600" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                  </div>
                 </div>
-                <div className="relative">
-                  <Lock className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-700" size={20} />
-                  <input type="password" placeholder="Confirm Access Key" className="w-full pl-16 pr-8 py-5 bg-white/5 border border-white/10 rounded-[1.75rem] font-black text-lg outline-none" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} />
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Confirm Key</label>
+                  <div className="relative">
+                    <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input type="password" placeholder="Repeat key" className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-indigo-600" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} />
+                  </div>
                 </div>
-                <button onClick={handleSignup} disabled={isProcessing} className="w-full py-7 bg-indigo-600 text-white rounded-[2rem] font-black text-xl hover:bg-indigo-500 transition-all flex items-center justify-center gap-4">
-                  {isProcessing ? "Allocating Resources..." : "Initialize Terminal"} <ChevronRight size={24} />
+                <button onClick={handleSignup} disabled={isProcessing} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-100">
+                  {isProcessing ? "Processing..." : "Deploy Identity"} <ChevronRight size={18} />
                 </button>
               </div>
             </div>
@@ -245,107 +250,110 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
 
           {/* STEP 3: Login Form */}
           {authStep === 'login' && (
-            <div className="space-y-10 animate-in slide-in-from-right-8 duration-700">
-              <div className="flex items-center gap-4 mb-4">
-                <button onClick={() => setAuthStep('identifier')} className="p-3 bg-white/5 rounded-2xl hover:bg-white/10"><ArrowLeft size={20}/></button>
-                <div className="inline-flex items-center gap-3 px-3 py-1 bg-indigo-500/10 text-indigo-400 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
-                  <ShieldCheck size={14}/> Recognized Node
+            <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
+              <div className="flex items-center gap-3">
+                <button onClick={() => setAuthStep('identifier')} className="p-2 bg-slate-50 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors"><ArrowLeft size={16}/></button>
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-indigo-100">
+                  <ShieldCheck size={12}/> Recognized Node
                 </div>
               </div>
-              <h1 className="text-4xl font-black tracking-tighter">Welcome Back, <br/><span className="text-indigo-500">Strategist.</span></h1>
+              <h1 className="text-3xl font-black tracking-tighter text-slate-950">Welcome back, <br/><span className="text-indigo-600">Strategist.</span></h1>
               
               {error && (
-                <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center gap-3 text-rose-400 text-sm font-bold">
-                  <AlertCircle size={18}/> {error}
+                <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold">
+                  <AlertCircle size={14}/> {error}
                 </div>
               )}
 
-              <div className="space-y-6">
-                <div className="relative">
-                  <Key className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-700" size={20} />
-                  <input 
-                    type="password" 
-                    placeholder="Enter Access Key" 
-                    className="w-full pl-16 pr-8 py-6 bg-white/5 border border-white/10 rounded-[2rem] font-black text-xl outline-none" 
-                    value={formData.password} 
-                    onChange={e => setFormData({...formData, password: e.target.value})} 
-                    onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                  />
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Key</label>
+                  <div className="relative">
+                    <Key className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="password" 
+                      placeholder="••••••••" 
+                      className="w-full pl-12 pr-5 py-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-indigo-600" 
+                      value={formData.password} 
+                      onChange={e => setFormData({...formData, password: e.target.value})} 
+                      onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                    />
+                  </div>
                 </div>
-                <button onClick={handleLogin} disabled={isProcessing} className="w-full py-8 bg-indigo-600 text-white rounded-[2.5rem] font-black text-xl hover:bg-indigo-500 transition-all flex items-center justify-center gap-4">
-                  {isProcessing ? "Booting..." : "Access Terminal"} <ArrowRight size={24} />
+                <button onClick={handleLogin} disabled={isProcessing} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-100">
+                  {isProcessing ? "Authenticating..." : "Access Terminal"} <ArrowRight size={18} />
                 </button>
               </div>
             </div>
           )}
 
-          {/* STEP 4: Onboarding Flow (Sequential) */}
+          {/* STEP 4: Onboarding Flow */}
           {authStep === 'onboarding' && (
-            <div className="space-y-12">
+            <div className="space-y-8">
               {onboardingStep === 0 && (
-                <div className="space-y-10 animate-in slide-in-from-right-8 duration-700">
-                  <h2 className="text-4xl font-black">Actuarial <span className="text-indigo-500">Horizon.</span></h2>
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-4">Temporal Origin (DOB)</label>
-                    <input type="date" className="w-full px-8 py-6 bg-white/5 border border-white/10 rounded-[2rem] font-black text-xl outline-none focus:border-indigo-600 transition-all text-indigo-400" value={formData.dob} onChange={e => setFormData({...formData, dob: e.target.value})} />
+                <div className="space-y-6 animate-in slide-in-from-right-4 duration-700">
+                  <h2 className="text-3xl font-black tracking-tight text-slate-950">Actuarial <span className="text-indigo-600">Horizon.</span></h2>
+                  <div className="space-y-3">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Temporal Origin (DOB)</label>
+                    <input type="date" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-indigo-600 transition-all text-indigo-600" value={formData.dob} onChange={e => setFormData({...formData, dob: e.target.value})} />
                   </div>
-                  <button onClick={() => setOnboardingStep(1)} className="w-full py-7 bg-indigo-600 text-white rounded-[2rem] font-black text-xl hover:bg-indigo-500 transition-all">Continue to Planning</button>
+                  <button onClick={() => setOnboardingStep(1)} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all">Next Phase</button>
                 </div>
               )}
 
               {onboardingStep === 1 && (
-                <div className="space-y-12 animate-in slide-in-from-right-8 duration-700">
-                  <h2 className="text-4xl font-black text-indigo-500">Time Vector.</h2>
-                  <div className="space-y-10">
-                    <div className="space-y-6">
-                      <div className="flex justify-between items-center"><label className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Life Expectancy</label><span className="text-3xl font-black text-indigo-500">{formData.lifeExpectancy} <span className="text-[10px] font-bold text-slate-600 uppercase">Yrs</span></span></div>
-                      <input type="range" min="60" max="100" className="w-full h-1 bg-white/10 rounded-full appearance-none accent-indigo-600" value={formData.lifeExpectancy} onChange={e => setFormData({...formData, lifeExpectancy: Number(e.target.value)})} />
+                <div className="space-y-10 animate-in slide-in-from-right-4 duration-700">
+                  <h2 className="text-3xl font-black text-indigo-600 tracking-tight">Time Vector.</h2>
+                  <div className="space-y-8">
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Life Span</label><span className="text-2xl font-black text-indigo-600">{formData.lifeExpectancy} <span className="text-[8px] font-bold text-slate-400 uppercase">Yrs</span></span></div>
+                      <input type="range" min="60" max="100" className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-indigo-600 cursor-pointer" value={formData.lifeExpectancy} onChange={e => setFormData({...formData, lifeExpectancy: Number(e.target.value)})} />
                     </div>
-                    <div className="space-y-6">
-                      <div className="flex justify-between items-center"><label className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Retirement Protocol</label><span className="text-3xl font-black text-emerald-500">{formData.retirementAge} <span className="text-[10px] font-bold text-slate-600 uppercase">Yrs</span></span></div>
-                      <input type="range" min="30" max="80" className="w-full h-1 bg-white/10 rounded-full appearance-none accent-emerald-500" value={formData.retirementAge} onChange={e => setFormData({...formData, retirementAge: Number(e.target.value)})} />
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center"><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Retirement Node</label><span className="text-2xl font-black text-emerald-600">{formData.retirementAge} <span className="text-[8px] font-bold text-slate-400 uppercase">Yrs</span></span></div>
+                      <input type="range" min="30" max="80" className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-emerald-500 cursor-pointer" value={formData.retirementAge} onChange={e => setFormData({...formData, retirementAge: Number(e.target.value)})} />
                     </div>
                   </div>
-                  <button onClick={() => setOnboardingStep(2)} className="w-full py-7 bg-indigo-600 text-white rounded-[2rem] font-black text-xl hover:bg-indigo-500 transition-all">Geospatial Sync</button>
+                  <button onClick={() => setOnboardingStep(2)} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all">Geospatial Sync</button>
                 </div>
               )}
 
               {onboardingStep === 2 && (
-                <div className="space-y-12 animate-in slide-in-from-right-8 duration-700">
-                   <h2 className="text-4xl font-black">Global <span className="text-indigo-500">Node.</span></h2>
-                   <div className="space-y-8">
-                    <input type="text" placeholder="Zip / Pin Code" className="w-full px-10 py-7 bg-white/5 border border-white/10 rounded-[2.5rem] font-black text-3xl outline-none focus:border-indigo-600 transition-all text-indigo-400 placeholder:text-white/5" value={formData.pincode} onChange={e => setFormData({...formData, pincode: e.target.value})} />
-                    <div className="grid grid-cols-2 gap-6">
-                      <input type="text" placeholder="City" className="w-full px-8 py-6 bg-white/5 border border-white/10 rounded-[2rem] font-black text-xl outline-none" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} />
-                      <input type="text" placeholder="State" className="w-full px-8 py-6 bg-white/5 border border-white/10 rounded-[2rem] font-black text-xl outline-none" value={formData.state} onChange={e => setFormData({...formData, state: e.target.value})} />
+                <div className="space-y-8 animate-in slide-in-from-right-4 duration-700">
+                   <h2 className="text-3xl font-black tracking-tight text-slate-950">Global <span className="text-indigo-600">Node.</span></h2>
+                   <div className="space-y-5">
+                    <input type="text" placeholder="Zip / Pin Code" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-indigo-600 text-indigo-600" value={formData.pincode} onChange={e => setFormData({...formData, pincode: e.target.value})} />
+                    <div className="grid grid-cols-2 gap-3">
+                      <input type="text" placeholder="City" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-600" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} />
+                      <input type="text" placeholder="State" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-indigo-600" value={formData.state} onChange={e => setFormData({...formData, state: e.target.value})} />
                     </div>
                   </div>
-                  <button onClick={() => setOnboardingStep(3)} className="w-full py-7 bg-indigo-600 text-white rounded-[2rem] font-black text-xl hover:bg-indigo-500 transition-all">Finalize Intelligence</button>
+                  <button onClick={() => setOnboardingStep(3)} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-700 transition-all">Compute IQ</button>
                 </div>
               )}
 
               {onboardingStep === 3 && (
-                <div className="text-center space-y-12 animate-in zoom-in-95 duration-1000">
-                  <div className="relative mx-auto w-64 h-64">
-                    <div className="absolute inset-0 bg-indigo-500/20 blur-[100px] animate-pulse" />
+                <div className="text-center space-y-8 animate-in zoom-in-95 duration-1000">
+                  <div className="relative mx-auto w-44 h-44 sm:w-52 sm:h-52">
+                    <div className="absolute inset-0 bg-indigo-50 blur-[50px] animate-pulse" />
                     <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                        <circle cx="50" cy="50" r="45" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-white/5" />
-                        <circle cx="50" cy="50" r="45" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray="283" strokeDashoffset={283 - (283 * baselineIq) / 100} className="text-indigo-500 transition-all duration-1000 ease-out" strokeLinecap="round" />
+                        <circle cx="50" cy="50" r="45" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-slate-100" />
+                        <circle cx="50" cy="50" r="45" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray="283" strokeDashoffset={283 - (283 * baselineIq) / 100} className="text-indigo-600 transition-all duration-1000 ease-out" strokeLinecap="round" />
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-7xl font-black tracking-tighter text-white">{baselineIq}</span>
-                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Digital IQ</span>
+                        <span className="text-4xl sm:text-5xl font-black tracking-tighter text-slate-900">{baselineIq}</span>
+                        <span className="text-[8px] font-black text-indigo-600 uppercase tracking-widest">Digital IQ</span>
                     </div>
                   </div>
                   
-                  <div className="space-y-4">
-                    <h3 className="text-4xl md:text-5xl font-black text-white tracking-tighter leading-none">Sync Successful.</h3>
-                    <p className="text-slate-500 font-medium text-lg leading-relaxed px-8">
-                      Welcome, <span className="text-white">{formData.firstName}</span>. Your baseline IQ of <span className="text-indigo-400 font-black">{baselineIq}</span> suggests high wealth velocity potential.
+                  <div className="space-y-2">
+                    <h3 className="text-3xl font-black text-slate-950 tracking-tighter leading-none">Sync Successful.</h3>
+                    <p className="text-slate-500 text-sm font-medium leading-relaxed">
+                      Welcome, <span className="text-indigo-600 font-bold">{formData.firstName}</span>. System readiness is nominal.
                     </p>
                   </div>
 
-                  <button onClick={handleFinishOnboarding} className="w-full py-10 bg-white text-slate-950 rounded-[3rem] font-black text-2xl hover:bg-indigo-500 hover:text-white transition-all shadow-2xl active:scale-[0.98] flex items-center justify-center gap-6 group">Access Master Terminal <ArrowRight size={32} className="group-hover:translate-x-3 transition-transform" /></button>
+                  <button onClick={handleFinishOnboarding} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2 group">Enter Terminal <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" /></button>
                 </div>
               )}
             </div>
