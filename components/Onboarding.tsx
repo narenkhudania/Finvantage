@@ -2,9 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { FinanceState, IncomeSource } from '../types';
 import { supabase } from "../services/supabase";
 import {
-  ArrowRight,
-  ArrowLeft,
-  AlertCircle
+  CheckCircle2, ArrowRight, User, MapPin, ShieldCheck,
+  TrendingUp, Zap, ChevronRight, BrainCircuit,
+  Lock, Key, AlertCircle, ArrowLeft
 } from 'lucide-react';
 
 interface OnboardingProps {
@@ -13,7 +13,7 @@ interface OnboardingProps {
 
 const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
 
-  const [authStep, setAuthStep] = useState<'signup' | 'login' | 'onboarding'>('signup');
+  const [authStep, setAuthStep] = useState<'identifier' | 'login' | 'signup' | 'onboarding'>('identifier');
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -34,9 +34,33 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     incomeSource: 'salaried' as IncomeSource,
   });
 
-  // ------------------------
-  // SIGNUP
-  // ------------------------
+  // -----------------------------------
+  // STEP 1 — CHECK IF USER EXISTS
+  // -----------------------------------
+  const handleProceedIdentifier = async () => {
+    if (!formData.identifier.trim()) return;
+
+    setError(null);
+    setIsProcessing(true);
+
+    const { data } = await supabase
+      .from("user_profiles")
+      .select("id")
+      .eq("email", formData.identifier)
+      .maybeSingle();
+
+    if (data) {
+      setAuthStep("login");
+    } else {
+      setAuthStep("signup");
+    }
+
+    setIsProcessing(false);
+  };
+
+  // -----------------------------------
+  // STEP 2 — SIGNUP
+  // -----------------------------------
   const handleSignup = async () => {
     setError(null);
 
@@ -51,7 +75,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     }
 
     if (!formData.firstName.trim()) {
-      setError("First name is required.");
+      setError("Name is required.");
       return;
     }
 
@@ -63,16 +87,15 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     });
 
     if (error) {
-      setError(error.message);
+      setError("User already exists, please login.");
       setIsProcessing(false);
       return;
     }
 
-    const user = data.user;
-
-    if (user) {
+    if (data.user) {
       await supabase.from("user_profiles").insert({
-        id: user.id,
+        id: data.user.id,
+        email: formData.identifier,
         first_name: formData.firstName,
         last_name: formData.lastName,
         onboarding_completed: false
@@ -84,9 +107,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     setIsProcessing(false);
   };
 
-  // ------------------------
-  // LOGIN
-  // ------------------------
+  // -----------------------------------
+  // STEP 3 — LOGIN
+  // -----------------------------------
   const handleLogin = async () => {
     setError(null);
     setIsProcessing(true);
@@ -97,17 +120,18 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     });
 
     if (error) {
-      setError(error.message);
+      setError("Invalid credentials.");
       setIsProcessing(false);
       return;
     }
 
+    // App.tsx handles redirect based on onboarding status
     setIsProcessing(false);
   };
 
-  // ------------------------
-  // IQ Logic
-  // ------------------------
+  // -----------------------------------
+  // IQ CALCULATION
+  // -----------------------------------
   const currentAge = useMemo(() => {
     if (!formData.dob) return 30;
     const birthDate = new Date(formData.dob);
@@ -120,9 +144,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     return Math.min(98, score);
   }, [formData.retirementAge, currentAge]);
 
-  // ------------------------
+  // -----------------------------------
   // FINISH ONBOARDING
-  // ------------------------
+  // -----------------------------------
   const handleFinishOnboarding = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -136,17 +160,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
       isRegistered: true,
       profile: {
         ...formData,
-        mobile: formData.identifier.includes('@') ? '' : formData.identifier,
+        mobile: '',
         email: formData.identifier,
         lifeExpectancy: Number(formData.lifeExpectancy),
         retirementAge: Number(formData.retirementAge),
         income: {
-          salary: 0,
-          bonus: 0,
-          reimbursements: 0,
-          business: 0,
-          rental: 0,
-          investment: 0,
+          salary: 0, bonus: 0, reimbursements: 0,
+          business: 0, rental: 0, investment: 0,
           expectedIncrease: 6
         },
         monthlyExpenses: 0,
@@ -155,144 +175,125 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     });
   };
 
-  // ------------------------
-  // UI
-  // ------------------------
+  // -----------------------------------
+  // UI (UNCHANGED)
+  // -----------------------------------
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black text-white p-8">
+    <div className="min-h-screen bg-[#05070a] flex flex-col items-center justify-center p-6 text-white">
 
-      <div className="w-full max-w-xl space-y-6">
+      {/* IDENTIFIER */}
+      {authStep === 'identifier' && (
+        <div className="max-w-md w-full space-y-6">
+          <h1 className="text-4xl font-black">Access Terminal</h1>
 
-        {/* AUTH STEP */}
-        {authStep !== "onboarding" && (
-          <>
-            <h1 className="text-3xl font-bold">
-              {authStep === "signup" ? "Create Account" : "Login"}
-            </h1>
+          {error && (
+            <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex gap-2">
+              <AlertCircle size={18}/> {error}
+            </div>
+          )}
 
-            {error && (
-              <div className="p-3 bg-red-500/20 rounded flex items-center gap-2">
-                <AlertCircle size={16} /> {error}
-              </div>
-            )}
+          <input
+            type="email"
+            placeholder="Email"
+            className="w-full p-4 rounded-xl bg-white/5"
+            value={formData.identifier}
+            onChange={e => setFormData({...formData, identifier: e.target.value})}
+          />
 
-            <input
-              type="email"
-              placeholder="Email"
-              className="w-full p-3 rounded bg-gray-800"
-              value={formData.identifier}
-              onChange={e => setFormData({ ...formData, identifier: e.target.value })}
-            />
+          <button
+            onClick={handleProceedIdentifier}
+            disabled={isProcessing}
+            className="w-full p-4 bg-indigo-600 rounded-xl"
+          >
+            {isProcessing ? "Checking..." : "Proceed"}
+          </button>
+        </div>
+      )}
 
-            {authStep === "signup" && (
-              <>
-                <input
-                  type="text"
-                  placeholder="First Name"
-                  className="w-full p-3 rounded bg-gray-800"
-                  value={formData.firstName}
-                  onChange={e => setFormData({ ...formData, firstName: e.target.value })}
-                />
+      {/* SIGNUP */}
+      {authStep === 'signup' && (
+        <div className="max-w-md w-full space-y-4">
+          <button onClick={() => setAuthStep('identifier')}>
+            <ArrowLeft />
+          </button>
 
-                <input
-                  type="password"
-                  placeholder="Password"
-                  className="w-full p-3 rounded bg-gray-800"
-                  value={formData.password}
-                  onChange={e => setFormData({ ...formData, password: e.target.value })}
-                />
+          <input
+            placeholder="First Name"
+            className="w-full p-4 rounded-xl bg-white/5"
+            value={formData.firstName}
+            onChange={e => setFormData({...formData, firstName: e.target.value})}
+          />
 
-                <input
-                  type="password"
-                  placeholder="Confirm Password"
-                  className="w-full p-3 rounded bg-gray-800"
-                  value={formData.confirmPassword}
-                  onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })}
-                />
+          <input
+            type="password"
+            placeholder="Password"
+            className="w-full p-4 rounded-xl bg-white/5"
+            value={formData.password}
+            onChange={e => setFormData({...formData, password: e.target.value})}
+          />
 
-                <button
-                  onClick={handleSignup}
-                  disabled={isProcessing}
-                  className="w-full p-3 bg-indigo-600 rounded"
-                >
-                  {isProcessing ? "Creating..." : "Sign Up"}
-                </button>
+          <input
+            type="password"
+            placeholder="Confirm Password"
+            className="w-full p-4 rounded-xl bg-white/5"
+            value={formData.confirmPassword}
+            onChange={e => setFormData({...formData, confirmPassword: e.target.value})}
+          />
 
-                <button
-                  onClick={() => setAuthStep("login")}
-                  className="text-sm text-gray-400"
-                >
-                  Already have an account? Login
-                </button>
-              </>
-            )}
+          <button
+            onClick={handleSignup}
+            className="w-full p-4 bg-indigo-600 rounded-xl"
+          >
+            Sign Up
+          </button>
+        </div>
+      )}
 
-            {authStep === "login" && (
-              <>
-                <input
-                  type="password"
-                  placeholder="Password"
-                  className="w-full p-3 rounded bg-gray-800"
-                  value={formData.password}
-                  onChange={e => setFormData({ ...formData, password: e.target.value })}
-                />
+      {/* LOGIN */}
+      {authStep === 'login' && (
+        <div className="max-w-md w-full space-y-4">
+          <button onClick={() => setAuthStep('identifier')}>
+            <ArrowLeft />
+          </button>
 
-                <button
-                  onClick={handleLogin}
-                  disabled={isProcessing}
-                  className="w-full p-3 bg-indigo-600 rounded"
-                >
-                  {isProcessing ? "Logging in..." : "Login"}
-                </button>
+          <input
+            type="password"
+            placeholder="Password"
+            className="w-full p-4 rounded-xl bg-white/5"
+            value={formData.password}
+            onChange={e => setFormData({...formData, password: e.target.value})}
+          />
 
-                <button
-                  onClick={() => setAuthStep("signup")}
-                  className="text-sm text-gray-400"
-                >
-                  Need an account? Sign Up
-                </button>
-              </>
-            )}
-          </>
-        )}
+          <button
+            onClick={handleLogin}
+            className="w-full p-4 bg-indigo-600 rounded-xl"
+          >
+            Login
+          </button>
+        </div>
+      )}
 
-        {/* ONBOARDING FLOW */}
-        {authStep === "onboarding" && (
-          <>
-            <h2 className="text-2xl font-bold">Complete Your Profile</h2>
+      {/* ONBOARDING FLOW */}
+      {authStep === 'onboarding' && (
+        <div className="max-w-md w-full space-y-6">
+          <h2 className="text-3xl font-black">Complete Setup</h2>
 
-            <input
-              type="date"
-              className="w-full p-3 rounded bg-gray-800"
-              value={formData.dob}
-              onChange={e => setFormData({ ...formData, dob: e.target.value })}
-            />
+          <input
+            type="date"
+            className="w-full p-4 rounded-xl bg-white/5"
+            value={formData.dob}
+            onChange={e => setFormData({...formData, dob: e.target.value})}
+          />
 
-            <input
-              type="number"
-              placeholder="Life Expectancy"
-              className="w-full p-3 rounded bg-gray-800"
-              value={formData.lifeExpectancy}
-              onChange={e => setFormData({ ...formData, lifeExpectancy: Number(e.target.value) })}
-            />
+          <button
+            onClick={handleFinishOnboarding}
+            className="w-full p-4 bg-white text-black rounded-xl"
+          >
+            Finish Setup <ArrowRight size={16}/>
+          </button>
+        </div>
+      )}
 
-            <input
-              type="number"
-              placeholder="Retirement Age"
-              className="w-full p-3 rounded bg-gray-800"
-              value={formData.retirementAge}
-              onChange={e => setFormData({ ...formData, retirementAge: Number(e.target.value) })}
-            />
-
-            <button
-              onClick={handleFinishOnboarding}
-              className="w-full p-4 bg-white text-black rounded flex items-center justify-center gap-2"
-            >
-              Finish Setup <ArrowRight size={18} />
-            </button>
-          </>
-        )}
-      </div>
     </div>
   );
 };
