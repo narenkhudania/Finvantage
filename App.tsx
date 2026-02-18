@@ -25,7 +25,6 @@ import Notifications from './components/Notifications';
 import { FinanceState, View, DetailedIncome } from './types';
 import { LayoutDashboard, Bell, ListChecks } from 'lucide-react';
 import { supabase } from "./services/supabase";
-import Auth from "./components/Auth"
 
 
 const INITIAL_INCOME: DetailedIncome = {
@@ -198,23 +197,5 @@ const App: React.FC = () => {
     </div>
   );
 };
-const [session, setSession] = useState<any>(null)
-
-useEffect(() => {
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    setSession(session)
-  })
-
-  const { data: listener } = supabase.auth.onAuthStateChange(
-    (_event, session) => {
-      setSession(session)
-    }
-  )
-
-  return () => {
-    listener.subscription.unsubscribe()
-  }
-}, []);
-
 
 export default App;
