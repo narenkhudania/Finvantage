@@ -22,10 +22,11 @@ import ActionPlan from './components/ActionPlan';
 import MonthlySavingsPlan from './components/MonthlySavingsPlan';
 import Settings from './components/Settings';
 import Notifications from './components/Notifications';
-import Auth from "./components/Auth";
 import { FinanceState, View, DetailedIncome } from './types';
 import { LayoutDashboard, Bell, ListChecks } from 'lucide-react';
 import { supabase } from "./services/supabase";
+import Auth from "./components/Auth"
+
 
 const INITIAL_INCOME: DetailedIncome = {
   salary: 0,
@@ -78,11 +79,9 @@ const INITIAL_STATE: FinanceState = {
 };
 
 const App: React.FC = () => {
-
   const [view, setView] = useState<View>('dashboard'); 
   const [showAuth, setShowAuth] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [session, setSession] = useState<any>(null);
 
   const [financeState, setFinanceState] = useState<FinanceState>(() => {
     const saved = localStorage.getItem('finvantage_clean_state_v1');
@@ -96,40 +95,33 @@ const App: React.FC = () => {
     return INITIAL_STATE;
   });
 
-  // 🔐 Supabase Auth Session
+  // ✅ Test Supabase Connection
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
+    async function testConnection() {
+      const { data, error } = await supabase
+        .from("users")
+        .select("*");
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-      }
-    );
+      console.log("SUPABASE DATA:", data);
+      console.log("SUPABASE ERROR:", error);
+    }
 
-    return () => {
-      listener.subscription.unsubscribe();
-    };
+    testConnection();
   }, []);
 
-  // 🔐 If not logged in → show Auth
-  if (!session) {
-    return <Auth onLogin={() => {}} />;
-  }
-
-  // Save local state
   useEffect(() => {
     localStorage.setItem('finvantage_clean_state_v1', JSON.stringify(financeState));
   }, [financeState]);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    localStorage.removeItem('finvantage_clean_state_v1');
-    setFinanceState({ ...INITIAL_STATE, isRegistered: false });
-    setShowAuth(false);
-    setView('dashboard');
-    window.scrollTo(0, 0);
+  const handleLogout = () => {
+    const confirmed = window.confirm("Terminate session? Local data will be preserved unless you clear browser storage.");
+    if (confirmed) {
+      localStorage.removeItem('finvantage_clean_state_v1');
+      setFinanceState({ ...INITIAL_STATE, isRegistered: false });
+      setShowAuth(false);
+      setView('dashboard');
+      window.scrollTo(0, 0);
+    }
   };
 
   if (!financeState.isRegistered && !showAuth) {
@@ -185,7 +177,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] font-sans flex overflow-hidden">
+    <div className="min-h-screen bg-[#f8fafc] font-sans selection:bg-indigo-100 flex overflow-hidden">
       <div className="hidden lg:block fixed left-0 top-0 h-full w-[260px] z-50 shrink-0">
         <Sidebar currentView={view} setView={setView} state={financeState} />
       </div>
@@ -206,5 +198,23 @@ const App: React.FC = () => {
     </div>
   );
 };
+const [session, setSession] = useState<any>(null)
+
+useEffect(() => {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    setSession(session)
+  })
+
+  const { data: listener } = supabase.auth.onAuthStateChange(
+    (_event, session) => {
+      setSession(session)
+    }
+  )
+
+  return () => {
+    listener.subscription.unsubscribe()
+  }
+}, []);
+
 
 export default App;
