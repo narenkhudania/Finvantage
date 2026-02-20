@@ -1,5 +1,6 @@
 // App.tsx — all original auth/session/routing code preserved.
-// Added: normalized DB sync via dbService (6 separate tables).
+// Updated: saveFinanceData() now returns DB-assigned UUIDs which
+// are merged back into state so subsequent saves use real UUIDs.
 
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
@@ -105,14 +106,12 @@ const App: React.FC = () => {
     return INITIAL_STATE;
   });
 
-  // ── On mount: restore full state from normalized DB tables ───
+  // ── On mount: restore full state from all 6 DB tables ────────
   useEffect(() => {
     const restoreSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-
         if (session) {
-          // Reads family_members, income_profiles, expenses, assets, loans, goals
           const loaded = await loadFinanceData(financeState);
           if (loaded) {
             setFinanceState(loaded);
@@ -144,11 +143,15 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Auto-save all sections to their own DB tables ────────────
+  // ── Auto-save: debounced write to all 6 DB tables ────────────
+  // saveFinanceData() returns DB-assigned UUIDs (Postgres generates
+  // real UUIDs; components use short random strings). We merge them
+  // back into state silently so subsequent saves work correctly.
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
     if (!financeState.isRegistered) return;
 
+    // Always update localStorage immediately — UI never blocks
     localStorage.setItem(LOCAL_KEY, JSON.stringify(financeState));
 
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -156,7 +159,18 @@ const App: React.FC = () => {
 
     saveTimer.current = setTimeout(async () => {
       try {
-        await saveFinanceData(financeState);
+        // dbUpdates contains arrays with DB-assigned UUIDs
+        const dbUpdates = await saveFinanceData(financeState);
+
+        // Merge DB UUIDs back into state (silent — no re-render cascade)
+        if (Object.keys(dbUpdates).length > 0) {
+          setFinanceState(prev => {
+            const next = { ...prev, ...dbUpdates };
+            localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
+            return next;
+          });
+        }
+
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2500);
       } catch {
