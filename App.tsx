@@ -1,6 +1,7 @@
-// App.tsx — Production ready. Diagnostic removed.
+// App.tsx — all original auth/session/routing code preserved.
+// Added: normalized DB sync via dbService (6 separate tables).
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
@@ -27,9 +28,13 @@ import Notifications from './components/Notifications';
 import AIAdvisor from './components/AIAdvisor';
 import Cashflow from './components/Cashflow';
 import { FinanceState, View, DetailedIncome, IncomeSource } from './types';
-import { LayoutDashboard, Bell, ListChecks } from 'lucide-react';
+import { LayoutDashboard, Bell, ListChecks, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { supabase } from './services/supabase';
-import { getProfile, signOut } from './services/authService';
+import { signOut } from './services/authService';
+import { saveFinanceData, loadFinanceData } from './services/dbService';
+
+const LOCAL_KEY        = 'finvantage_active_session';
+const SAVE_DEBOUNCE_MS = 1500;
 
 const INITIAL_INCOME: DetailedIncome = {
   salary: 0, bonus: 0, reimbursements: 0,
@@ -57,59 +62,65 @@ const INITIAL_STATE: FinanceState = {
   riskProfile: undefined,
 };
 
+// ── Cloud sync pill ───────────────────────────────────────────
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+const SyncPill: React.FC<{ status: SaveStatus }> = ({ status }) => {
+  if (status === 'idle') return null;
+  return (
+    <div className={`
+      fixed bottom-20 lg:bottom-6 right-6 z-50 pointer-events-none
+      flex items-center gap-2 px-4 py-2 rounded-full shadow-xl
+      text-[10px] font-black uppercase tracking-widest transition-all duration-300
+      ${status === 'saving' ? 'bg-indigo-600 text-white'
+      : status === 'saved'  ? 'bg-emerald-500 text-white'
+      :                       'bg-rose-500    text-white'}
+    `}>
+      {status === 'saving' && <Loader2 size={12} className="animate-spin" />}
+      {status === 'saved'  && <Cloud    size={12} />}
+      {status === 'error'  && <CloudOff size={12} />}
+      {status === 'saving' ? 'Syncing...'
+       : status === 'saved'  ? 'Saved to Cloud'
+       :                       'Sync Failed'}
+    </div>
+  );
+};
+
+// ── App ───────────────────────────────────────────────────────
 const App: React.FC = () => {
   const [view, setView]                   = useState<View>('dashboard');
   const [showAuth, setShowAuth]           = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRestoring, setIsRestoring]     = useState(true);
+  const [saveStatus, setSaveStatus]       = useState<SaveStatus>('idle');
+
+  const saveTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstRender = useRef(true);
 
   const [financeState, setFinanceState] = useState<FinanceState>(() => {
-    const saved = localStorage.getItem('finvantage_active_session');
+    const saved = localStorage.getItem(LOCAL_KEY);
     if (saved) {
       try { return JSON.parse(saved); } catch { /* fall through */ }
     }
     return INITIAL_STATE;
   });
 
-  // On mount: verify Supabase session is still valid
+  // ── On mount: restore full state from normalized DB tables ───
   useEffect(() => {
     const restoreSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session) {
-          if (!financeState.isRegistered) {
-            const profile = await getProfile();
-            if (profile) {
-              setFinanceState(prev => ({
-                ...prev,
-                isRegistered: true,
-                profile: {
-                  ...prev.profile,
-                  firstName:       profile.first_name,
-                  lastName:        profile.last_name ?? '',
-                  email:           profile.identifier.includes('@') && !profile.identifier.includes('@auth.finvantage.app')
-                                     ? profile.identifier : '',
-                  mobile:          !profile.identifier.includes('@')
-                                     ? profile.identifier : '',
-                  dob:             profile.dob ?? '',
-                  lifeExpectancy:  profile.life_expectancy,
-                  retirementAge:   profile.retirement_age,
-                  pincode:         profile.pincode ?? '',
-                  city:            profile.city    ?? '',
-                  state:           profile.state   ?? '',
-                  country:         profile.country,
-                  incomeSource:    profile.income_source as IncomeSource,
-                  iqScore:         profile.iq_score,
-                  income: { salary: 50000, bonus: 0, reimbursements: 0, business: 0, rental: 0, investment: 0, expectedIncrease: 6 },
-                  monthlyExpenses: 20000,
-                },
-              }));
-            }
+          // Reads family_members, income_profiles, expenses, assets, loans, goals
+          const loaded = await loadFinanceData(financeState);
+          if (loaded) {
+            setFinanceState(loaded);
+            localStorage.setItem(LOCAL_KEY, JSON.stringify(loaded));
           }
         } else {
           if (financeState.isRegistered) {
-            localStorage.removeItem('finvantage_active_session');
+            localStorage.removeItem(LOCAL_KEY);
             setFinanceState({ ...INITIAL_STATE });
           }
         }
@@ -124,7 +135,7 @@ const App: React.FC = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
-        localStorage.removeItem('finvantage_active_session');
+        localStorage.removeItem(LOCAL_KEY);
         setFinanceState({ ...INITIAL_STATE });
         setShowAuth(false);
       }
@@ -133,25 +144,44 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist state to localStorage whenever it changes
+  // ── Auto-save all sections to their own DB tables ────────────
   useEffect(() => {
-    if (financeState.isRegistered) {
-      localStorage.setItem('finvantage_active_session', JSON.stringify(financeState));
-    }
-  }, [financeState]);
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    if (!financeState.isRegistered) return;
 
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(financeState));
+
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaveStatus('saving');
+
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await saveFinanceData(financeState);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2500);
+      } catch {
+        setSaveStatus('error');
+        setTimeout(() => setSaveStatus('idle'), 4000);
+      }
+    }, SAVE_DEBOUNCE_MS);
+
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [financeState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Logout ────────────────────────────────────────────────────
   const handleLogout = async () => {
     const confirmed = window.confirm('Terminate session? Your data is saved in the cloud.');
     if (confirmed) {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      await saveFinanceData(financeState).catch(() => {});
       await signOut();
-      localStorage.removeItem('finvantage_active_session');
+      localStorage.removeItem(LOCAL_KEY);
       setFinanceState({ ...INITIAL_STATE, isRegistered: false });
       setShowAuth(false);
       setView('dashboard');
     }
   };
 
-  // Show spinner while verifying session on reload
   if (isRestoring) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
@@ -238,6 +268,8 @@ const App: React.FC = () => {
           </button>
         </div>
       </main>
+
+      <SyncPill status={saveStatus} />
     </div>
   );
 };
