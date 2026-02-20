@@ -125,7 +125,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
           </div>
           
           <div className="flex flex-col gap-6">
-            <div className="bg-white/5 border border-white/10 p-10 rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner min-w-[320px]">
+          <div className="bg-white/5 border border-white/10 p-10 rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner w-full md:min-w-[320px]">
                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Monthly Net Surplus</p>
                <h4 className={`text-4xl md:text-5xl font-black tracking-tighter ${(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
                   ₹{(totalMonthlyIncome - totalMonthlyOutflow).toLocaleString()}

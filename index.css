@@ -31,6 +31,7 @@ body {
   color: var(--ink-900);
   background: linear-gradient(180deg, var(--paper-50) 0%, var(--mist-50) 100%);
   min-height: 100vh;
+  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -165,4 +166,45 @@ h4 {
 
 .surface-dark {
   background: linear-gradient(160deg, #071615 0%, #0c1f1e 100%);
+}
+
+@media (max-width: 640px) {
+  .text-7xl { font-size: 2.5rem !important; line-height: 1.05 !important; }
+  .text-8xl { font-size: 2.75rem !important; line-height: 1.05 !important; }
+  .text-9xl { font-size: 3rem !important; line-height: 1.05 !important; }
+  .text-6xl { font-size: 2.25rem !important; line-height: 1.1 !important; }
+  .text-5xl { font-size: 2rem !important; line-height: 1.1 !important; }
+  .text-4xl { font-size: 1.5rem !important; line-height: 1.2 !important; }
+  .text-3xl { font-size: 1.25rem !important; line-height: 1.25 !important; }
+
+  .p-20 { padding: 2.5rem !important; }
+  .p-16 { padding: 2rem !important; }
+  .p-12 { padding: 1.75rem !important; }
+  .p-10 { padding: 1.5rem !important; }
+  .p-8  { padding: 1.25rem !important; }
+  .p-6  { padding: 1rem !important; }
+
+  .px-12 { padding-left: 1.5rem !important; padding-right: 1.5rem !important; }
+  .px-10 { padding-left: 1.25rem !important; padding-right: 1.25rem !important; }
+  .px-8  { padding-left: 1rem !important; padding-right: 1rem !important; }
+  .px-6  { padding-left: 0.875rem !important; padding-right: 0.875rem !important; }
+
+  .py-12 { padding-top: 1.5rem !important; padding-bottom: 1.5rem !important; }
+  .py-10 { padding-top: 1.25rem !important; padding-bottom: 1.25rem !important; }
+  .py-8  { padding-top: 1rem !important; padding-bottom: 1rem !important; }
+  .py-6  { padding-top: 0.875rem !important; padding-bottom: 0.875rem !important; }
+
+  .gap-12 { gap: 2rem !important; }
+  .gap-10 { gap: 1.75rem !important; }
+  .gap-8  { gap: 1.25rem !important; }
+  .gap-6  { gap: 1rem !important; }
+
+  .rounded-\[5rem\],
+  .rounded-\[4\.5rem\],
+  .rounded-\[4rem\],
+  .rounded-\[3\.5rem\],
+  .rounded-\[3rem\],
+  .rounded-\[2\.5rem\] {
+    border-radius: 1.5rem !important;
+  }
 }

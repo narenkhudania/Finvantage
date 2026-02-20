@@ -179,8 +179,8 @@ const Transactions: React.FC<TransactionsProps> = ({ transactions, onAddTransact
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto no-scrollbar">
+        <table className="w-full text-left min-w-[720px]">
           <thead className="bg-slate-50">
             <tr>
               <th className="px-6 py-4 font-semibold text-slate-500 text-sm">Date</th>

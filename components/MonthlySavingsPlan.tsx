@@ -52,7 +52,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
           </div>
           
           <div className="flex flex-col gap-4 w-full md:w-auto">
-            <div className="bg-white/5 border border-white/10 p-10 rounded-[3rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner min-w-[320px]">
+            <div className="bg-white/5 border border-white/10 p-10 rounded-[3rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner w-full md:min-w-[320px]">
                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global Inflow Node</p>
                <h4 className="text-4xl md:text-5xl font-black text-white tracking-tighter">₹{breakdown.income.toLocaleString()}</h4>
                <div className="flex p-1 bg-white/5 rounded-2xl w-full mt-4">
@@ -120,7 +120,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                    </p>
                 </div>
              </div>
-             <div className="bg-white/5 p-8 rounded-[3rem] border border-white/10 flex flex-col items-center gap-2 min-w-[280px] relative z-10">
+             <div className="bg-white/5 p-8 rounded-[3rem] border border-white/10 flex flex-col items-center gap-2 w-full md:min-w-[280px] relative z-10">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Leakage Index</p>
                 <h5 className="text-4xl font-black text-emerald-400">{Math.round((unmappedCash / breakdown.income) * 100)}%</h5>
                 <button className="mt-4 px-8 py-3 bg-teal-600 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-teal-500 transition-all">Direct to Success Silo</button>
@@ -141,7 +141,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
            </div>
 
            <div className="overflow-x-auto no-scrollbar">
-              <table className="w-full text-left">
+              <table className="w-full text-left min-w-[720px]">
                  <thead>
                     <tr className="bg-white">
                        <th className="px-12 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Partition Node</th>

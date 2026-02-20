@@ -510,7 +510,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                               <span className="text-[9px] font-black text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full uppercase">12 Month Window</span>
                            </div>
                            <div className="overflow-x-auto max-h-[300px] no-scrollbar">
-                              <table className="w-full text-left">
+                              <table className="w-full text-left min-w-[520px]">
                                  <thead className="bg-slate-50 sticky top-0 z-10">
                                     <tr>
                                        <th className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase">Period</th>

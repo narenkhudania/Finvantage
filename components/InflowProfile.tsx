@@ -114,7 +114,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
             </div>
             <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Household <br/><span className="text-teal-500">Inflows.</span></h2>
           </div>
-          <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner min-w-[300px]">
+          <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner w-full md:min-w-[300px]">
              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Aggregated Monthly</p>
              <h4 className="text-4xl md:text-6xl font-black tracking-tighter text-emerald-400">₹{totalHouseholdInflow.toLocaleString()}</h4>
           </div>
@@ -130,7 +130,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{members.length} Active Earners</p>
               </div>
               <div className="overflow-x-auto no-scrollbar">
-                 <table className="w-full text-left">
+                 <table className="w-full text-left min-w-[720px]">
                     <thead>
                        <tr className="bg-white">
                           <th className="px-8 md:px-12 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Earner Name</th>

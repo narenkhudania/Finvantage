@@ -322,7 +322,7 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
           </div>
           
           <div className="flex flex-col gap-6 w-full lg:w-auto">
-            <div className="bg-white/[0.03] border border-white/10 p-10 rounded-[3rem] backdrop-blur-xl flex flex-col items-center gap-4 shadow-inner min-w-[340px]">
+            <div className="bg-white/[0.03] border border-white/10 p-10 rounded-[3rem] backdrop-blur-xl flex flex-col items-center gap-4 shadow-inner w-full md:min-w-[340px]">
                <div className="relative w-32 h-32">
                   <svg className="w-full h-full transform -rotate-90">
                     <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-white/5" />

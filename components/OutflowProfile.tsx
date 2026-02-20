@@ -72,7 +72,7 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
             <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Outflow <br/><span className="text-teal-500">Profile.</span></h2>
           </div>
           
-          <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner min-w-[300px]">
+          <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner w-full md:min-w-[300px]">
              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Monthly Burn Rate</p>
              <h4 className="text-4xl md:text-6xl font-black tracking-tighter text-teal-300">₹{totalMonthlyOutflow.toLocaleString()}</h4>
           </div>

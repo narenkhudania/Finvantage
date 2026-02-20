@@ -325,7 +325,7 @@ const App: React.FC = () => {
 
       <main className="flex-1 lg:ml-[260px] flex flex-col min-h-screen relative h-screen">
         <Header onMenuClick={() => setIsSidebarOpen(true)} title={view} state={financeState} setView={setView} onLogout={handleLogout} />
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 md:p-10 max-w-[1400px] mx-auto w-full no-scrollbar scroll-smooth">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 pb-24 md:p-10 md:pb-10 max-w-[1400px] mx-auto w-full no-scrollbar scroll-smooth">
           <div key={view} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
             {renderView()}
           </div>
