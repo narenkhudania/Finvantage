@@ -235,10 +235,14 @@ const App: React.FC = () => {
   // ── Logout ────────────────────────────────────────────────────
   const handleLogout = async () => {
     const confirmed = window.confirm('Terminate session? Your data is saved in the cloud.');
-    if (confirmed) {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      await saveFinanceData(financeState).catch(() => {});
+    if (!confirmed) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    await saveFinanceData(financeState).catch(() => {});
+    try {
       await signOut();
+    } catch (err) {
+      console.error('Sign out failed:', err);
+    } finally {
       localStorage.removeItem(LOCAL_KEY);
       setFinanceState({ ...INITIAL_STATE, isRegistered: false });
       setShowAuth(false);
