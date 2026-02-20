@@ -229,8 +229,9 @@ export async function loadFinanceData(
 export async function saveFinanceData(
   state: FinanceState,
 ): Promise<Partial<FinanceState>> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return {};
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!user) throw new Error('No active auth session.');
 
   const uid = user.id;
   const dbUpdates: Partial<FinanceState> = {};

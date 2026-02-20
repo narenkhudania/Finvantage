@@ -108,6 +108,10 @@ const App: React.FC = () => {
 
   // ── On mount: restore full state from all 6 DB tables ────────
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      (window as any).supabase = supabase;
+    }
+
     const restoreSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
