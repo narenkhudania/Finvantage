@@ -16,6 +16,11 @@ import type {
   IncomeSource,
 } from '../types';
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string) => UUID_REGEX.test(value);
+
 // ─────────────────────────────────────────────────────────────
 // ROW ↔ TYPE MAPPERS
 // ─────────────────────────────────────────────────────────────
@@ -233,7 +238,7 @@ export async function saveFinanceData(
   // ── Step 1: family_members (must be first — income_profiles needs UUIDs)
   try {
     const savedFamily = await saveFamilyMembers(uid, state.family);
-    dbUpdates.family = savedFamily;
+    if (savedFamily) dbUpdates.family = savedFamily;
   } catch (err) {
     console.error('[dbService] family save failed:', err);
     throw err; // family failure is fatal — block income save below
@@ -255,9 +260,9 @@ export async function saveFinanceData(
     saveGoals(uid, state.goals),
   ]);
 
-  if (assetsRes.status === 'fulfilled')   dbUpdates.assets = assetsRes.value;
-  if (loansRes.status === 'fulfilled')    dbUpdates.loans  = loansRes.value;
-  if (goalsRes.status === 'fulfilled')    dbUpdates.goals  = goalsRes.value;
+  if (assetsRes.status === 'fulfilled' && assetsRes.value) dbUpdates.assets = assetsRes.value;
+  if (loansRes.status === 'fulfilled' && loansRes.value)   dbUpdates.loans  = loansRes.value;
+  if (goalsRes.status === 'fulfilled' && goalsRes.value)   dbUpdates.goals  = goalsRes.value;
 
   ['expenses','assets','loans','goals'].forEach((label, i) => {
     const r = [expensesRes, assetsRes, loansRes, goalsRes][i];
@@ -277,18 +282,20 @@ export async function saveFinanceData(
 async function saveFamilyMembers(
   uid: string,
   family: FamilyMember[],
-): Promise<FamilyMember[]> {
-  // Delete all existing rows first
-  const { error: delErr } = await supabase
-    .from('family_members')
-    .delete()
-    .eq('user_id', uid);
-  if (delErr) throw delErr;
+): Promise<FamilyMember[] | null> {
+  if (family.length === 0) {
+    const { error: delErr } = await supabase
+      .from('family_members')
+      .delete()
+      .eq('user_id', uid);
+    if (delErr) throw delErr;
+    return null;
+  }
 
-  if (family.length === 0) return [];
+  const hasOnlyUuidIds = family.every(m => isUuid(m.id));
 
-  // Insert without id — Postgres generates UUIDs
   const rows = family.map(m => ({
+    id:               hasOnlyUuidIds ? m.id : undefined,
     user_id:          uid,
     name:             m.name,
     relation:         m.relation,
@@ -298,9 +305,32 @@ async function saveFamilyMembers(
     ...incomeToColumns(m.income),
   }));
 
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('family_members')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = family.map(m => m.id);
+    await supabase
+      .from('family_members')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  // Non-UUID ids found — reset to DB-generated UUIDs
+  const { error: delErr } = await supabase
+    .from('family_members')
+    .delete()
+    .eq('user_id', uid);
+  if (delErr) throw delErr;
+
   const { data, error } = await supabase
     .from('family_members')
-    .insert(rows)
+    .insert(rows.map(({ id, ...rest }) => rest))
     .select();
   if (error) throw error;
 
@@ -368,11 +398,16 @@ async function saveExpenses(
 async function saveAssets(
   uid: string,
   assets: Asset[],
-): Promise<Asset[]> {
-  await supabase.from('assets').delete().eq('user_id', uid);
-  if (assets.length === 0) return [];
+): Promise<Asset[] | null> {
+  if (assets.length === 0) {
+    await supabase.from('assets').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = assets.every(a => isUuid(a.id));
 
   const rows = assets.map(a => ({
+    id:                  hasOnlyUuidIds ? a.id : undefined,
     user_id:             uid,
     category:            a.category,
     sub_category:        a.subCategory,
@@ -386,9 +421,27 @@ async function saveAssets(
     tenure:              a.tenure ?? null,
   }));
 
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('assets')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = assets.map(a => a.id);
+    await supabase
+      .from('assets')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('assets').delete().eq('user_id', uid);
+
   const { data, error } = await supabase
     .from('assets')
-    .insert(rows)
+    .insert(rows.map(({ id, ...rest }) => rest))
     .select();
   if (error) throw error;
   return (data ?? []).map(rowToAsset);
@@ -398,11 +451,16 @@ async function saveAssets(
 async function saveLoans(
   uid: string,
   loans: Loan[],
-): Promise<Loan[]> {
-  await supabase.from('loans').delete().eq('user_id', uid);
-  if (loans.length === 0) return [];
+): Promise<Loan[] | null> {
+  if (loans.length === 0) {
+    await supabase.from('loans').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = loans.every(l => isUuid(l.id));
 
   const rows = loans.map(l => ({
+    id:                 hasOnlyUuidIds ? l.id : undefined,
     user_id:            uid,
     type:               l.type,
     owner_ref:          l.owner,
@@ -417,9 +475,27 @@ async function saveLoans(
     lump_sum_repayments: l.lumpSumRepayments ?? [],
   }));
 
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('loans')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = loans.map(l => l.id);
+    await supabase
+      .from('loans')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('loans').delete().eq('user_id', uid);
+
   const { data, error } = await supabase
     .from('loans')
-    .insert(rows)
+    .insert(rows.map(({ id, ...rest }) => rest))
     .select();
   if (error) throw error;
   return (data ?? []).map(rowToLoan);
@@ -429,11 +505,16 @@ async function saveLoans(
 async function saveGoals(
   uid: string,
   goals: Goal[],
-): Promise<Goal[]> {
-  await supabase.from('goals').delete().eq('user_id', uid);
-  if (goals.length === 0) return [];
+): Promise<Goal[] | null> {
+  if (goals.length === 0) {
+    await supabase.from('goals').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = goals.every(g => isUuid(g.id));
 
   const rows = goals.map(g => ({
+    id:               hasOnlyUuidIds ? g.id : undefined,
     user_id:          uid,
     type:             g.type,
     description:      g.description,
@@ -454,9 +535,27 @@ async function saveGoals(
     detailed_breakdown:                        g.detailedBreakdown  ?? null,
   }));
 
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('goals')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = goals.map(g => g.id);
+    await supabase
+      .from('goals')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('goals').delete().eq('user_id', uid);
+
   const { data, error } = await supabase
     .from('goals')
-    .insert(rows)
+    .insert(rows.map(({ id, ...rest }) => rest))
     .select();
   if (error) throw error;
   return (data ?? []).map(rowToGoal);
