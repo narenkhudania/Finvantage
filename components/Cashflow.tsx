@@ -102,7 +102,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
 
     return {
       bar: [
-        { name: 'Monthly Inflow', value: personalInflow, fill: '#6366f1' },
+        { name: 'Monthly Inflow', value: personalInflow, fill: '#0f766e' },
         { name: 'Monthly Expense', value: personalExpenses, fill: '#f43f5e' }
       ],
       netFlowHistory: [
@@ -120,17 +120,17 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-6 duration-1000 pb-24">
       
       {/* Strategic Header */}
-      <div className="bg-[#0b0f1a] p-12 md:p-20 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-indigo-900/30">
-        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-indigo-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-12 md:p-20 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-teal-900/30">
+        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-teal-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12">
           <div className="space-y-6 text-left">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <Activity size={14}/> Wealth Radar Engine
             </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Strategic <br/><span className="text-indigo-500">Flows.</span></h2>
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Strategic <br/><span className="text-teal-500">Flows.</span></h2>
           </div>
           <div className="bg-white/5 border border-white/10 p-10 rounded-[4rem] backdrop-blur-xl flex items-center gap-8 shadow-inner">
-             <div className="p-5 bg-indigo-600 rounded-[2rem] shadow-xl">
+             <div className="p-5 bg-teal-600 rounded-[2rem] shadow-xl">
                 <BarChart3 size={40} className="text-white"/>
              </div>
              <div className="text-left">
@@ -151,7 +151,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
             <div className="flex gap-6 items-center">
                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-slate-200"/><span className="text-[10px] font-black text-slate-400 uppercase">Living</span></div>
                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-rose-500"/><span className="text-[10px] font-black text-slate-400 uppercase">Debt</span></div>
-               <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-indigo-500"/><span className="text-[10px] font-black text-slate-400 uppercase">Investments</span></div>
+               <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-teal-500"/><span className="text-[10px] font-black text-slate-400 uppercase">Investments</span></div>
             </div>
          </div>
 
@@ -168,7 +168,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                   />
                   <Bar dataKey="living" stackId="a" fill="#e2e8f0" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="debt" stackId="a" fill="#f43f5e" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="committed" stackId="a" fill="#6366f1" radius={[10, 10, 0, 0]} />
+                  <Bar dataKey="committed" stackId="a" fill="#0f766e" radius={[10, 10, 0, 0]} />
                </BarChart>
             </ResponsiveContainer>
          </div>
@@ -202,7 +202,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                   <h3 className="text-2xl font-black text-slate-900 tracking-tight italic">Personal Net Surplus.</h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">6-Month Net Trajectory</p>
                </div>
-               <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl"><Activity size={20}/></div>
+               <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl"><Activity size={20}/></div>
             </div>
             <div className="flex-1 min-h-[300px]">
                <ResponsiveContainer width="100%" height="100%">
@@ -211,7 +211,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                      <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11, fontWeight: 900}} />
                      <YAxis hide />
                      <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', fontWeight: 'bold' }} />
-                     <Line type="monotone" dataKey="flow" stroke="#6366f1" strokeWidth={5} dot={{ r: 6, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 10, strokeWidth: 0 }} />
+                     <Line type="monotone" dataKey="flow" stroke="#0f766e" strokeWidth={5} dot={{ r: 6, fill: '#0f766e', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 10, strokeWidth: 0 }} />
                   </LineChart>
                </ResponsiveContainer>
             </div>

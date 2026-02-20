@@ -98,14 +98,14 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
   return (
     <div className="space-y-8 md:space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Strategic Header */}
-      <div className="bg-[#0b0f1a] p-8 md:p-16 rounded-[2.5rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-8 md:p-16 rounded-[2.5rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8 md:gap-12">
           <div className="space-y-4 md:space-y-6">
-            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-teal-500/10 text-teal-300 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <Zap size={14}/> Household Liquidity Engine
             </div>
-            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Cashflow <br/><span className="text-indigo-500">Radar.</span></h2>
+            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Cashflow <br/><span className="text-teal-500">Radar.</span></h2>
             <p className="text-slate-400 text-sm md:text-lg font-medium max-w-lg leading-relaxed">
               Consolidated audit of annual inflows versus committed outflows and lifestyle burn.
             </p>
@@ -123,8 +123,8 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                </div>
             </div>
             <div className="flex p-1 bg-white/5 border border-white/10 rounded-2xl w-full">
-               <button onClick={() => setActiveTab('audit')} className={`flex-1 py-3 px-4 md:px-8 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'audit' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Audit</button>
-               <button onClick={() => setActiveTab('timeline')} className={`flex-1 py-3 px-4 md:px-8 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'timeline' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Timeline</button>
+               <button onClick={() => setActiveTab('audit')} className={`flex-1 py-3 px-4 md:px-8 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'audit' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Audit</button>
+               <button onClick={() => setActiveTab('timeline')} className={`flex-1 py-3 px-4 md:px-8 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'timeline' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Timeline</button>
             </div>
           </div>
         </div>
@@ -136,7 +136,7 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
               <div className="bg-white p-8 md:p-10 rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-sm">
                  <div className="flex items-center justify-between mb-6 md:mb-8 border-b border-slate-50 pb-4 md:pb-6">
                     <div className="flex items-center gap-3 md:gap-4">
-                       <div className="p-2.5 md:p-3 bg-indigo-50 text-indigo-600 rounded-xl md:rounded-2xl"><Calculator size={20}/></div>
+                       <div className="p-2.5 md:p-3 bg-teal-50 text-teal-600 rounded-xl md:rounded-2xl"><Calculator size={20}/></div>
                        <h3 className="text-lg md:text-xl font-black text-slate-900">Incomes</h3>
                     </div>
                     <p className="text-xs md:text-sm font-black text-slate-900">₹{auditData.totalInflowPa.toLocaleString()}</p>
@@ -174,7 +174,7 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
               <div className="bg-white p-8 md:p-10 rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-sm">
                  <div className="flex items-center justify-between mb-6 md:mb-8 border-b border-slate-50 pb-4 md:pb-6">
                     <div className="flex items-center gap-3 md:gap-4">
-                       <div className="p-2.5 md:p-3 bg-indigo-50 text-indigo-600 rounded-xl md:rounded-2xl"><Landmark size={20}/></div>
+                       <div className="p-2.5 md:p-3 bg-teal-50 text-teal-600 rounded-xl md:rounded-2xl"><Landmark size={20}/></div>
                        <h3 className="text-lg md:text-xl font-black text-slate-900">Repayments</h3>
                     </div>
                     <p className="text-xs md:text-sm font-black text-slate-900">₹{auditData.totalRepaymentsPa.toLocaleString()}</p>
@@ -189,9 +189,9 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                  </div>
               </div>
 
-              <div className="bg-slate-950 p-8 md:p-12 rounded-[2.5rem] md:rounded-[5rem] text-white space-y-6 md:space-y-10 relative overflow-hidden shadow-2xl">
+              <div className="surface-dark p-8 md:p-12 rounded-[2.5rem] md:rounded-[5rem] text-white space-y-6 md:space-y-10 relative overflow-hidden shadow-2xl">
                  <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 blur-[80px] rounded-full translate-x-1/2 -translate-y-1/2" />
-                 <h4 className="text-2xl md:text-3xl font-black tracking-tight flex items-center gap-3 relative z-10"><BarChartHorizontal className="text-indigo-500" size={24}/> Audit Node</h4>
+                 <h4 className="text-2xl md:text-3xl font-black tracking-tight flex items-center gap-3 relative z-10"><BarChartHorizontal className="text-teal-500" size={24}/> Audit Node</h4>
                  <div className="pt-4 space-y-4 relative z-10">
                     <p className="text-slate-400 text-sm md:text-base font-medium leading-relaxed">
                        Net position: <span className={auditData.netCashFlowPa >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>₹{auditData.netCashFlowPa.toLocaleString()} p.a.</span>
@@ -220,12 +220,12 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                        <th className="px-8 md:px-10 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest">Year (Age)</th>
                        <th className="px-4 md:px-8 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-right">Inflow (₹)</th>
                        <th className="px-4 md:px-8 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-right">Outflows (₹)</th>
-                       <th className="px-8 md:px-10 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-indigo-600 uppercase tracking-widest text-right">Net Capacity</th>
+                       <th className="px-8 md:px-10 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-teal-600 uppercase tracking-widest text-right">Net Capacity</th>
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50">
                     {simulationData.map((row, idx) => (
-                       <tr key={idx} className="hover:bg-indigo-50/30 transition-colors">
+                       <tr key={idx} className="hover:bg-teal-50/30 transition-colors">
                           <td className="px-8 md:px-10 py-4 md:py-6">
                              <div className="flex items-center gap-2 md:gap-3">
                                 <span className="text-xs md:text-sm font-black text-slate-900">{row.year}</span>

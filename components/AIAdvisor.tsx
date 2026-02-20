@@ -53,7 +53,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
     <button 
       onClick={() => handleSend(query)}
       disabled={isLoading}
-      className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all whitespace-nowrap shrink-0"
+      className="flex items-center gap-2 px-4 py-2.5 bg-teal-50 text-teal-700 border border-teal-100 rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-teal-600 hover:text-white transition-all whitespace-nowrap shrink-0"
     >
       <Icon size={14} />
       {label}
@@ -63,18 +63,18 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
   return (
     <div className="flex flex-col h-[calc(100vh-12rem)] max-w-4xl mx-auto bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-slate-100 bg-slate-950 text-white flex items-center justify-between">
+      <div className="p-6 border-b border-slate-100 surface-dark text-white flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 p-2.5 rounded-xl shadow-lg shadow-indigo-600/20">
+          <div className="bg-teal-600 p-2.5 rounded-xl shadow-lg shadow-teal-600/20">
             <Bot size={22} />
           </div>
           <div>
             <h3 className="font-black text-lg">Strategy Terminal</h3>
-            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Household Intelligence</p>
+            <p className="text-[10px] font-black text-teal-400 uppercase tracking-widest">Household Intelligence</p>
           </div>
         </div>
         <div className="bg-white/10 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 border border-white/5">
-          <Sparkles size={12} className="text-indigo-400" />
+          <Sparkles size={12} className="text-teal-400" />
           Live Simulator
         </div>
       </div>
@@ -88,14 +88,14 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`flex gap-4 max-w-[90%] md:max-w-[80%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
               <div className={`w-10 h-10 rounded-2xl flex-shrink-0 flex items-center justify-center border ${
-                msg.role === 'assistant' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-900 text-white border-slate-800 shadow-xl shadow-slate-900/10'
+                msg.role === 'assistant' ? 'bg-teal-50 text-teal-600 border-teal-100' : 'bg-slate-900 text-white border-slate-800 shadow-xl shadow-slate-900/10'
               }`}>
                 {msg.role === 'assistant' ? <Bot size={20} /> : <User size={20} />}
               </div>
               <div className={`p-6 rounded-[2rem] text-sm leading-relaxed font-medium ${
                 msg.role === 'assistant' 
                   ? 'bg-slate-50 text-slate-800 rounded-tl-none border border-slate-100' 
-                  : 'bg-indigo-600 text-white rounded-tr-none shadow-xl shadow-indigo-600/10'
+                  : 'bg-teal-600 text-white rounded-tr-none shadow-xl shadow-teal-600/10'
               }`}>
                 {msg.content.split('\n').map((line, idx) => (
                   <p key={idx} className={idx > 0 ? 'mt-3' : ''}>
@@ -109,7 +109,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
         {isLoading && (
           <div className="flex justify-start">
             <div className="flex gap-4 max-w-[80%]">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+              <div className="w-10 h-10 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center border border-teal-100">
                 <Loader2 size={20} className="animate-spin" />
               </div>
               <div className="p-6 rounded-[2rem] bg-slate-50 text-slate-400 text-sm animate-pulse rounded-tl-none border border-slate-100">
@@ -137,13 +137,13 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             placeholder="E.g. What happens if I move to a $4000/mo apartment in 2 years?"
-            className="w-full bg-white border border-slate-200 rounded-[1.5rem] pl-6 pr-14 py-4 md:py-5 font-bold outline-none shadow-xl shadow-slate-200/50 focus:ring-4 focus:ring-indigo-600/5 transition-all"
+            className="w-full bg-white border border-slate-200 rounded-[1.5rem] pl-6 pr-14 py-4 md:py-5 font-bold outline-none shadow-xl shadow-slate-200/50 focus:ring-4 focus:ring-teal-600/5 transition-all"
           />
           <button 
             onClick={() => handleSend()}
             disabled={!input.trim() || isLoading}
             className={`absolute right-3 top-1/2 -translate-y-1/2 p-3 rounded-2xl transition-all ${
-              input.trim() && !isLoading ? 'bg-indigo-600 text-white hover:scale-110 shadow-lg shadow-indigo-600/20' : 'bg-slate-100 text-slate-300 cursor-not-allowed'
+              input.trim() && !isLoading ? 'bg-teal-600 text-white hover:scale-110 shadow-lg shadow-teal-600/20' : 'bg-slate-100 text-slate-300 cursor-not-allowed'
             }`}
           >
             <Send size={20} />

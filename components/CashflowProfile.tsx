@@ -84,10 +84,10 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
   const totalMonthlyOutflow = totalMonthlyExpenses + totalMonthlyDebt;
 
   const IncomeInput = ({ label, icon: Icon, value, field, description }: any) => (
-    <div className="group bg-white p-6 rounded-[2.5rem] border border-slate-200 hover:border-indigo-400 transition-all shadow-sm">
+    <div className="group bg-white p-6 rounded-[2.5rem] border border-slate-200 hover:border-teal-400 transition-all shadow-sm">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-slate-50 text-slate-400 group-hover:bg-indigo-600 group-hover:text-white rounded-2xl transition-all">
+          <div className="p-3 bg-slate-50 text-slate-400 group-hover:bg-teal-600 group-hover:text-white rounded-2xl transition-all">
             <Icon size={18} />
           </div>
           <div>
@@ -111,14 +111,14 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-24">
       {/* Strategic Header */}
-      <div className="bg-[#0b0f1a] p-12 md:p-16 rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-12 md:p-16 rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12">
           <div className="space-y-6">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <Calculator size={14}/> Node Configuration
             </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Cashflow <br/><span className="text-indigo-500">Profile.</span></h2>
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Cashflow <br/><span className="text-teal-500">Profile.</span></h2>
             <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
               Consolidated node for configuring all <span className="text-white">Household Inflows</span> and <span className="text-white">Burn Rates</span>.
             </p>
@@ -140,8 +140,8 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
       </div>
 
       <div className="flex p-2 bg-white rounded-[2.5rem] border border-slate-200 w-fit mx-auto shadow-sm">
-        <button onClick={() => setActiveTab('inflow')} className={`px-10 py-4 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'inflow' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><TrendingUp size={14}/> Inflow Profile</button>
-        <button onClick={() => setActiveTab('outflow')} className={`px-10 py-4 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'outflow' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><ArrowDownRight size={14}/> Outflow Profile</button>
+        <button onClick={() => setActiveTab('inflow')} className={`px-10 py-4 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'inflow' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><TrendingUp size={14}/> Inflow Profile</button>
+        <button onClick={() => setActiveTab('outflow')} className={`px-10 py-4 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'outflow' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><ArrowDownRight size={14}/> Outflow Profile</button>
       </div>
 
       {activeTab === 'inflow' ? (
@@ -154,12 +154,12 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
                 className={`relative flex-shrink-0 w-48 p-6 rounded-[2.5rem] border-2 transition-all text-left group ${
                   selectedMemberId === member.id 
                     ? 'bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20' 
-                    : 'bg-white border-slate-200 text-slate-900 hover:border-indigo-300'
+                    : 'bg-white border-slate-200 text-slate-900 hover:border-teal-300'
                 }`}
               >
                 <p className={`text-[9px] font-black uppercase mb-1 ${selectedMemberId === member.id ? 'text-slate-500' : 'text-slate-400'}`}>{member.relation}</p>
                 <h4 className="text-lg font-black tracking-tight">{member.name}</h4>
-                <p className={`text-[10px] font-bold mt-4 ${selectedMemberId === member.id ? 'text-indigo-400' : 'text-indigo-600'}`}>
+                <p className={`text-[10px] font-bold mt-4 ${selectedMemberId === member.id ? 'text-teal-400' : 'text-teal-600'}`}>
                   ₹{((member.income.salary || 0) + (member.income.bonus || 0)).toLocaleString()}
                 </p>
               </button>
@@ -179,11 +179,11 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
               {/* Category Expenses */}
               <div className="lg:col-span-2 space-y-8">
                  <div className="bg-white p-10 rounded-[3.5rem] border border-slate-200 shadow-sm">
-                    <h3 className="text-xl font-black text-slate-900 mb-8 flex items-center gap-3"><Receipt size={24} className="text-indigo-600"/> Lifestyle Burn Rate</h3>
+                    <h3 className="text-xl font-black text-slate-900 mb-8 flex items-center gap-3"><Receipt size={24} className="text-teal-600"/> Lifestyle Burn Rate</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                        {EXPENSE_CATEGORIES.map((cat: any) => (
-                          <div key={cat.name} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex items-center gap-4 group hover:bg-white hover:border-indigo-300 transition-all">
-                             <div className="p-3 bg-white text-slate-400 rounded-2xl group-hover:text-indigo-600 transition-all"><cat.icon size={18}/></div>
+                          <div key={cat.name} className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex items-center gap-4 group hover:bg-white hover:border-teal-300 transition-all">
+                             <div className="p-3 bg-white text-slate-400 rounded-2xl group-hover:text-teal-600 transition-all"><cat.icon size={18}/></div>
                              <div className="flex-1">
                                 <p className="text-[10px] font-black text-slate-400 uppercase mb-1">{cat.name}</p>
                                 <div className="relative">
@@ -205,7 +205,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
 
               {/* Obligations Sidebar */}
               <div className="space-y-8">
-                 <div className="bg-slate-950 p-10 rounded-[4rem] text-white space-y-8 shadow-2xl relative overflow-hidden">
+                 <div className="surface-dark p-10 rounded-[4rem] text-white space-y-8 shadow-2xl relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-4 opacity-5"><CreditCard size={120}/></div>
                     <div className="space-y-2 relative z-10">
                        <h3 className="text-2xl font-black">Debt Obligations</h3>
@@ -232,7 +232,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
                  </div>
 
                  <div className="bg-white p-8 rounded-[3.5rem] border border-slate-200 shadow-sm flex items-center gap-6">
-                    <div className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl"><ShieldCheck size={24}/></div>
+                    <div className="p-4 bg-teal-50 text-teal-600 rounded-2xl"><ShieldCheck size={24}/></div>
                     <div>
                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Efficiency Audit</p>
                        <h4 className="text-lg font-black text-slate-900">{Math.round((totalMonthlyDebt / totalMonthlyIncome) * 100)}% Debt Load</h4>

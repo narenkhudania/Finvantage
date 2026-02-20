@@ -133,6 +133,14 @@ export interface Goal {
   detailedBreakdown?: ExpenseItem[];
 }
 
+export interface InsuranceAnalysisConfig {
+  inflation: number;
+  investmentRate: number;
+  replacementYears: number;
+  immediateNeeds: number;
+  financialAssetDiscount: number;
+}
+
 export interface FinanceState {
   isRegistered: boolean;
   onboardingStep: number;
@@ -159,6 +167,7 @@ export interface FinanceState {
   assets: Asset[];
   loans: Loan[];
   insurance: Insurance[];
+  insuranceAnalysis: InsuranceAnalysisConfig;
   goals: Goal[];
   estate: {
     hasWill: boolean;

@@ -1,11 +1,12 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Bell, Menu, UserCircle, LogOut, ChevronDown, 
   User, Search, Zap, Activity, Shield,
   ArrowRight, ArrowUpRight, ChevronRight, Settings
 } from 'lucide-react';
 import { FinanceState, View } from '../types';
+import { getJourneyProgress } from '../lib/journey';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -30,31 +31,48 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
   }, []);
 
   const unreadCount = state.notifications?.filter(n => !n.read).length || 0;
+  const { completionPct, nextStep } = useMemo(() => getJourneyProgress(state), [state]);
 
   return (
-    <header className="h-20 md:h-24 bg-white/80 backdrop-blur-xl border-b border-slate-100 sticky top-0 z-[50] px-6 md:px-12 flex items-center justify-between">
+    <header className="h-20 md:h-24 bg-white/75 backdrop-blur-xl border-b border-white/60 shadow-sm sticky top-0 z-[50] px-6 md:px-12 flex items-center justify-between">
       <div className="flex items-center gap-6">
         <button 
           onClick={onMenuClick}
-          className="lg:hidden p-2.5 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl transition-all"
+          className="lg:hidden p-2.5 bg-slate-50 hover:bg-teal-50 hover:text-teal-600 rounded-xl transition-all"
         >
           <Menu size={20} />
         </button>
         <div>
-          <h1 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight leading-none">
+          <h1 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight leading-none font-display">
             {title.replace('-', ' ')}
           </h1>
           <div className="flex items-center gap-1.5 mt-1.5">
              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Operational Core</p>
+             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Journey Active</p>
           </div>
+          {completionPct < 100 && (
+            <div className="hidden md:flex items-center gap-3 mt-3">
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Journey {completionPct}%</span>
+              <div className="w-28 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-teal-600 transition-all" style={{ width: `${completionPct}%` }} />
+              </div>
+              {nextStep && (
+                <button
+                  onClick={() => setView(nextStep.view)}
+                  className="text-[9px] font-black uppercase tracking-widest text-teal-600 hover:text-teal-700 transition-colors"
+                >
+                  Next: {nextStep.label}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="flex items-center gap-4 md:gap-6">
         <button 
           onClick={() => setView('notifications')}
-          className="p-3 bg-slate-50 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 rounded-2xl relative transition-all group"
+          className="p-3 bg-slate-50 text-slate-400 hover:bg-teal-50 hover:text-teal-600 rounded-2xl relative transition-all group"
         >
           <Bell size={20} className="group-hover:rotate-12 transition-transform" />
           {unreadCount > 0 && (
@@ -71,7 +89,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
           >
             <div className="hidden md:block text-right">
               <p className="text-xs font-black text-slate-900 tracking-tight leading-none">{state.profile.firstName || 'Primary User'}</p>
-              <p className="text-[8px] font-black text-indigo-500 uppercase tracking-widest mt-1">Terminal Active</p>
+              <p className="text-[8px] font-black text-teal-500 uppercase tracking-widest mt-1">Terminal Active</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-lg overflow-hidden transition-transform group-hover:scale-105">
                <User size={20} />
@@ -86,7 +104,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Session Data Node</p>
                    <p className="text-[10px] font-bold text-slate-600 truncate">{state.profile.email || 'Local Terminal'}</p>
                 </div>
-                <button onClick={() => { setView('settings'); setIsDropdownOpen(false); }} className="w-full flex items-center justify-between px-4 py-3 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl transition-all group">
+                <button onClick={() => { setView('settings'); setIsDropdownOpen(false); }} className="w-full flex items-center justify-between px-4 py-3 text-slate-600 hover:bg-teal-50 hover:text-teal-600 rounded-xl transition-all group">
                   <div className="flex items-center gap-3">
                      <Settings size={18} />
                      <span className="text-[10px] font-black uppercase tracking-widest">Configuration</span>

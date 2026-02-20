@@ -9,17 +9,16 @@ import type { IncomeSource } from '../types';
 // HELPERS
 // ─────────────────────────────────────────────────────────────
 
-/** 
+/**
  * Supabase Auth requires an email address.
- * For mobile users we derive a synthetic email so we can use
- * the same email+password auth flow transparently.
- * The user never sees this synthetic email.
+ * Mobile/phone identifiers are no longer supported.
  */
 function toAuthEmail(identifier: string): string {
-  const isEmail = identifier.includes('@');
-  return isEmail
-    ? identifier.trim().toLowerCase()
-    : `${identifier.trim().replace(/\D/g, '')}.mobile@auth.finvantage.app`;
+  const email = identifier.trim().toLowerCase();
+  if (!email.includes('@')) {
+    throw new Error('A valid email address is required.');
+  }
+  return email;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -27,7 +26,7 @@ function toAuthEmail(identifier: string): string {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Check whether an email/mobile has already been registered.
+ * Check whether an email has already been registered.
  * Uses a SECURITY DEFINER Postgres function so the anon key
  * can safely query without exposing other users' data.
  */
@@ -151,6 +150,20 @@ export async function saveOnboardingProfile(payload: {
   incomeSource: IncomeSource;
   iqScore: number;
 }): Promise<void> {
+  const dobDate = new Date(payload.dob);
+  if (Number.isNaN(dobDate.getTime())) {
+    throw new Error('Invalid date of birth.');
+  }
+  const today = new Date();
+  let age = today.getFullYear() - dobDate.getFullYear();
+  const m = today.getMonth() - dobDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dobDate.getDate())) {
+    age -= 1;
+  }
+  if (age < 18 || age > 90) {
+    throw new Error('Age must be between 18 and 90.');
+  }
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated.');
 

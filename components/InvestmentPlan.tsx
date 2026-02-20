@@ -117,16 +117,16 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   return (
     <div className="space-y-6 md:space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Strategic Header */}
-      <div className="bg-[#0b0f1a] p-6 md:p-16 rounded-[2rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-6 md:p-16 rounded-[2rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 md:gap-12">
           <div className="space-y-3 md:space-y-6 text-left">
-            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-teal-500/10 text-teal-300 rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <PieChart size={12} className="md:w-[14px] md:h-[14px]"/> Allocation Terminal
             </div>
-            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Portfolio <br/><span className="text-indigo-500">Mapping.</span></h2>
+            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Portfolio <br/><span className="text-teal-500">Mapping.</span></h2>
             <p className="text-slate-400 text-xs md:text-lg font-medium max-w-lg leading-relaxed">
-              Auditing yields against <span className="text-indigo-400 font-bold">{state.riskProfile?.level || 'Balanced'} DNA</span> for Ravindra Khudania.
+              Auditing yields against <span className="text-teal-400 font-bold">{state.riskProfile?.level || 'Balanced'} DNA</span> for Ravindra Khudania.
             </p>
           </div>
           
@@ -136,8 +136,8 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                <h4 className="text-3xl md:text-5xl font-black text-white tracking-tighter">{weightedAvgReturn.toFixed(2)}%</h4>
             </div>
             <div className="flex p-1 bg-white/5 border border-white/10 rounded-2xl w-full">
-               <button onClick={() => setActiveTab('strategy')} className={`flex-1 py-2 md:py-3 px-4 md:px-8 rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'strategy' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Strategy</button>
-               <button onClick={() => setActiveTab('audit')} className={`flex-1 py-2 md:py-3 px-4 md:px-8 rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'audit' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Audit</button>
+               <button onClick={() => setActiveTab('strategy')} className={`flex-1 py-2 md:py-3 px-4 md:px-8 rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'strategy' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Strategy</button>
+               <button onClick={() => setActiveTab('audit')} className={`flex-1 py-2 md:py-3 px-4 md:px-8 rounded-xl text-[8px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'audit' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-white'}`}>Audit</button>
             </div>
           </div>
         </div>
@@ -162,7 +162,7 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                       <th className="px-6 md:px-12 py-4 md:py-8 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
                       <th className="px-4 md:px-8 py-4 md:py-8 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Value</th>
                       <th className="px-4 md:px-8 py-4 md:py-8 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Weight</th>
-                      <th className="px-6 md:px-12 py-4 md:py-8 text-[9px] font-black text-indigo-600 uppercase tracking-widest text-right">Expected ROI</th>
+                      <th className="px-6 md:px-12 py-4 md:py-8 text-[9px] font-black text-teal-600 uppercase tracking-widest text-right">Expected ROI</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -176,7 +176,7 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                       </td>
                       <td className="px-4 md:px-8 py-4 md:py-8 text-right text-sm font-black text-slate-900">₹{row.value.toLocaleString()}</td>
                       <td className="px-4 md:px-8 py-4 md:py-8 text-center text-sm font-black text-slate-900">{row.allocation.toFixed(1)}%</td>
-                      <td className="px-6 md:px-12 py-4 md:py-8 text-right text-sm font-black text-indigo-600">{row.growthRate.toFixed(1)}%</td>
+                      <td className="px-6 md:px-12 py-4 md:py-8 text-right text-sm font-black text-teal-600">{row.growthRate.toFixed(1)}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -189,7 +189,7 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
             {/* Allocation Drift Map */}
             <div className="bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-sm flex flex-col h-full lg:col-span-1">
                <div className="space-y-1 mb-8">
-                  <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl w-fit"><BarChart3 size={24}/></div>
+                  <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl w-fit"><BarChart3 size={24}/></div>
                   <h3 className="text-xl font-black text-slate-900 tracking-tight">Allocation Drift.</h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ideal Positioning</p>
                </div>
@@ -199,7 +199,7 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                     <RadarChart cx="50%" cy="50%" outerRadius="80%" data={driftData}>
                       <PolarGrid stroke="#f1f5f9" />
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 900 }} />
-                      <Radar name="Ideal" dataKey="A" stroke="#6366f1" strokeWidth={3} fill="#6366f1" fillOpacity={0.1} />
+                      <Radar name="Ideal" dataKey="A" stroke="#0f766e" strokeWidth={3} fill="#0f766e" fillOpacity={0.1} />
                       <Radar name="Current" dataKey="B" stroke="#f59e0b" strokeWidth={3} fill="#f59e0b" fillOpacity={0.15} />
                     </RadarChart>
                   </ResponsiveContainer>
@@ -208,10 +208,10 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                <div className="mt-8 space-y-4">
                   <div className="flex justify-between items-center px-4 py-3 bg-slate-50 rounded-2xl border border-slate-100">
                      <div className="flex items-center gap-3">
-                        <div className="w-2 h-2 rounded-full bg-indigo-600" />
+                        <div className="w-2 h-2 rounded-full bg-teal-600" />
                         <span className="text-[10px] font-black text-slate-500 uppercase">Ideal Strat</span>
                      </div>
-                     <CheckCircle2 size={14} className="text-indigo-600" />
+                     <CheckCircle2 size={14} className="text-teal-600" />
                   </div>
                   <div className="flex justify-between items-center px-4 py-3 bg-amber-50/50 rounded-2xl border border-amber-100">
                      <div className="flex items-center gap-3">
@@ -225,7 +225,7 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
 
             {/* Strategic Recommendations Feed */}
             <div className="lg:col-span-2 space-y-8">
-               <div className="bg-slate-950 p-10 rounded-[3.5rem] text-white relative overflow-hidden shadow-xl">
+               <div className="surface-dark p-10 rounded-[3.5rem] text-white relative overflow-hidden shadow-xl">
                   <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 blur-[80px] rounded-full" />
                   <div className="relative z-10 space-y-8">
                      <div className="flex items-center gap-4">
@@ -252,11 +252,11 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
 
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {recommendations.map((rec, i) => (
-                    <div key={i} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm hover:border-indigo-400 transition-all flex flex-col justify-between group">
+                    <div key={i} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm hover:border-teal-400 transition-all flex flex-col justify-between group">
                        <div className="space-y-6">
                           <div className="flex justify-between items-start">
                              <div className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
-                               rec.type === 'alpha' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' :
+                               rec.type === 'alpha' ? 'bg-teal-50 text-teal-600 border-teal-100' :
                                rec.type === 'safety' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
                                'bg-slate-50 text-slate-600 border-slate-100'
                              }`}>
@@ -265,13 +265,13 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                              <h4 className="text-2xl font-black text-slate-900">{rec.weight}%</h4>
                           </div>
                           <div className="space-y-2">
-                             <h5 className="text-xl font-black text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">{rec.instrument}</h5>
+                             <h5 className="text-xl font-black text-slate-900 leading-tight group-hover:text-teal-600 transition-colors">{rec.instrument}</h5>
                              <p className="text-sm font-medium text-slate-500 leading-relaxed">{rec.reason}</p>
                           </div>
                        </div>
                        
                        <div className="mt-8 pt-8 border-t border-slate-50 flex items-center justify-between">
-                          <button className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-indigo-600 transition-colors">
+                          <button className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-teal-600 transition-colors">
                              View Options <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
                           </button>
                        </div>

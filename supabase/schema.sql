@@ -353,3 +353,217 @@ for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 drop policy if exists goals_delete on public.goals;
 create policy goals_delete on public.goals
 for delete using (user_id = auth.uid());
+
+-- ─────────────────────────────────────────────────────────────
+-- Insurance Policies
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.insurances (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  category text not null,
+  type text not null,
+  proposer text not null,
+  insured text not null,
+  sum_assured numeric default 0,
+  premium numeric default 0,
+  premium_end_year integer,
+  maturity_date date,
+  is_money_back boolean default false,
+  money_back_years integer[] default '{}',
+  money_back_amounts numeric[] default '{}',
+  created_at timestamptz default now()
+);
+
+create index if not exists insurances_user_id_idx on public.insurances(user_id);
+
+-- ─────────────────────────────────────────────────────────────
+-- Transactions
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.transactions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  date date not null,
+  description text not null,
+  amount numeric not null,
+  category text not null,
+  type text not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists transactions_user_id_idx on public.transactions(user_id);
+
+-- ─────────────────────────────────────────────────────────────
+-- Notifications
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null,
+  message text not null,
+  type text not null,
+  read boolean default false,
+  timestamp timestamptz not null default now(),
+  created_at timestamptz default now()
+);
+
+create index if not exists notifications_user_id_idx on public.notifications(user_id);
+
+-- ─────────────────────────────────────────────────────────────
+-- Risk Profiles
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.risk_profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  score integer not null,
+  level text not null,
+  last_updated timestamptz not null,
+  equity integer not null,
+  debt integer not null,
+  gold integer not null,
+  liquid integer not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Insurance Analysis Config
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.insurance_analysis_config (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  inflation numeric not null default 6,
+  investment_rate numeric not null default 11.5,
+  replacement_years integer not null default 20,
+  immediate_needs numeric not null default 1000000,
+  financial_asset_discount numeric not null default 50,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Estate Flags
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.estate_flags (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  has_will boolean default false,
+  nominations_updated boolean default false,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- RLS Policies (new tables)
+-- ─────────────────────────────────────────────────────────────
+
+alter table public.insurances enable row level security;
+alter table public.transactions enable row level security;
+alter table public.notifications enable row level security;
+alter table public.risk_profiles enable row level security;
+alter table public.estate_flags enable row level security;
+alter table public.insurance_analysis_config enable row level security;
+
+-- Insurances
+drop policy if exists insurances_select on public.insurances;
+create policy insurances_select on public.insurances
+for select using (user_id = auth.uid());
+
+drop policy if exists insurances_insert on public.insurances;
+create policy insurances_insert on public.insurances
+for insert with check (user_id = auth.uid());
+
+drop policy if exists insurances_update on public.insurances;
+create policy insurances_update on public.insurances
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists insurances_delete on public.insurances;
+create policy insurances_delete on public.insurances
+for delete using (user_id = auth.uid());
+
+-- Transactions
+drop policy if exists transactions_select on public.transactions;
+create policy transactions_select on public.transactions
+for select using (user_id = auth.uid());
+
+drop policy if exists transactions_insert on public.transactions;
+create policy transactions_insert on public.transactions
+for insert with check (user_id = auth.uid());
+
+drop policy if exists transactions_update on public.transactions;
+create policy transactions_update on public.transactions
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists transactions_delete on public.transactions;
+create policy transactions_delete on public.transactions
+for delete using (user_id = auth.uid());
+
+-- Notifications
+drop policy if exists notifications_select on public.notifications;
+create policy notifications_select on public.notifications
+for select using (user_id = auth.uid());
+
+drop policy if exists notifications_insert on public.notifications;
+create policy notifications_insert on public.notifications
+for insert with check (user_id = auth.uid());
+
+drop policy if exists notifications_update on public.notifications;
+create policy notifications_update on public.notifications
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists notifications_delete on public.notifications;
+create policy notifications_delete on public.notifications
+for delete using (user_id = auth.uid());
+
+-- Risk Profiles
+drop policy if exists risk_profiles_select on public.risk_profiles;
+create policy risk_profiles_select on public.risk_profiles
+for select using (user_id = auth.uid());
+
+drop policy if exists risk_profiles_insert on public.risk_profiles;
+create policy risk_profiles_insert on public.risk_profiles
+for insert with check (user_id = auth.uid());
+
+drop policy if exists risk_profiles_update on public.risk_profiles;
+create policy risk_profiles_update on public.risk_profiles
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists risk_profiles_delete on public.risk_profiles;
+create policy risk_profiles_delete on public.risk_profiles
+for delete using (user_id = auth.uid());
+
+-- Estate Flags
+drop policy if exists estate_flags_select on public.estate_flags;
+create policy estate_flags_select on public.estate_flags
+for select using (user_id = auth.uid());
+
+drop policy if exists estate_flags_insert on public.estate_flags;
+create policy estate_flags_insert on public.estate_flags
+for insert with check (user_id = auth.uid());
+
+drop policy if exists estate_flags_update on public.estate_flags;
+create policy estate_flags_update on public.estate_flags
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists estate_flags_delete on public.estate_flags;
+create policy estate_flags_delete on public.estate_flags
+for delete using (user_id = auth.uid());
+
+-- Insurance Analysis Config
+drop policy if exists insurance_analysis_select on public.insurance_analysis_config;
+create policy insurance_analysis_select on public.insurance_analysis_config
+for select using (user_id = auth.uid());
+
+drop policy if exists insurance_analysis_insert on public.insurance_analysis_config;
+create policy insurance_analysis_insert on public.insurance_analysis_config
+for insert with check (user_id = auth.uid());
+
+drop policy if exists insurance_analysis_update on public.insurance_analysis_config;
+create policy insurance_analysis_update on public.insurance_analysis_config
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists insurance_analysis_delete on public.insurance_analysis_config;
+create policy insurance_analysis_delete on public.insurance_analysis_config
+for delete using (user_id = auth.uid());

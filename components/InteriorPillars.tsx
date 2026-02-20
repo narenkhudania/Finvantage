@@ -12,7 +12,7 @@ const InteriorPillars: React.FC = () => {
       desc: "Stop guessing. Know exactly how buying that car today affects your purchasing power 15 years into retirement.",
       icon: Clock,
       tech: "Actuarial Simulation",
-      color: "indigo"
+      color: "teal"
     },
     {
       title: "Regime-Level Tax Tuning",
@@ -40,7 +40,7 @@ const InteriorPillars: React.FC = () => {
       desc: "Our engine projects your real wealth through decades of 6%+ inflation cycles, adjusting your lifestyle automatically.",
       icon: TrendingUp,
       tech: "CAGR Correction",
-      color: "indigo"
+      color: "teal"
     },
     {
       title: "Multi-Earner Sync",
@@ -54,13 +54,13 @@ const InteriorPillars: React.FC = () => {
   return (
     <div className="space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Strategic Header */}
-      <div className="bg-slate-950 p-12 md:p-16 rounded-[4rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-12 md:p-16 rounded-[4rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 space-y-6">
-          <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+          <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/20 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
             <Layers size={14}/> Wealth Architecture
           </div>
-          <h2 className="text-4xl md:text-7xl font-black tracking-tighter leading-[0.85]">The Core <br/><span className="text-indigo-500">Pillars.</span></h2>
+          <h2 className="text-4xl md:text-7xl font-black tracking-tighter leading-[0.85]">The Core <br/><span className="text-teal-500">Pillars.</span></h2>
           <p className="text-slate-400 text-lg font-medium max-w-2xl leading-relaxed">
             The six technological pillars that power the FinVantage intelligence engine, ensuring your wealth remains <span className="text-white font-bold">Resilient and Growth-Oriented.</span>
           </p>

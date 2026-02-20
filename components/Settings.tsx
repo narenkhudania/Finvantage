@@ -27,20 +27,20 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
   return (
     <div className="space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Strategic Header */}
-      <div className="bg-[#0b0f1a] p-12 md:p-16 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-indigo-900/30">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-12 md:p-16 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-teal-900/30">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10">
-          <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20 mb-6">
+          <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20 mb-6">
             <SettingsIcon size={14}/> Environment Configuration
           </div>
-          <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">System <br/><span className="text-indigo-500">Settings.</span></h2>
+          <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">System <br/><span className="text-teal-500">Settings.</span></h2>
         </div>
       </div>
 
       <div className="flex p-1.5 bg-white rounded-[2.5rem] border border-slate-200 w-fit mx-auto shadow-sm sticky top-28 z-40">
-        <button onClick={() => setActiveTab('profile')} className={`px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'profile' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><User size={14}/> Profile</button>
-        <button onClick={() => setActiveTab('system')} className={`px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'system' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><Shield size={14}/> System</button>
-        <button onClick={() => setActiveTab('datalab')} className={`px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'datalab' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><Database size={14}/> Data Lab</button>
+        <button onClick={() => setActiveTab('profile')} className={`px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'profile' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><User size={14}/> Profile</button>
+        <button onClick={() => setActiveTab('system')} className={`px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'system' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><Shield size={14}/> System</button>
+        <button onClick={() => setActiveTab('datalab')} className={`px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'datalab' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><Database size={14}/> Data Lab</button>
       </div>
 
       {activeTab === 'profile' && (
@@ -81,16 +81,16 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
            <div className="bg-white p-12 rounded-[4rem] border border-slate-200 shadow-sm space-y-8">
               <div className="flex justify-between items-center">
                  <div className="flex items-center gap-4">
-                    <div className="p-4 bg-indigo-50 text-indigo-600 rounded-[1.5rem]"><FileJson size={24}/></div>
+                    <div className="p-4 bg-teal-50 text-teal-600 rounded-[1.5rem]"><FileJson size={24}/></div>
                     <h3 className="text-2xl font-black text-slate-900">Master State Inspector</h3>
                  </div>
                  <div className="flex gap-3">
-                    <button onClick={copyData} className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all">
+                    <button onClick={copyData} className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-teal-600 transition-all">
                        {copied ? <CheckCircle2 size={14}/> : <Copy size={14}/>} {copied ? 'State Copied' : 'Copy JSON'}
                     </button>
                  </div>
               </div>
-              <div className="bg-slate-950 rounded-[3rem] p-8 text-emerald-400 font-mono text-[11px] overflow-auto max-h-[500px] border border-white/5 no-scrollbar shadow-inner">
+              <div className="surface-dark rounded-[3rem] p-8 text-emerald-400 font-mono text-[11px] overflow-auto max-h-[500px] border border-white/5 no-scrollbar shadow-inner">
                  <pre>{JSON.stringify(state, null, 2)}</pre>
               </div>
               <div className="flex items-center gap-4 p-8 bg-amber-50 rounded-[3rem] border border-amber-100">
@@ -112,9 +112,9 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
                 { title: 'Tax Jurisdiction', icon: Calculator, status: 'India', desc: 'Sourcing tax rules from FY 2024-25.' },
                 { title: 'Terminal Sound', icon: Zap, status: 'Disabled', desc: 'Auditory feedback for AI generation.' },
               ].map((sys, i) => (
-                <div key={i} className="p-8 bg-slate-50 rounded-[3rem] border border-slate-100 group hover:border-indigo-400 transition-all flex flex-col justify-between h-56">
+                <div key={i} className="p-8 bg-slate-50 rounded-[3rem] border border-slate-100 group hover:border-teal-400 transition-all flex flex-col justify-between h-56">
                    <div className="flex justify-between items-start">
-                      <div className="p-4 bg-white rounded-2xl text-slate-400 group-hover:text-indigo-600 transition-colors shadow-sm"><sys.icon size={20}/></div>
+                      <div className="p-4 bg-white rounded-2xl text-slate-400 group-hover:text-teal-600 transition-colors shadow-sm"><sys.icon size={20}/></div>
                       <span className="px-3 py-1 bg-white border border-slate-200 rounded-full text-[9px] font-black uppercase tracking-widest text-slate-500">{sys.status}</span>
                    </div>
                    <div>

@@ -73,9 +73,9 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
         {CATEGORIES.map((cat) => {
           const expense = state.detailedExpenses.find(e => e.category === cat.name);
           return (
-            <div key={cat.name} className="bg-white p-6 rounded-[2rem] border border-slate-100 hover:border-indigo-300 transition-all group">
+            <div key={cat.name} className="bg-white p-6 rounded-[2rem] border border-slate-100 hover:border-teal-300 transition-all group">
               <div className="flex items-center gap-3 mb-6">
-                 <div className="p-3 bg-slate-50 rounded-2xl text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                 <div className="p-3 bg-slate-50 rounded-2xl text-slate-400 group-hover:bg-teal-600 group-hover:text-white transition-all">
                     <cat.icon size={20} />
                  </div>
                  <h4 className="text-xs font-black text-slate-900">{cat.name}</h4>
@@ -87,19 +87,19 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
                   placeholder="0"
                   value={expense?.amount || ''}
                   onChange={(e) => handleAmountChange(cat.name, parseFloat(e.target.value) || 0)}
-                  className="w-full bg-transparent pl-6 py-2 text-xl font-black text-slate-900 outline-none border-b-2 border-slate-50 focus:border-indigo-600 transition-all"
+                  className="w-full bg-transparent pl-6 py-2 text-xl font-black text-slate-900 outline-none border-b-2 border-slate-50 focus:border-teal-600 transition-all"
                 />
               </div>
               <div className="mt-4 flex items-center justify-between">
                  <span className="text-[10px] font-black text-slate-400 uppercase">Inflation: 6%</span>
-                 <button className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Adjust</button>
+                 <button className="text-[10px] font-black text-teal-600 uppercase tracking-widest">Adjust</button>
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="bg-slate-950 p-10 rounded-[3rem] text-white flex items-center justify-between">
+      <div className="surface-dark p-10 rounded-[3rem] text-white flex items-center justify-between">
          <div className="space-y-2">
             <h4 className="text-2xl font-black">Net Cash Flow Positioning</h4>
             <p className="text-slate-400 font-medium">Your surplus represents {Math.round((surplus/totalIncome)*100)}% of your gross monthly inflow.</p>
@@ -108,7 +108,7 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
             <div className={`w-12 h-12 rounded-full flex items-center justify-center ${surplus > 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}>
                <Wallet size={24} />
             </div>
-            <button className="px-8 py-4 bg-indigo-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all">Analyze with AI</button>
+            <button className="px-8 py-4 bg-teal-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-teal-700 transition-all">Analyze with AI</button>
          </div>
       </div>
     </div>

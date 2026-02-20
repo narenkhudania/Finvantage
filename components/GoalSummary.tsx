@@ -63,14 +63,14 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
   return (
     <div className="space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Header Strategy Node */}
-      <div className="bg-[#0b0f1a] p-12 md:p-16 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-indigo-900/30">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-12 md:p-16 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-teal-900/30">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12">
           <div className="space-y-6 text-left">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <Layers size={14}/> Goal Funding Terminal
             </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Funding <br/><span className="text-indigo-500">Summary.</span></h2>
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Funding <br/><span className="text-teal-500">Summary.</span></h2>
           </div>
           
           <div className="bg-white/5 border border-white/10 p-10 rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner">
@@ -84,20 +84,20 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
         {goalsData.map((goal) => (
           <div 
             key={goal.id} 
-            className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:border-indigo-400 transition-all flex flex-col justify-between min-h-[420px]"
+            className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden group hover:border-teal-400 transition-all flex flex-col justify-between min-h-[420px]"
             onMouseEnter={() => setHoveredGoalId(goal.id)}
             onMouseLeave={() => setHoveredGoalId(null)}
           >
              {/* Actuarial Tooltip Overlay */}
              <div className={`absolute inset-0 bg-slate-900/95 backdrop-blur-md p-10 text-white z-20 transition-all duration-500 flex flex-col justify-center gap-6 ${hoveredGoalId === goal.id ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8 pointer-events-none'}`}>
-                <div className="flex items-center gap-4 text-indigo-400 border-b border-white/10 pb-4">
+                <div className="flex items-center gap-4 text-teal-400 border-b border-white/10 pb-4">
                    <Zap size={24}/>
                    <h5 className="text-xl font-black uppercase tracking-tight">Actuarial Forecast</h5>
                 </div>
                 <div className="space-y-3 text-left">
                    <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Inflation Burden</span><span className="text-rose-400">+{goal.inflationRate}% p.a.</span></div>
-                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Projected FV (Year {goal.startYear})</span><span className="text-indigo-400">₹{Math.round(goal.corpusAtStart).toLocaleString()}</span></div>
-                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Global Sum Required</span><span className="text-indigo-400">₹{Math.round(goal.sumCorpus).toLocaleString()}</span></div>
+                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Projected FV (Year {goal.startYear})</span><span className="text-teal-400">₹{Math.round(goal.corpusAtStart).toLocaleString()}</span></div>
+                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Global Sum Required</span><span className="text-teal-400">₹{Math.round(goal.sumCorpus).toLocaleString()}</span></div>
                    <div className="flex justify-between text-xs font-bold border-t border-white/10 pt-4"><span className="opacity-70 uppercase tracking-widest">Funding Deficit</span><span className="text-emerald-400">₹{Math.max(0, Math.round(goal.sumCorpus - goal.currentAmount)).toLocaleString()}</span></div>
                 </div>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-relaxed mt-4">Simulated with priority rank {goal.priority}. Cross-asset dependencies applied.</p>
@@ -110,11 +110,11 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
                    </div>
                    <div>
                       <h3 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">{goal.description || goal.type}</h3>
-                      <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mt-1">{goal.startYear} — {goal.endYear}</p>
+                      <p className="text-[10px] font-black text-teal-600 uppercase tracking-widest mt-1">{goal.startYear} — {goal.endYear}</p>
                    </div>
                 </div>
-                <div className="bg-slate-50 p-2 rounded-xl group-hover:bg-indigo-50 transition-colors">
-                  <Edit3 size={18} className="text-slate-300 group-hover:text-indigo-600" />
+                <div className="bg-slate-50 p-2 rounded-xl group-hover:bg-teal-50 transition-colors">
+                  <Edit3 size={18} className="text-slate-300 group-hover:text-teal-600" />
                 </div>
              </div>
 
@@ -125,7 +125,7 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
                       <span className="text-xl font-black text-slate-900">{goal.progressPct.toFixed(1)}%</span>
                    </div>
                    <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden border border-slate-200 relative">
-                      <div className={`h-full bg-indigo-600 transition-all duration-1000 ease-out`} style={{ width: `${goal.progressPct}%` }} />
+                      <div className={`h-full bg-teal-600 transition-all duration-1000 ease-out`} style={{ width: `${goal.progressPct}%` }} />
                    </div>
                 </div>
 
@@ -136,7 +136,7 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
                    </div>
                    <div className="space-y-1">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Future Target (FV)</p>
-                      <h4 className="text-2xl font-black text-indigo-600">₹{Math.round(goal.sumCorpus).toLocaleString()}</h4>
+                      <h4 className="text-2xl font-black text-teal-600">₹{Math.round(goal.sumCorpus).toLocaleString()}</h4>
                    </div>
                 </div>
              </div>

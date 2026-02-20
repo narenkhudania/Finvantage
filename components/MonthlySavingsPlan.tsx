@@ -28,7 +28,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   }, [state]);
 
   const silos = [
-    { label: 'Survival Silo', desc: 'Lifestyle & Burn', val: breakdown.survival, color: 'indigo', icon: Wallet, meta: 'Baseline Needs' },
+    { label: 'Survival Silo', desc: 'Lifestyle & Burn', val: breakdown.survival, color: 'teal', icon: Wallet, meta: 'Baseline Needs' },
     { label: 'Servicing Silo', desc: 'Debt & Interest', val: breakdown.servicing, color: 'rose', icon: Landmark, meta: 'Fixed Obligations' },
     { label: 'Success Silo', desc: 'Growth Capital', val: breakdown.success, color: 'emerald', icon: TrendingUp, meta: 'Compounding Pool' },
   ];
@@ -38,14 +38,14 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   return (
     <div className="space-y-10 animate-in fade-in duration-1000 pb-24">
       {/* Dynamic Console Header */}
-      <div className="bg-[#0b0f1a] p-10 md:p-16 rounded-[4rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-indigo-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-10 md:p-16 rounded-[4rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-teal-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-end md:items-center gap-12">
           <div className="space-y-6 text-left">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <LayoutGrid size={14}/> Partition Console
             </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Cash <br/><span className="text-indigo-500">Matrix.</span></h2>
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Cash <br/><span className="text-teal-500">Matrix.</span></h2>
             <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
               Auditing the distribution of <span className="text-white font-bold">₹{breakdown.income.toLocaleString()}</span> monthly inflow across strategic silos.
             </p>
@@ -56,8 +56,8 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global Inflow Node</p>
                <h4 className="text-4xl md:text-5xl font-black text-white tracking-tighter">₹{breakdown.income.toLocaleString()}</h4>
                <div className="flex p-1 bg-white/5 rounded-2xl w-full mt-4">
-                  <button onClick={() => setActiveView('matrix')} className={`flex-1 py-3 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'matrix' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}>Matrix</button>
-                  <button onClick={() => setActiveView('ledger')} className={`flex-1 py-3 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'ledger' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}>Ledger</button>
+                  <button onClick={() => setActiveView('matrix')} className={`flex-1 py-3 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'matrix' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}>Matrix</button>
+                  <button onClick={() => setActiveView('ledger')} className={`flex-1 py-3 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'ledger' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}>Ledger</button>
                </div>
             </div>
           </div>
@@ -69,7 +69,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
           {/* Silo Modules */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {silos.map((silo, idx) => (
-              <div key={idx} className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-sm flex flex-col justify-between group hover:border-indigo-400 transition-all min-h-[450px] relative overflow-hidden">
+              <div key={idx} className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-sm flex flex-col justify-between group hover:border-teal-400 transition-all min-h-[450px] relative overflow-hidden">
                 <div className={`absolute top-0 right-0 w-32 h-32 bg-${silo.color}-500/5 blur-[40px] rounded-full translate-x-1/2 -translate-y-1/2 group-hover:scale-150 transition-transform duration-1000`} />
                 
                 <div className="relative z-10 space-y-10">
@@ -101,7 +101,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                 </div>
 
                 <div className="pt-8 border-t border-slate-50 flex items-center justify-between group/btn relative z-10">
-                   <button className="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2">Adjust Allocation <ChevronRight size={12} className="group-hover/btn:translate-x-1 transition-transform" /></button>
+                   <button className="text-[10px] font-black text-teal-600 uppercase tracking-widest flex items-center gap-2">Adjust Allocation <ChevronRight size={12} className="group-hover/btn:translate-x-1 transition-transform" /></button>
                    <MoreHorizontal size={16} className="text-slate-300" />
                 </div>
               </div>
@@ -109,10 +109,10 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
           </div>
 
           {/* Leakage Audit Node */}
-          <div className="bg-slate-950 p-12 rounded-[5rem] text-white flex flex-col lg:flex-row items-center justify-between gap-12 relative overflow-hidden shadow-2xl">
+          <div className="surface-dark p-12 rounded-[5rem] text-white flex flex-col lg:flex-row items-center justify-between gap-12 relative overflow-hidden shadow-2xl">
              <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_20%_30%,_rgba(99,102,241,0.05),_transparent)] pointer-events-none" />
              <div className="flex items-center gap-10 relative z-10 text-left">
-                <div className="p-6 bg-white/5 rounded-[2.5rem] border border-white/10 text-indigo-400 shadow-inner shrink-0"><Activity size={40}/></div>
+                <div className="p-6 bg-white/5 rounded-[2.5rem] border border-white/10 text-teal-400 shadow-inner shrink-0"><Activity size={40}/></div>
                 <div className="space-y-4">
                    <h4 className="text-3xl font-black tracking-tight flex items-center gap-3">Partition Leakage Audit</h4>
                    <p className="text-slate-400 text-lg font-medium max-w-xl leading-relaxed">
@@ -123,7 +123,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
              <div className="bg-white/5 p-8 rounded-[3rem] border border-white/10 flex flex-col items-center gap-2 min-w-[280px] relative z-10">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Leakage Index</p>
                 <h5 className="text-4xl font-black text-emerald-400">{Math.round((unmappedCash / breakdown.income) * 100)}%</h5>
-                <button className="mt-4 px-8 py-3 bg-indigo-600 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-500 transition-all">Direct to Success Silo</button>
+                <button className="mt-4 px-8 py-3 bg-teal-600 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-teal-500 transition-all">Direct to Success Silo</button>
              </div>
           </div>
         </div>
@@ -136,7 +136,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
               </div>
               <div className="relative w-full md:w-80">
                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                 <input type="text" placeholder="Filter ledger nodes..." className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-6 py-4 text-xs font-bold outline-none focus:border-indigo-600" />
+                 <input type="text" placeholder="Filter ledger nodes..." className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-6 py-4 text-xs font-bold outline-none focus:border-teal-600" />
               </div>
            </div>
 
@@ -147,7 +147,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                        <th className="px-12 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Partition Node</th>
                        <th className="px-6 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Target (Plan)</th>
                        <th className="px-6 py-8 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Actual (Spend)</th>
-                       <th className="px-12 py-8 text-[11px] font-black text-indigo-600 uppercase tracking-[0.2em] text-right">Variance Delta</th>
+                       <th className="px-12 py-8 text-[11px] font-black text-teal-600 uppercase tracking-[0.2em] text-right">Variance Delta</th>
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50">
@@ -158,10 +158,10 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                       { name: 'Direct Equity SIP Pool', budget: 70000, actual: 0, status: 'Automated' },
                       { name: 'Emerging Cash Buffer', budget: unmappedCash, actual: 0, status: 'Floating' },
                     ].map((row, i) => (
-                       <tr key={i} className="hover:bg-indigo-50/30 transition-all group">
+                       <tr key={i} className="hover:bg-teal-50/30 transition-all group">
                           <td className="px-12 py-6">
                              <div className="flex items-center gap-4">
-                                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-teal-500" />
                                 <div className="text-left">
                                   <p className="text-sm font-black text-slate-900">{row.name}</p>
                                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{row.status}</span>

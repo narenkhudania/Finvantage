@@ -14,6 +14,11 @@ import type {
   Loan,
   Goal,
   IncomeSource,
+  Insurance,
+  Transaction,
+  Notification,
+  RiskProfile,
+  InsuranceAnalysisConfig,
 } from '../types';
 
 const UUID_REGEX =
@@ -126,6 +131,80 @@ function rowToGoal(row: Record<string, any>): Goal {
   };
 }
 
+function rowToInsurance(row: Record<string, any>): Insurance {
+  return {
+    id: row.id,
+    category: row.category,
+    type: row.type,
+    proposer: row.proposer,
+    insured: row.insured,
+    sumAssured: Number(row.sum_assured ?? 0),
+    premium: Number(row.premium ?? 0),
+    premiumEndYear: row.premium_end_year ?? undefined,
+    maturityDate: row.maturity_date ?? undefined,
+    isMoneyBack: Boolean(row.is_money_back),
+    moneyBackYears: Array.isArray(row.money_back_years) ? row.money_back_years : [],
+    moneyBackAmounts: Array.isArray(row.money_back_amounts) ? row.money_back_amounts : [],
+  };
+}
+
+function rowToTransaction(row: Record<string, any>): Transaction {
+  const dateValue = row.date instanceof Date ? row.date.toISOString().split('T')[0] : row.date;
+  return {
+    id: row.id,
+    date: dateValue,
+    description: row.description,
+    amount: Number(row.amount ?? 0),
+    category: row.category,
+    type: row.type,
+  };
+}
+
+function rowToNotification(row: Record<string, any>): Notification {
+  const timestampValue = row.timestamp instanceof Date ? row.timestamp.toISOString() : row.timestamp;
+  return {
+    id: row.id,
+    title: row.title,
+    message: row.message,
+    type: row.type,
+    read: Boolean(row.read),
+    timestamp: timestampValue,
+  };
+}
+
+function rowToRiskProfile(row: Record<string, any>): RiskProfile {
+  return {
+    score: Number(row.score ?? 0),
+    level: row.level,
+    lastUpdated: row.last_updated instanceof Date
+      ? row.last_updated.toISOString()
+      : row.last_updated,
+    recommendedAllocation: {
+      equity: Number(row.equity ?? 0),
+      debt: Number(row.debt ?? 0),
+      gold: Number(row.gold ?? 0),
+      liquid: Number(row.liquid ?? 0),
+    },
+  };
+}
+
+function rowToEstateFlags(row: Record<string, any>) {
+  return {
+    hasWill: Boolean(row.has_will),
+    nominationsUpdated: Boolean(row.nominations_updated),
+  };
+}
+
+function rowToInsuranceAnalysis(row: Record<string, any>): InsuranceAnalysisConfig {
+  return {
+    inflation: Number(row.inflation ?? 0),
+    investmentRate: Number(row.investment_rate ?? 0),
+    replacementYears: Number(row.replacement_years ?? 0),
+    immediateNeeds: Number(row.immediate_needs ?? 0),
+    financialAssetDiscount: Number(row.financial_asset_discount ?? 0),
+  };
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // LOAD — parallel fetch from all 6 tables on login / reload
@@ -139,6 +218,8 @@ export async function loadFinanceData(
   const [
     profileRes, familyRes, incomeRes,
     expensesRes, assetsRes, loansRes, goalsRes,
+    insuranceRes, transactionsRes, notificationsRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes,
   ] = await Promise.all([
     supabase
       .from('profiles')
@@ -151,6 +232,12 @@ export async function loadFinanceData(
     supabase.from('assets').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('loans').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('goals').select('*').eq('user_id', user.id).order('priority'),
+    supabase.from('insurances').select('*').eq('user_id', user.id).order('created_at'),
+    supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false }),
+    supabase.from('notifications').select('*').eq('user_id', user.id).order('timestamp', { ascending: false }),
+    supabase.from('risk_profiles').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('estate_flags').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('insurance_analysis_config').select('*').eq('user_id', user.id).maybeSingle(),
   ]);
 
   if (profileRes.error || !profileRes.data) {
@@ -201,11 +288,14 @@ export async function loadFinanceData(
     assets:           (assetsRes.data   ?? []).map(rowToAsset),
     loans:            (loansRes.data    ?? []).map(rowToLoan),
     goals:            (goalsRes.data    ?? []).map(rowToGoal),
-    insurance:        fallback.insurance,
-    estate:           fallback.estate,
-    transactions:     fallback.transactions,
-    notifications:    fallback.notifications,
-    riskProfile:      fallback.riskProfile,
+    insurance:        (insuranceRes.data ?? []).map(rowToInsurance),
+    insuranceAnalysis: insuranceAnalysisRes.data
+      ? rowToInsuranceAnalysis(insuranceAnalysisRes.data)
+      : fallback.insuranceAnalysis,
+    transactions:     (transactionsRes.data ?? []).map(rowToTransaction),
+    notifications:    (notificationsRes.data ?? []).map(rowToNotification),
+    riskProfile:      riskProfileRes.data ? rowToRiskProfile(riskProfileRes.data) : fallback.riskProfile,
+    estate:           estateRes.data ? rowToEstateFlags(estateRes.data) : fallback.estate,
   };
 }
 
@@ -254,22 +344,49 @@ export async function saveFinanceData(
   }
 
   // ── Steps 3–6: independent tables, run in parallel
-  const [expensesRes, assetsRes, loansRes, goalsRes] = await Promise.allSettled([
+  const [
+    expensesRes, assetsRes, loansRes, goalsRes,
+    insuranceRes, transactionsRes, notificationsRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes,
+  ] = await Promise.allSettled([
     saveExpenses(uid, state.detailedExpenses),
     saveAssets(uid, state.assets),
     saveLoans(uid, state.loans),
     saveGoals(uid, state.goals),
+    saveInsurances(uid, state.insurance),
+    saveTransactions(uid, state.transactions),
+    saveNotifications(uid, state.notifications ?? []),
+    saveRiskProfile(uid, state.riskProfile),
+    saveEstateFlags(uid, state.estate),
+    saveInsuranceAnalysis(uid, state.insuranceAnalysis),
   ]);
 
-  if (assetsRes.status === 'fulfilled' && assetsRes.value) dbUpdates.assets = assetsRes.value;
-  if (loansRes.status === 'fulfilled' && loansRes.value)   dbUpdates.loans  = loansRes.value;
-  if (goalsRes.status === 'fulfilled' && goalsRes.value)   dbUpdates.goals  = goalsRes.value;
+  if (assetsRes.status === 'fulfilled' && assetsRes.value)        dbUpdates.assets        = assetsRes.value;
+  if (loansRes.status === 'fulfilled' && loansRes.value)          dbUpdates.loans         = loansRes.value;
+  if (goalsRes.status === 'fulfilled' && goalsRes.value)          dbUpdates.goals         = goalsRes.value;
+  if (insuranceRes.status === 'fulfilled' && insuranceRes.value)  dbUpdates.insurance     = insuranceRes.value;
+  if (transactionsRes.status === 'fulfilled' && transactionsRes.value) dbUpdates.transactions = transactionsRes.value;
+  if (notificationsRes.status === 'fulfilled' && notificationsRes.value) dbUpdates.notifications = notificationsRes.value;
 
-  ['expenses','assets','loans','goals'].forEach((label, i) => {
-    const r = [expensesRes, assetsRes, loansRes, goalsRes][i];
+  ['expenses','assets','loans','goals','insurances','transactions','notifications','riskProfile','estateFlags','insuranceAnalysis'].forEach((label, i) => {
+    const r = [
+      expensesRes, assetsRes, loansRes, goalsRes,
+      insuranceRes, transactionsRes, notificationsRes,
+      riskProfileRes, estateRes, insuranceAnalysisRes,
+    ][i];
     if (r.status === 'rejected')
       console.error(`[dbService] ${label} save failed:`, (r as PromiseRejectedResult).reason);
   });
+
+  const failures = [
+    expensesRes, assetsRes, loansRes, goalsRes,
+    insuranceRes, transactionsRes, notificationsRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes,
+  ].filter(r => r.status === 'rejected').length;
+
+  if (failures > 0) {
+    throw new Error('One or more save operations failed.');
+  }
 
   return dbUpdates; // App.tsx merges these back into state
 }
@@ -560,4 +677,209 @@ async function saveGoals(
     .select();
   if (error) throw error;
   return (data ?? []).map(rowToGoal);
+}
+
+async function saveInsurances(
+  uid: string,
+  policies: Insurance[],
+): Promise<Insurance[] | null> {
+  if (policies.length === 0) {
+    await supabase.from('insurances').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = policies.every(p => isUuid(p.id));
+
+  const rows = policies.map(p => ({
+    id:                 hasOnlyUuidIds ? p.id : undefined,
+    user_id:            uid,
+    category:           p.category,
+    type:               p.type,
+    proposer:           p.proposer,
+    insured:            p.insured,
+    sum_assured:        p.sumAssured,
+    premium:            p.premium,
+    premium_end_year:   p.premiumEndYear ?? null,
+    maturity_date:      p.maturityDate ?? null,
+    is_money_back:      p.isMoneyBack,
+    money_back_years:   p.moneyBackYears ?? [],
+    money_back_amounts: p.moneyBackAmounts ?? [],
+  }));
+
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('insurances')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = policies.map(p => p.id);
+    await supabase
+      .from('insurances')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('insurances').delete().eq('user_id', uid);
+
+  const { data, error } = await supabase
+    .from('insurances')
+    .insert(rows.map(({ id, ...rest }) => rest))
+    .select();
+  if (error) throw error;
+  return (data ?? []).map(rowToInsurance);
+}
+
+async function saveTransactions(
+  uid: string,
+  transactions: Transaction[],
+): Promise<Transaction[] | null> {
+  if (transactions.length === 0) {
+    await supabase.from('transactions').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = transactions.every(t => isUuid(t.id));
+
+  const rows = transactions.map(t => ({
+    id:          hasOnlyUuidIds ? t.id : undefined,
+    user_id:     uid,
+    date:        t.date,
+    description: t.description,
+    amount:      t.amount,
+    category:    t.category,
+    type:        t.type,
+  }));
+
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('transactions')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = transactions.map(t => t.id);
+    await supabase
+      .from('transactions')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('transactions').delete().eq('user_id', uid);
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert(rows.map(({ id, ...rest }) => rest))
+    .select();
+  if (error) throw error;
+  return (data ?? []).map(rowToTransaction);
+}
+
+async function saveNotifications(
+  uid: string,
+  notifications: Notification[],
+): Promise<Notification[] | null> {
+  if (notifications.length === 0) {
+    await supabase.from('notifications').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = notifications.every(n => isUuid(n.id));
+
+  const rows = notifications.map(n => ({
+    id:         hasOnlyUuidIds ? n.id : undefined,
+    user_id:    uid,
+    title:      n.title,
+    message:    n.message,
+    type:       n.type,
+    read:       n.read,
+    timestamp:  n.timestamp,
+  }));
+
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('notifications')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = notifications.map(n => n.id);
+    await supabase
+      .from('notifications')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('notifications').delete().eq('user_id', uid);
+
+  const { data, error } = await supabase
+    .from('notifications')
+    .insert(rows.map(({ id, ...rest }) => rest))
+    .select();
+  if (error) throw error;
+  return (data ?? []).map(rowToNotification);
+}
+
+async function saveRiskProfile(
+  uid: string,
+  riskProfile?: RiskProfile,
+): Promise<void> {
+  if (!riskProfile) {
+    await supabase.from('risk_profiles').delete().eq('user_id', uid);
+    return;
+  }
+
+  const { error } = await supabase
+    .from('risk_profiles')
+    .upsert({
+      user_id: uid,
+      score: riskProfile.score,
+      level: riskProfile.level,
+      last_updated: riskProfile.lastUpdated,
+      equity: riskProfile.recommendedAllocation.equity,
+      debt: riskProfile.recommendedAllocation.debt,
+      gold: riskProfile.recommendedAllocation.gold,
+      liquid: riskProfile.recommendedAllocation.liquid,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+async function saveEstateFlags(
+  uid: string,
+  estate: FinanceState['estate'],
+): Promise<void> {
+  const { error } = await supabase
+    .from('estate_flags')
+    .upsert({
+      user_id: uid,
+      has_will: estate.hasWill,
+      nominations_updated: estate.nominationsUpdated,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+async function saveInsuranceAnalysis(
+  uid: string,
+  config: InsuranceAnalysisConfig,
+): Promise<void> {
+  const { error } = await supabase
+    .from('insurance_analysis_config')
+    .upsert({
+      user_id: uid,
+      inflation: config.inflation,
+      investment_rate: config.investmentRate,
+      replacement_years: config.replacementYears,
+      immediate_needs: config.immediateNeeds,
+      financial_asset_discount: config.financialAssetDiscount,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw error;
 }

@@ -24,14 +24,14 @@ const Notifications: React.FC<{ state: FinanceState, updateState: (data: Partial
   return (
     <div className="space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Strategic Header */}
-      <div className="bg-[#0b0f1a] p-12 md:p-16 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-indigo-900/30">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-12 md:p-16 rounded-[5rem] text-white relative overflow-hidden shadow-2xl shadow-teal-900/30">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12">
           <div className="space-y-6">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <Bell size={14}/> Tactical Alert Hub
             </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Alert <br/><span className="text-indigo-500">Center.</span></h2>
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Alert <br/><span className="text-teal-500">Center.</span></h2>
             <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
               Real-time synchronization of household financial anomalies and strategy updates.
             </p>
@@ -51,12 +51,12 @@ const Notifications: React.FC<{ state: FinanceState, updateState: (data: Partial
           </div>
         ) : (
           notifications.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map((note) => (
-            <div key={note.id} className={`bg-white p-8 md:p-10 rounded-[3.5rem] border border-slate-200 shadow-sm relative overflow-hidden group transition-all hover:border-indigo-400 flex flex-col md:flex-row items-center gap-8 ${note.read ? 'opacity-80' : ''}`}>
-               {!note.read && <div className="absolute top-8 left-8 w-3 h-3 bg-indigo-600 rounded-full shadow-[0_0_15px_rgba(79,70,229,0.5)] animate-pulse" />}
+            <div key={note.id} className={`bg-white p-8 md:p-10 rounded-[3.5rem] border border-slate-200 shadow-sm relative overflow-hidden group transition-all hover:border-teal-400 flex flex-col md:flex-row items-center gap-8 ${note.read ? 'opacity-80' : ''}`}>
+               {!note.read && <div className="absolute top-8 left-8 w-3 h-3 bg-teal-600 rounded-full shadow-[0_0_15px_rgba(13,148,136,0.5)] animate-pulse" />}
                
                <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shrink-0 shadow-lg transition-all ${
                  note.type === 'critical' ? 'bg-rose-50 text-rose-600' :
-                 note.type === 'strategy' ? 'bg-indigo-50 text-indigo-600' :
+                 note.type === 'strategy' ? 'bg-teal-50 text-teal-600' :
                  'bg-emerald-50 text-emerald-600'
                }`}>
                   {note.type === 'critical' ? <AlertCircle size={28}/> : note.type === 'strategy' ? <Zap size={28}/> : <ShieldCheck size={28}/>}
@@ -71,7 +71,7 @@ const Notifications: React.FC<{ state: FinanceState, updateState: (data: Partial
                </div>
 
                <div className="flex items-center gap-3">
-                  <button className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center gap-2">Explore Move <ArrowRight size={14}/></button>
+                  <button className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-teal-600 transition-all flex items-center gap-2">Explore Move <ArrowRight size={14}/></button>
                   <button onClick={() => removeOne(note.id)} className="p-3 bg-slate-50 text-slate-300 hover:text-rose-500 rounded-xl transition-all"><Trash2 size={16}/></button>
                </div>
             </div>
@@ -80,7 +80,7 @@ const Notifications: React.FC<{ state: FinanceState, updateState: (data: Partial
       </div>
 
       {notifications.length > 0 && (
-        <div className="max-w-4xl mx-auto p-10 bg-slate-950 rounded-[4rem] text-white flex items-center justify-between shadow-2xl relative overflow-hidden">
+        <div className="max-w-4xl mx-auto p-10 surface-dark rounded-[4rem] text-white flex items-center justify-between shadow-2xl relative overflow-hidden">
            <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 blur-[60px] rounded-full" />
            <div className="flex items-center gap-6 relative z-10">
               <div className="p-4 bg-white/5 rounded-2xl text-emerald-400 shadow-inner"><TrendingUp size={24}/></div>
@@ -89,7 +89,7 @@ const Notifications: React.FC<{ state: FinanceState, updateState: (data: Partial
                  <p className="text-xs text-slate-400 font-medium">Auto-generating new moves based on 14 data variables.</p>
               </div>
            </div>
-           <button className="px-8 py-4 bg-indigo-600 rounded-[2rem] text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500 transition-all shadow-xl shadow-indigo-600/20 relative z-10">Run Global Audit</button>
+           <button className="px-8 py-4 bg-teal-600 rounded-[2rem] text-[10px] font-black uppercase tracking-widest hover:bg-teal-500 transition-all shadow-xl shadow-teal-600/20 relative z-10">Run Global Audit</button>
         </div>
       )}
     </div>

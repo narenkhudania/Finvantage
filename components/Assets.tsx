@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { FinanceState, Asset, AssetType } from '../types';
 import { Plus, Trash2, Coins, TrendingUp, Home, Landmark, Briefcase, Car, Gem, CheckCircle2, Circle, Calendar, Percent } from 'lucide-react';
+import { clampNumber, parseNumber } from '../lib/validation';
 
 const ASSET_CLASSES: { name: AssetType, icon: any, subCategories: string[] }[] = [
   { name: 'Liquid', icon: Landmark, subCategories: ['Savings Account', 'Cash', 'Liquid Mutual Funds', 'Overnight Funds'] },
@@ -14,6 +15,9 @@ const ASSET_CLASSES: { name: AssetType, icon: any, subCategories: string[] }[] =
 
 const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formWarning, setFormWarning] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [newAsset, setNewAsset] = useState<Partial<Asset>>({
     category: 'Equity',
     subCategory: 'Direct Equity',
@@ -37,7 +41,53 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
   };
 
   const handleAdd = () => {
-    const asset = { ...newAsset, id: Math.random().toString(36).substr(2, 9) } as Asset;
+    setFormError(null);
+    setFormWarning(null);
+    const currentYear = new Date().getFullYear();
+    const name = (newAsset.name || '').trim();
+    const subCategory = newAsset.subCategory || '';
+    const owner = newAsset.owner || 'self';
+    const purchaseYear = parseNumber(newAsset.purchaseYear || currentYear, currentYear);
+    const growthRate = parseNumber(newAsset.growthRate || 0, 0);
+    const currentValue = parseNumber(newAsset.currentValue || 0, 0);
+    const availableFrom = newAsset.availableFrom ? parseNumber(newAsset.availableFrom, purchaseYear) : undefined;
+
+    if (subCategory.toLowerCase().includes('other') && name.length < 2) {
+      setFormError('Asset name is required for custom/other categories.');
+      return;
+    }
+    if (!owner || (owner !== 'self' && !state.family.find(f => f.id === owner))) {
+      setFormError('Owner must be Self or a valid family member.');
+      return;
+    }
+    if (purchaseYear > currentYear) {
+      setFormError('Purchase year cannot be in the future.');
+      return;
+    }
+    if (growthRate < 0 || growthRate > 30) {
+      setFormError('Growth rate must be between 0% and 30%.');
+      return;
+    }
+    if (availableFrom !== undefined && availableFrom < purchaseYear) {
+      setFormError('Available-from year cannot be earlier than purchase year.');
+      return;
+    }
+    if (currentValue <= 0) {
+      setFormWarning('Current value is 0. Consider entering a positive value.');
+      setNotice('Asset saved with 0 current value. Consider updating for accuracy.');
+      setTimeout(() => setNotice(null), 4000);
+    }
+
+    const asset = {
+      ...newAsset,
+      id: Math.random().toString(36).substr(2, 9),
+      name,
+      owner,
+      purchaseYear: purchaseYear,
+      growthRate: clampNumber(growthRate, 0, 30),
+      currentValue: Math.max(0, currentValue),
+      availableFrom: availableFrom,
+    } as Asset;
     updateState({ assets: [...state.assets, asset] });
     setShowAdd(false);
   };
@@ -55,18 +105,120 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
+      {notice && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl px-6 py-3 text-[10px] font-black uppercase tracking-widest">
+          {notice}
+        </div>
+      )}
       <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="space-y-1">
           <h3 className="text-2xl font-black text-slate-900">Step 5: Asset Inventory</h3>
           <p className="text-sm font-medium text-slate-500">Log holdings with specific growth rates and purchase history.</p>
         </div>
         <button 
-          onClick={() => setShowAdd(true)}
+          onClick={() => setShowAdd(prev => !prev)}
           className="px-10 py-6 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase text-xs tracking-widest flex items-center gap-3 hover:bg-emerald-600 transition-all shadow-2xl"
         >
-          <Plus size={20} /> Add Asset
+          <Plus size={20} /> {showAdd ? 'Close Form' : 'Add Asset'}
         </button>
       </div>
+
+      {showAdd && (
+        <div className="bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-6 sm:p-10 border-b border-slate-100 flex justify-between items-center bg-white/90">
+            <h3 className="text-2xl font-black text-slate-900">Add Holding</h3>
+            <button onClick={() => setShowAdd(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-900">
+              <Plus size={24} className="rotate-45" />
+            </button>
+          </div>
+          <div className="p-6 sm:p-10 space-y-6">
+            {formError && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold">
+                {formError}
+              </div>
+            )}
+            {formWarning && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs font-bold">
+                {formWarning}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-2">
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
+                 <select 
+                   value={newAsset.category}
+                   onChange={e => handleCategoryChange(e.target.value as AssetType)}
+                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                 >
+                    {ASSET_CLASSES.map(ac => <option key={ac.name} value={ac.name}>{ac.name}</option>)}
+                 </select>
+              </div>
+              <div className="space-y-2">
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sub-Category</label>
+                 <select 
+                   value={newAsset.subCategory}
+                   onChange={e => setNewAsset({...newAsset, subCategory: e.target.value})}
+                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                 >
+                    {ASSET_CLASSES.find(ac => ac.name === newAsset.category)?.subCategories.map(sub => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                 </select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Name (Custom)</label>
+               <input type="text" placeholder="e.g. Parag Parikh Flexi Cap" value={newAsset.name} onChange={e => setNewAsset({...newAsset, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={12}/> Purchase Year</label>
+                 <input type="number" value={newAsset.purchaseYear || ''} onChange={e => setNewAsset({...newAsset, purchaseYear: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" />
+               </div>
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Percent size={12}/> Exp. Growth (%)</label>
+                 <input type="number" value={newAsset.growthRate || ''} onChange={e => setNewAsset({...newAsset, growthRate: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" />
+               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Coins size={12}/> Current Value</label>
+                 <input type="number" value={newAsset.currentValue || ''} onChange={e => setNewAsset({...newAsset, currentValue: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" placeholder="₹" />
+               </div>
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12}/> Owner</label>
+                 <select value={newAsset.owner} onChange={e => setNewAsset({...newAsset, owner: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold">
+                    <option value="self">Self</option>
+                    {state.family.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                 </select>
+               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available For Goals</label>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setNewAsset({...newAsset, availableForGoals: true})} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newAsset.availableForGoals ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                    Yes
+                  </button>
+                  <button type="button" onClick={() => setNewAsset({...newAsset, availableForGoals: false})} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newAsset.availableForGoals === false ? 'bg-rose-600 text-white border-rose-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                    No
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available From</label>
+                <input type="number" value={newAsset.availableFrom || ''} onChange={e => setNewAsset({...newAsset, availableFrom: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" />
+              </div>
+            </div>
+
+            <button onClick={handleAdd} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black text-lg shadow-xl hover:bg-teal-600 transition-all">Secure Asset Record</button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 flex flex-col justify-center">
@@ -122,91 +274,7 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
         ))}
       </div>
 
-      {showAdd && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[3.5rem] w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 h-[85vh] flex flex-col">
-            <div className="p-10 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-              <h3 className="text-2xl font-black text-slate-900">Add Holding</h3>
-              <button onClick={() => setShowAdd(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-900">
-                <Plus size={24} className="rotate-45" />
-              </button>
-            </div>
-            
-            <div className="p-10 space-y-6 flex-1 overflow-y-auto no-scrollbar">
-               <div className="grid grid-cols-2 gap-6">
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
-                    <select 
-                      value={newAsset.category}
-                      onChange={e => handleCategoryChange(e.target.value as AssetType)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
-                    >
-                       {ASSET_CLASSES.map(ac => <option key={ac.name} value={ac.name}>{ac.name}</option>)}
-                    </select>
-                 </div>
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sub-Category</label>
-                    <select 
-                      value={newAsset.subCategory}
-                      onChange={e => setNewAsset({...newAsset, subCategory: e.target.value})}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
-                    >
-                       {ASSET_CLASSES.find(ac => ac.name === newAsset.category)?.subCategories.map(sub => (
-                         <option key={sub} value={sub}>{sub}</option>
-                       ))}
-                    </select>
-                 </div>
-               </div>
-
-               <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Name (Custom)</label>
-                  <input type="text" placeholder="e.g. Parag Parikh Flexi Cap" value={newAsset.name} onChange={e => setNewAsset({...newAsset, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" />
-               </div>
-
-               <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Calendar size={12}/> Purchase Year</label>
-                    <input type="number" value={newAsset.purchaseYear || ''} onChange={e => setNewAsset({...newAsset, purchaseYear: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Percent size={12}/> Exp. Growth (%)</label>
-                    <input type="number" value={newAsset.growthRate || ''} onChange={e => setNewAsset({...newAsset, growthRate: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" />
-                  </div>
-               </div>
-
-               <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Owner</label>
-                    <select value={newAsset.owner} onChange={e => setNewAsset({...newAsset, owner: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold">
-                       <option value="self">Self</option>
-                       {state.family.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Goal Availability</label>
-                    <button 
-                      type="button" 
-                      onClick={() => setNewAsset({...newAsset, availableForGoals: !newAsset.availableForGoals})} 
-                      className={`w-full py-4 rounded-xl flex items-center justify-center gap-2 border transition-all font-black text-[10px] uppercase tracking-widest ${newAsset.availableForGoals ? 'bg-emerald-50 border-emerald-500 text-emerald-600' : 'bg-slate-50 border-slate-200 text-slate-400'}`}
-                    >
-                      {newAsset.availableForGoals ? <CheckCircle2 size={16}/> : <Circle size={16}/>}
-                      {newAsset.availableForGoals ? 'Mark Available' : 'Keep Personal'}
-                    </button>
-                  </div>
-               </div>
-
-               <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Market Value (₹)</label>
-                  <input type="number" value={newAsset.currentValue || ''} onChange={e => setNewAsset({...newAsset, currentValue: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-black text-xl shadow-inner outline-none focus:border-indigo-600" placeholder="0" />
-               </div>
-            </div>
-            <div className="p-10 border-t border-slate-50 bg-white">
-               <button onClick={handleAdd} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black text-lg shadow-xl hover:bg-indigo-600 transition-all">Secure Asset Record</button>
-            </div>
           </div>
-        </div>
-      )}
-    </div>
   );
 };
 

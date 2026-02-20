@@ -64,7 +64,7 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
   const calculateResults = (finalAnswers: number[]): RiskProfileType => {
     const totalScore = finalAnswers.reduce((a, b) => a + b, 0);
     const maxPossible = 185; 
-    const score = Math.min(100, Math.round((totalScore / maxPossible) * 100));
+    const score = Math.min(100, Math.max(0, Math.round((totalScore / maxPossible) * 100)));
     
     let level: RiskLevel = 'Balanced';
     let recommendedAllocation = { equity: 50, debt: 35, gold: 10, liquid: 5 };
@@ -84,6 +84,18 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     } else {
       level = 'Very Aggressive';
       recommendedAllocation = { equity: 90, debt: 5, gold: 5, liquid: 0 };
+    }
+
+    const allocationTotal =
+      recommendedAllocation.equity +
+      recommendedAllocation.debt +
+      recommendedAllocation.gold +
+      recommendedAllocation.liquid;
+    if (allocationTotal !== 100) {
+      recommendedAllocation = {
+        ...recommendedAllocation,
+        liquid: Math.max(0, 100 - (recommendedAllocation.equity + recommendedAllocation.debt + recommendedAllocation.gold)),
+      };
     }
 
     return { score, level, lastUpdated: new Date().toISOString(), recommendedAllocation };
@@ -111,8 +123,8 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     return (
       <div className="max-w-4xl mx-auto py-8 md:py-12 px-4 md:px-6 animate-in fade-in slide-in-from-bottom-4">
         <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-2xl overflow-hidden p-8 md:p-20 text-center space-y-8 md:space-y-10 relative">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50/50 blur-[100px] -z-10 rounded-full translate-x-1/2 -translate-y-1/2" />
-          <div className="mx-auto w-16 h-16 md:w-24 md:h-24 bg-indigo-600 text-white rounded-2xl md:rounded-[2.5rem] flex items-center justify-center shadow-2xl">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-teal-50/50 blur-[100px] -z-10 rounded-full translate-x-1/2 -translate-y-1/2" />
+          <div className="mx-auto w-16 h-16 md:w-24 md:h-24 bg-teal-600 text-white rounded-2xl md:rounded-[2.5rem] flex items-center justify-center shadow-2xl">
             <BrainCircuit size={32} md:size={48} />
           </div>
           <div className="space-y-4">
@@ -121,7 +133,7 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           </div>
           <button 
             onClick={() => setCurrentStep('quiz')}
-            className="w-full md:w-auto px-10 md:px-12 py-5 md:py-6 bg-indigo-600 text-white rounded-[1.5rem] md:rounded-[2rem] font-black text-base md:text-xl hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 mx-auto shadow-xl"
+            className="w-full md:w-auto px-10 md:px-12 py-5 md:py-6 bg-teal-600 text-white rounded-[1.5rem] md:rounded-[2rem] font-black text-base md:text-xl hover:bg-teal-700 transition-all flex items-center justify-center gap-3 mx-auto shadow-xl"
           >
             Start Assessment <ChevronRight />
           </button>
@@ -141,7 +153,7 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                <ArrowLeft size={20} md:size={24} />
              </button>
              <div className="flex-1 px-4 md:px-8">
-                <div className="w-full h-1.5 md:h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-indigo-600 transition-all duration-500" style={{ width: `${progress}%` }} /></div>
+                <div className="w-full h-1.5 md:h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-teal-600 transition-all duration-500" style={{ width: `${progress}%` }} /></div>
              </div>
              <span className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest">{activeQuestion + 1}/{QUESTIONS.length}</span>
           </div>
@@ -149,9 +161,9 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
             <h2 className="text-xl md:text-3xl font-black text-slate-900 leading-tight">{q.text}</h2>
             <div className="space-y-3 md:space-y-4">
               {q.options.map((opt, i) => (
-                <button key={i} onClick={() => handleAnswer(opt.score)} className="w-full p-5 md:p-6 text-left border-2 border-slate-100 rounded-2xl md:rounded-[1.5rem] hover:border-indigo-600 hover:bg-indigo-50/50 transition-all group flex items-center justify-between">
-                  <span className="text-xs md:text-sm font-bold text-slate-700 group-hover:text-indigo-900">{opt.text}</span>
-                  <div className="w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-slate-200 flex items-center justify-center group-hover:border-indigo-600 transition-colors shrink-0 ml-4"><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-indigo-600 scale-0 group-hover:scale-100 transition-transform" /></div>
+                <button key={i} onClick={() => handleAnswer(opt.score)} className="w-full p-5 md:p-6 text-left border-2 border-slate-100 rounded-2xl md:rounded-[1.5rem] hover:border-teal-600 hover:bg-teal-50/50 transition-all group flex items-center justify-between">
+                  <span className="text-xs md:text-sm font-bold text-slate-700 group-hover:text-teal-900">{opt.text}</span>
+                  <div className="w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-slate-200 flex items-center justify-center group-hover:border-teal-600 transition-colors shrink-0 ml-4"><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-teal-600 scale-0 group-hover:scale-100 transition-transform" /></div>
                 </button>
               ))}
             </div>
@@ -166,22 +178,22 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in duration-700 pb-24">
-      <div className="bg-slate-950 p-8 md:p-16 rounded-[2.5rem] md:rounded-[4rem] text-white flex flex-col md:flex-row items-center gap-8 md:gap-12 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-600/20 blur-[120px] rounded-full translate-x-1/2 -translate-y-1/2" />
+      <div className="surface-dark p-8 md:p-16 rounded-[2.5rem] md:rounded-[4rem] text-white flex flex-col md:flex-row items-center gap-8 md:gap-12 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-teal-600/20 blur-[120px] rounded-full translate-x-1/2 -translate-y-1/2" />
         <div className="relative shrink-0">
           <svg className="w-40 h-40 md:w-64 md:h-64 transform -rotate-90">
              <circle cx="50%" cy="50%" r="45%" stroke="currentColor" strokeWidth="10" fill="transparent" className="text-white/10" />
-             <circle cx="50%" cy="50%" r="45%" stroke="currentColor" strokeWidth="10" fill="transparent" strokeDasharray="450" strokeDashoffset={450 - (450 * result.score) / 100} className="text-indigo-500 transition-all duration-1000 ease-out" strokeLinecap="round" />
+             <circle cx="50%" cy="50%" r="45%" stroke="currentColor" strokeWidth="10" fill="transparent" strokeDasharray="450" strokeDashoffset={450 - (450 * result.score) / 100} className="text-teal-500 transition-all duration-1000 ease-out" strokeLinecap="round" />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
              <span className="text-3xl md:text-6xl font-black">{result.score}</span>
-             <span className="text-[8px] md:text-[10px] font-black text-indigo-400 uppercase tracking-widest">Score</span>
+             <span className="text-[8px] md:text-[10px] font-black text-teal-400 uppercase tracking-widest">Score</span>
           </div>
         </div>
         <div className="flex-1 space-y-4 md:space-y-6 text-center md:text-left">
-           <h2 className="text-3xl md:text-6xl font-black leading-none"><span className="text-indigo-500">{result.level}</span> Profile</h2>
+           <h2 className="text-3xl md:text-6xl font-black leading-none"><span className="text-teal-500">{result.level}</span> Profile</h2>
            <p className="text-slate-400 font-medium text-sm md:text-lg max-w-xl">Healthy appetite for growth with strategic capital protection.</p>
-           <button onClick={reset} className="flex items-center gap-2 text-[10px] md:text-xs font-black text-indigo-400 uppercase tracking-widest hover:text-white transition-colors mx-auto md:mx-0">
+           <button onClick={reset} className="flex items-center gap-2 text-[10px] md:text-xs font-black text-teal-400 uppercase tracking-widest hover:text-white transition-colors mx-auto md:mx-0">
              <RefreshCw size={14} /> Retake Assessment
            </button>
         </div>
@@ -189,10 +201,10 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
         <div className="lg:col-span-2 bg-white p-8 md:p-14 rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-200 shadow-sm">
-           <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-8 md:mb-12 flex items-center gap-3"><PieChart className="text-indigo-600" size={24} md:size={28} /> Target Mix</h3>
+           <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-8 md:mb-12 flex items-center gap-3"><PieChart className="text-teal-600" size={24} md:size={28} /> Target Mix</h3>
            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
               {[
-                { label: 'Equity', value: allocation.equity, color: 'indigo' },
+                { label: 'Equity', value: allocation.equity, color: 'teal' },
                 { label: 'Debt', value: allocation.debt, color: 'emerald' },
                 { label: 'Gold', value: allocation.gold, color: 'amber' },
                 { label: 'Liquid', value: allocation.liquid, color: 'slate' }

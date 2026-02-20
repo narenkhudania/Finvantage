@@ -33,6 +33,7 @@ import { LayoutDashboard, Bell, ListChecks, Cloud, CloudOff, Loader2 } from 'luc
 import { supabase } from './services/supabase';
 import { signOut } from './services/authService';
 import { saveFinanceData, loadFinanceData } from './services/dbService';
+import { getJourneyProgress } from './lib/journey';
 
 const LOCAL_KEY        = 'finvantage_active_session';
 const SAVE_DEBOUNCE_MS = 1500;
@@ -52,7 +53,15 @@ const INITIAL_STATE: FinanceState = {
     income: { ...INITIAL_INCOME }, monthlyExpenses: 0,
   },
   family: [], detailedExpenses: [], assets: [], loans: [],
-  insurance: [], goals: [],
+  insurance: [],
+  insuranceAnalysis: {
+    inflation: 6,
+    investmentRate: 11.5,
+    replacementYears: 20,
+    immediateNeeds: 1000000,
+    financialAssetDiscount: 50,
+  },
+  goals: [],
   estate: { hasWill: false, nominationsUpdated: false },
   transactions: [],
   notifications: [{
@@ -61,6 +70,35 @@ const INITIAL_STATE: FinanceState = {
     type: 'success', timestamp: new Date().toISOString(), read: false,
   }],
   riskProfile: undefined,
+};
+
+const normalizeState = (raw: Partial<FinanceState> | null | undefined): FinanceState => {
+  const base = INITIAL_STATE;
+  const profile = {
+    ...base.profile,
+    ...(raw?.profile || {}),
+    income: {
+      ...base.profile.income,
+      ...((raw?.profile as any)?.income || {}),
+    },
+  };
+
+  return {
+    ...base,
+    ...(raw || {}),
+    profile,
+    family: Array.isArray(raw?.family) ? raw!.family : base.family,
+    detailedExpenses: Array.isArray(raw?.detailedExpenses) ? raw!.detailedExpenses : base.detailedExpenses,
+    assets: Array.isArray(raw?.assets) ? raw!.assets : base.assets,
+    loans: Array.isArray(raw?.loans) ? raw!.loans : base.loans,
+    insurance: Array.isArray(raw?.insurance) ? raw!.insurance : base.insurance,
+    insuranceAnalysis: { ...base.insuranceAnalysis, ...(raw?.insuranceAnalysis || {}) },
+    goals: Array.isArray(raw?.goals) ? raw!.goals : base.goals,
+    transactions: Array.isArray(raw?.transactions) ? raw!.transactions : base.transactions,
+    notifications: Array.isArray(raw?.notifications) ? raw!.notifications : base.notifications,
+    estate: { ...base.estate, ...(raw?.estate || {}) },
+    riskProfile: raw?.riskProfile ?? base.riskProfile,
+  };
 };
 
 // ── Cloud sync pill ───────────────────────────────────────────
@@ -73,7 +111,7 @@ const SyncPill: React.FC<{ status: SaveStatus }> = ({ status }) => {
       fixed bottom-20 lg:bottom-6 right-6 z-50 pointer-events-none
       flex items-center gap-2 px-4 py-2 rounded-full shadow-xl
       text-[10px] font-black uppercase tracking-widest transition-all duration-300
-      ${status === 'saving' ? 'bg-indigo-600 text-white'
+      ${status === 'saving' ? 'bg-teal-600 text-white'
       : status === 'saved'  ? 'bg-emerald-500 text-white'
       :                       'bg-rose-500    text-white'}
     `}>
@@ -101,7 +139,7 @@ const App: React.FC = () => {
   const [financeState, setFinanceState] = useState<FinanceState>(() => {
     const saved = localStorage.getItem(LOCAL_KEY);
     if (saved) {
-      try { return JSON.parse(saved); } catch { /* fall through */ }
+      try { return normalizeState(JSON.parse(saved)); } catch { /* fall through */ }
     }
     return INITIAL_STATE;
   });
@@ -118,8 +156,9 @@ const App: React.FC = () => {
         if (session) {
           const loaded = await loadFinanceData(financeState);
           if (loaded) {
-            setFinanceState(loaded);
-            localStorage.setItem(LOCAL_KEY, JSON.stringify(loaded));
+            const normalized = normalizeState(loaded);
+            setFinanceState(normalized);
+            localStorage.setItem(LOCAL_KEY, JSON.stringify(normalized));
           }
         } else {
           if (financeState.isRegistered) {
@@ -200,12 +239,33 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdateState = (data: Partial<FinanceState>) =>
+    setFinanceState(prev => ({ ...prev, ...data }));
+
+  const journey = getJourneyProgress(financeState);
+  const gateUnlocked = journey.completionPct === 100;
+  const gatedViews = new Set<View>([
+    'action-plan',
+    'monthly-savings',
+    'cashflow',
+    'investment-plan',
+    'risk-profile',
+    'insurance',
+    'tax-estate',
+  ]);
+
+  useEffect(() => {
+    if (!gateUnlocked && gatedViews.has(view)) {
+      setView(journey.nextStep?.view || 'dashboard');
+    }
+  }, [gateUnlocked, view, journey.nextStep?.view]);
+
   if (isRestoring) {
     return (
-      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-3">
-          <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Establishing connection...</p>
+          <div className="w-10 h-10 border-4 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-slate-500 text-xs font-black uppercase tracking-widest">Establishing connection...</p>
         </div>
       </div>
     );
@@ -223,9 +283,6 @@ const App: React.FC = () => {
       />
     );
   }
-
-  const handleUpdateState = (data: Partial<FinanceState>) =>
-    setFinanceState(prev => ({ ...prev, ...data }));
 
   const renderView = () => {
     switch (view) {
@@ -254,7 +311,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] font-sans selection:bg-indigo-100 flex overflow-hidden">
+    <div className="app-shell font-sans flex overflow-hidden">
       <div className="hidden lg:block fixed left-0 top-0 h-full w-[260px] z-50 shrink-0">
         <Sidebar currentView={view} setView={setView} state={financeState} />
       </div>
@@ -274,14 +331,16 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="lg:hidden fixed bottom-0 left-0 w-full bg-white border-t border-slate-200 h-16 flex items-center justify-around px-4 z-40 pb-safe shadow-2xl">
-          <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'dashboard' ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-400'}`}>
+        <div className="lg:hidden fixed bottom-0 left-0 w-full bg-white/80 backdrop-blur-xl border-t border-white/60 h-16 flex items-center justify-around px-4 z-40 pb-safe shadow-2xl">
+          <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'dashboard' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
             <LayoutDashboard size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Dash</span>
           </button>
-          <button onClick={() => setView('action-plan')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'action-plan' ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-400'}`}>
-            <ListChecks size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Plan</span>
-          </button>
-          <button onClick={() => setView('notifications')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'notifications' ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-400'}`}>
+          {gateUnlocked && (
+            <button onClick={() => setView('action-plan')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'action-plan' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
+              <ListChecks size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Plan</span>
+            </button>
+          )}
+          <button onClick={() => setView('notifications')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'notifications' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
             <Bell size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Alerts</span>
           </button>
         </div>

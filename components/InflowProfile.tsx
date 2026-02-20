@@ -6,6 +6,7 @@ import {
   CheckCircle2, Plus, Coins, Sparkles, User, Edit3, PieChart
 } from 'lucide-react';
 import { FinanceState, DetailedIncome } from '../types';
+import { clampNumber, parseNumber } from '../lib/validation';
 
 interface InflowProfileProps {
   state: FinanceState;
@@ -29,13 +30,18 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
   }, [members]);
 
   const updateIncomeField = (id: string, field: keyof DetailedIncome, value: number) => {
+    const sanitized = Math.max(0, parseNumber(value, 0));
+    const finalValue =
+      field === 'expectedIncrease'
+        ? clampNumber(sanitized, 0, 25)
+        : sanitized;
     if (id === 'self') {
       updateState({
-        profile: { ...state.profile, income: { ...state.profile.income, [field]: value } }
+        profile: { ...state.profile, income: { ...state.profile.income, [field]: finalValue } }
       });
     } else {
       updateState({
-        family: state.family.map(f => f.id === id ? { ...f, income: { ...f.income, [field]: value } } : f)
+        family: state.family.map(f => f.id === id ? { ...f, income: { ...f.income, [field]: finalValue } } : f)
       });
     }
   };
@@ -43,7 +49,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
   const IncomeForm = ({ member }: { member: any }) => (
     <div className="bg-slate-50 p-8 md:p-12 rounded-[3.5rem] border border-slate-200 animate-in slide-in-from-top-6 duration-500 space-y-10">
       <div className="flex justify-between items-center">
-         <h3 className="text-xl md:text-2xl font-black text-slate-900 flex items-center gap-3"><Edit3 className="text-indigo-600"/> Calibrate: {member.name}</h3>
+         <h3 className="text-xl md:text-2xl font-black text-slate-900 flex items-center gap-3"><Edit3 className="text-teal-600"/> Calibrate: {member.name}</h3>
          <button onClick={() => setEditingId(null)} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-colors">Close Form</button>
       </div>
       
@@ -58,12 +64,12 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
              <div key={item.field} className="space-y-2">
                 <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest ml-2">{item.label}</label>
                 <div className="relative group">
-                   <item.icon className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-600 transition-colors" size={18}/>
+                   <item.icon className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-teal-600 transition-colors" size={18}/>
                    <input 
                     type="number" 
                     value={member.income[item.field] || ''} 
                     onChange={e => updateIncomeField(member.id, item.field, parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-14 py-4 font-black text-xl outline-none focus:border-indigo-600 transition-all shadow-sm"
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-14 py-4 font-black text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
                     placeholder="0"
                    />
                 </div>
@@ -80,12 +86,12 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
              <div key={item.field} className="space-y-2">
                 <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest ml-2">{item.label}</label>
                 <div className="relative group">
-                   <item.icon className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-600 transition-colors" size={18}/>
+                   <item.icon className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-teal-600 transition-colors" size={18}/>
                    <input 
                     type="number" 
                     value={member.income[item.field] || ''} 
                     onChange={e => updateIncomeField(member.id, item.field, parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-14 py-4 font-black text-xl outline-none focus:border-indigo-600 transition-all shadow-sm"
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-14 py-4 font-black text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
                     placeholder="0"
                    />
                 </div>
@@ -99,14 +105,14 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
   return (
     <div className="space-y-8 md:space-y-12 animate-in fade-in duration-700 pb-24">
       {/* Visual Header */}
-      <div className="bg-[#0b0f1a] p-8 md:p-16 rounded-[2.5rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-8 md:p-16 rounded-[2.5rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8 md:gap-12">
           <div className="space-y-4 md:space-y-6 text-left">
-            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-teal-500/10 text-teal-300 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <TrendingUp size={14}/> Household Liquidity
             </div>
-            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Household <br/><span className="text-indigo-500">Inflows.</span></h2>
+            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Household <br/><span className="text-teal-500">Inflows.</span></h2>
           </div>
           <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner min-w-[300px]">
              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Aggregated Monthly</p>
@@ -149,10 +155,10 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                                 <td className="px-6 py-6 text-[10px] font-bold text-slate-500 uppercase">{m.relation}</td>
                                 <td className="px-6 py-6 text-sm font-black text-slate-900 text-right">₹{mTotal.toLocaleString()}</td>
                                 <td className="px-6 py-6 text-center">
-                                   <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black border border-indigo-100">{share.toFixed(1)}%</div>
+                                   <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-50 text-teal-600 rounded-full text-[10px] font-black border border-teal-100">{share.toFixed(1)}%</div>
                                 </td>
                                 <td className="px-8 md:px-12 py-6 text-right">
-                                   <button onClick={() => setEditingId(m.id)} className="p-2.5 bg-slate-100 text-slate-400 hover:bg-indigo-600 hover:text-white rounded-xl transition-all shadow-sm"><Edit3 size={16}/></button>
+                                   <button onClick={() => setEditingId(m.id)} className="p-2.5 bg-slate-100 text-slate-400 hover:bg-teal-600 hover:text-white rounded-xl transition-all shadow-sm"><Edit3 size={16}/></button>
                                 </td>
                              </tr>
                           );
@@ -166,8 +172,8 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
         </div>
 
         <div className="space-y-8">
-           <div className="bg-slate-950 p-10 rounded-[3.5rem] text-white space-y-10 relative overflow-hidden shadow-2xl">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600/10 blur-[80px] rounded-full translate-x-1/2 -translate-y-1/2" />
+           <div className="surface-dark p-10 rounded-[3.5rem] text-white space-y-10 relative overflow-hidden shadow-2xl">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-teal-600/10 blur-[80px] rounded-full translate-x-1/2 -translate-y-1/2" />
               <div className="space-y-2 relative z-10">
                  <h3 className="text-2xl font-black tracking-tight">Diversification Pool.</h3>
                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Inflow Concentration Audit</p>
@@ -175,7 +181,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
               
               <div className="space-y-6 relative z-10">
                  {[
-                   { label: 'Active Salary', val: members.reduce((s, m) => s + (m.income.salary || 0), 0), color: '#6366f1' },
+                   { label: 'Active Salary', val: members.reduce((s, m) => s + (m.income.salary || 0), 0), color: '#0f766e' },
                    { label: 'Passive Yields', val: members.reduce((s, m) => s + (m.income.rental || 0) + (m.income.investment || 0), 0), color: '#10b981' },
                    { label: 'Side/Business', val: members.reduce((s, m) => s + (m.income.business || 0), 0), color: '#f59e0b' }
                  ].map((pool, i) => (

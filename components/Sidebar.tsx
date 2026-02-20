@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { 
+import {
   LayoutDashboard, Target, ShieldCheck, 
   TrendingUp, X, Users, Calculator, 
   Landmark, BrainCircuit, ChevronRight, Zap,
@@ -8,6 +8,7 @@ import {
   ArrowDownRight, Receipt, CreditCard, Shield
 } from 'lucide-react';
 import { View, FinanceState } from '../types';
+import { getJourneyProgress } from '../lib/journey';
 
 interface SidebarProps {
   currentView: View;
@@ -20,6 +21,17 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
   const totalAssets = useMemo(() => state.assets.reduce((sum, a) => sum + a.currentValue, 0), [state.assets]);
   const totalLoans = useMemo(() => state.loans.reduce((sum, l) => sum + l.outstandingAmount, 0), [state.loans]);
   const netWorth = totalAssets - totalLoans;
+  const { completionPct } = getJourneyProgress(state);
+  const gateUnlocked = completionPct === 100;
+  const gatedViews = new Set<View>([
+    'action-plan',
+    'monthly-savings',
+    'cashflow',
+    'investment-plan',
+    'risk-profile',
+    'insurance',
+    'tax-estate',
+  ]);
 
   const navGroups = [
     {
@@ -58,17 +70,24 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
     }
   ];
 
+  const visibleGroups = navGroups
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => gateUnlocked || !gatedViews.has(item.id as View)),
+    }))
+    .filter(group => group.items.length > 0);
+
   return (
-    <aside className="h-full w-full flex flex-col bg-[#05070a] text-white border-r border-white/5 relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-[600px] bg-gradient-to-b from-indigo-600/10 to-transparent pointer-events-none" />
+    <aside className="h-full w-full flex flex-col surface-dark text-white border-r border-white/10 relative overflow-hidden">
+      <div className="absolute top-0 left-0 w-full h-[600px] bg-gradient-to-b from-teal-500/15 to-transparent pointer-events-none" />
       
       <div className="p-8 md:p-10 relative z-10 flex flex-col h-full">
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center gap-3 group cursor-pointer shrink-0" onClick={() => setView('dashboard')}>
-            <div className="bg-indigo-600 p-2 rounded-xl shadow-[0_0_20px_rgba(79,70,229,0.3)]">
+            <div className="bg-teal-600 p-2 rounded-xl shadow-[0_0_20px_rgba(13,148,136,0.35)]">
               <TrendingUp className="text-white w-5 h-5" />
             </div>
-            <span className="text-xl font-black tracking-tighter italic">FinVantage<span className="text-indigo-600">.</span></span>
+            <span className="text-xl font-black tracking-tighter italic font-display">FinVantage<span className="text-teal-400">.</span></span>
           </div>
           {onClose && (
             <button onClick={onClose} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl lg:hidden">
@@ -78,13 +97,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
         </div>
 
         {/* Wealth Summary Block */}
-        <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-4 mb-10 shadow-2xl backdrop-blur-md">
-           <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-1">Household Net Worth</p>
+        <div className="bg-white/[0.04] border border-white/10 rounded-3xl p-4 mb-10 shadow-2xl backdrop-blur-md">
+           <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">Household Net Worth</p>
            <h4 className="text-base font-black text-white tracking-tight break-all">₹{netWorth.toLocaleString()}</h4>
            <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
               <div className="flex -space-x-1.5">
                  {[...Array(3)].map((_, i) => (
-                   <div key={i} className="w-5 h-5 rounded-full border border-slate-900 bg-indigo-600 flex items-center justify-center text-[7px] font-black">
+                   <div key={i} className="w-5 h-5 rounded-full border border-slate-900 bg-teal-600 flex items-center justify-center text-[7px] font-black">
                       {i === 0 ? 'P' : 'S'}
                    </div>
                  ))}
@@ -98,9 +117,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
 
         {/* Navigation Layers */}
         <div className="space-y-8 flex-1 overflow-y-auto no-scrollbar pb-6 pr-2">
-          {navGroups.map((group, idx) => (
+          {visibleGroups.map((group, idx) => (
             <div key={idx} className="space-y-2">
-               <h5 className="px-4 text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">{group.label}</h5>
+               <h5 className="px-4 text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{group.label}</h5>
                <nav className="space-y-1">
                  {group.items.map((item) => {
                    const Icon = item.icon;
@@ -114,12 +133,12 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
                        }}
                        className={`w-full flex items-center justify-between px-4 py-2.5 rounded-2xl transition-all duration-300 group ${
                          isActive 
-                           ? 'bg-indigo-600 text-white shadow-xl translate-x-1' 
-                           : 'text-slate-500 hover:bg-white/[0.04] hover:text-white'
+                           ? 'bg-teal-600 text-white shadow-xl translate-x-1' 
+                           : 'text-slate-400 hover:bg-white/[0.05] hover:text-white'
                        }`}
-                     >
-                       <div className="flex items-center gap-3">
-                          <Icon size={16} className={`${isActive ? 'scale-110' : 'group-hover:text-indigo-400'} transition-all shrink-0`} />
+                    >
+                      <div className="flex items-center gap-3">
+                          <Icon size={16} className={`${isActive ? 'scale-110' : 'group-hover:text-teal-300'} transition-all shrink-0`} />
                           <span className="text-[11px] font-bold tracking-tight text-left leading-none">{item.label}</span>
                        </div>
                        {isActive && <ChevronRight size={10} className="opacity-40" />}

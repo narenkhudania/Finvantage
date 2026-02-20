@@ -11,6 +11,8 @@ interface FamilyProps {
 
 const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
   const [showAdd, setShowAdd] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   
   const initialIncome: DetailedIncome = {
     salary: 0,
@@ -33,7 +35,22 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
+    const trimmedName = newMember.name.trim();
+    const age = Number(newMember.age);
+    if (trimmedName.length < 2) {
+      setFormError('Name must be at least 2 characters.');
+      return;
+    }
+    if (!Number.isFinite(age) || age < 0 || age > 110) {
+      setFormError('Age must be between 0 and 110.');
+      return;
+    }
     const member: FamilyMember = { ...newMember, id: Math.random().toString(36).substr(2, 9) };
+    if (member.isDependent && age > 25) {
+      setNotice('Dependent age is over 25. Please confirm this is intended.');
+      setTimeout(() => setNotice(null), 4000);
+    }
     updateState({ family: [...state.family, member] });
     setShowAdd(false);
     setNewMember({ name: '', relation: 'Spouse', age: 30, isDependent: true, income: { ...initialIncome }, monthlyExpenses: 0 });
@@ -45,12 +62,17 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+      {notice && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl px-6 py-3 text-[10px] font-black uppercase tracking-widest">
+          {notice}
+        </div>
+      )}
       <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
         <div className="space-y-4">
           <h3 className="text-2xl font-black text-slate-900">Step 1: Family Profile</h3>
           <p className="text-slate-500 font-medium max-w-lg">Define who lives in your household. This is required before we can map out individual income streams and benefits.</p>
           <div className="flex gap-4">
-             <div className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1.5 rounded-full">
+             <div className="flex items-center gap-2 text-[10px] font-black text-teal-600 uppercase tracking-widest bg-teal-50 px-3 py-1.5 rounded-full">
                <Users size={14}/> {state.family.length} Added
              </div>
              {state.family.length > 0 && (
@@ -64,18 +86,61 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
           </div>
         </div>
         <button 
-          onClick={() => setShowAdd(true)}
+          onClick={() => setShowAdd(prev => !prev)}
           className="px-10 py-6 bg-slate-900 text-white rounded-[2rem] hover:bg-slate-800 transition-all flex items-center gap-3 font-black uppercase text-sm tracking-widest shadow-2xl shadow-slate-900/20"
         >
-          <Plus size={20} /> Add Member
+          <Plus size={20} /> {showAdd ? 'Close Form' : 'Add Member'}
         </button>
       </div>
 
+      {showAdd && (
+        <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-8 sm:p-10 border-b border-slate-100 flex justify-between items-center bg-white/90">
+            <h3 className="text-2xl font-black text-slate-900">Add Household Member</h3>
+            <button onClick={() => setShowAdd(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-900 transition-colors">
+              <Plus size={24} className="rotate-45" />
+            </button>
+          </div>
+          <form onSubmit={handleAdd} className="p-8 sm:p-10 space-y-8">
+            {formError && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold">
+                {formError}
+              </div>
+            )}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name</label>
+              <input required type="text" value={newMember.name} onChange={e => setNewMember({...newMember, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none" placeholder="e.g. Jane Smith" />
+            </div>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Relation</label>
+                <select value={newMember.relation} onChange={e => setNewMember({...newMember, relation: e.target.value as Relation})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none">
+                  <option>Spouse</option>
+                  <option>Child</option>
+                  <option>Parent</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Age</label>
+                <input required type="number" value={newMember.age} onChange={e => setNewMember({...newMember, age: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none" />
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <button type="button" onClick={() => setNewMember({...newMember, isDependent: !newMember.isDependent})} className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newMember.isDependent ? 'bg-teal-600 text-white border-teal-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                {newMember.isDependent ? 'Dependent' : 'Independent'}
+              </button>
+            </div>
+            <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black text-lg shadow-xl shadow-slate-900/10">Add to Profile</button>
+          </form>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-[2rem] border-2 border-indigo-100 shadow-sm relative overflow-hidden h-48 flex flex-col justify-center">
-          <div className="absolute top-0 right-0 p-2 bg-indigo-600 text-[8px] font-black text-white rounded-bl-xl uppercase tracking-widest">Primary</div>
+        <div className="bg-white p-6 rounded-[2rem] border-2 border-teal-100 shadow-sm relative overflow-hidden h-48 flex flex-col justify-center">
+          <div className="absolute top-0 right-0 p-2 bg-teal-600 text-[8px] font-black text-white rounded-bl-xl uppercase tracking-widest">Primary</div>
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600">
+            <div className="w-14 h-14 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600">
               <User size={28} />
             </div>
             <div>
@@ -86,10 +151,10 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
         </div>
 
         {state.family.map((member) => (
-          <div key={member.id} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm group hover:border-indigo-300 transition-all h-48 flex flex-col justify-center">
+          <div key={member.id} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm group hover:border-teal-300 transition-all h-48 flex flex-col justify-center">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-teal-50 group-hover:text-teal-600 transition-colors">
                   <Users size={28} />
                 </div>
                 <div>
@@ -113,46 +178,7 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
         ))}
       </div>
 
-      {showAdd && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[3.5rem] w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-10 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="text-2xl font-black text-slate-900">Add Household Member</h3>
-              <button onClick={() => setShowAdd(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-900 transition-colors">
-                <Plus size={24} className="rotate-45" />
-              </button>
-            </div>
-            <form onSubmit={handleAdd} className="p-10 space-y-8">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name</label>
-                <input required type="text" value={newMember.name} onChange={e => setNewMember({...newMember, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none" placeholder="e.g. Jane Smith" />
-              </div>
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Relation</label>
-                  <select value={newMember.relation} onChange={e => setNewMember({...newMember, relation: e.target.value as Relation})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none">
-                    <option>Spouse</option>
-                    <option>Child</option>
-                    <option>Parent</option>
-                    <option>Other</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Age</label>
-                  <input required type="number" value={newMember.age} onChange={e => setNewMember({...newMember, age: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none" />
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <button type="button" onClick={() => setNewMember({...newMember, isDependent: !newMember.isDependent})} className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newMember.isDependent ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
-                  {newMember.isDependent ? 'Dependent' : 'Independent'}
-                </button>
-              </div>
-              <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black text-lg shadow-xl shadow-slate-900/10">Add to Profile</button>
-            </form>
           </div>
-        </div>
-      )}
-    </div>
   );
 };
 

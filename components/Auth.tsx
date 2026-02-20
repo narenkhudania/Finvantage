@@ -46,7 +46,7 @@ export default function Auth({ onLogin }: { onLogin: () => void }) {
         onChange={(e) => setPassword(e.target.value)}
         className="border p-2"
       />
-      <button onClick={handleLogin} className="bg-indigo-600 text-white p-2">
+      <button onClick={handleLogin} className="bg-teal-600 text-white p-2">
         Login
       </button>
       <button onClick={handleSignup} className="border p-2">

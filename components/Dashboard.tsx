@@ -15,13 +15,14 @@ import {
   PieChart, BarChart3, LineChart, RefreshCw
 } from 'lucide-react';
 import { FinanceState, DetailedIncome, View } from '../types';
+import { getJourneyProgress } from '../lib/journey';
 
 interface DashboardProps {
   state: FinanceState;
   setView: (view: View) => void;
 }
 
-const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+const COLORS = ['#0f766e', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#84cc16'];
 
 const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
   const calculateTotalMemberIncome = (income: DetailedIncome) => {
@@ -61,7 +62,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
   const budgetData = useMemo(() => [
     { name: 'Survival', value: householdExpenses, color: '#f59e0b' },
     { name: 'Servicing', value: totalMonthlyDebt, color: '#ef4444' },
-    { name: 'Success', value: Math.max(0, surplusValue), color: '#6366f1' }
+    { name: 'Success', value: Math.max(0, surplusValue), color: '#0f766e' }
   ], [householdExpenses, totalMonthlyDebt, surplusValue]);
 
   // Chart Data: Wealth Trajectory (5 Years)
@@ -76,16 +77,26 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
     return data;
   }, [netWorth, surplusValue]);
 
-  const initializationSteps = useMemo(() => [
-    { id: 'family', label: 'Household Node', isComplete: state.family.length > 0 || state.profile.firstName !== '', icon: Users, view: 'family' as View },
-    { id: 'inflow', label: 'Inflow Profile', isComplete: householdIncome > 0, icon: TrendingUp, view: 'inflow' as View },
-    { id: 'outflow', label: 'Burn Profile', isComplete: state.detailedExpenses.length > 0, icon: ArrowDownRight, view: 'outflow' as View },
-    { id: 'assets', label: 'Asset Inventory', isComplete: state.assets.length > 0, icon: Landmark, view: 'assets' as View },
-    { id: 'debt', label: 'Liability Map', isComplete: state.loans.length > 0, icon: CreditCard, view: 'debt' as View },
-    { id: 'goals', label: 'Mission Targets', isComplete: state.goals.length > 0, icon: Target, view: 'goals' as View },
-  ], [householdIncome, state.detailedExpenses, state.assets, state.loans, state.goals, state.family, state.profile.firstName]);
+  const journey = useMemo(() => getJourneyProgress(state), [state]);
+  const stepIcons: Record<string, any> = {
+    family: Users,
+    inflow: TrendingUp,
+    outflow: ArrowDownRight,
+    assets: Landmark,
+    debt: CreditCard,
+    goals: Target,
+  };
+  const initializationSteps = useMemo(() => (
+    journey.steps.map(step => ({
+      id: step.id,
+      label: step.label,
+      isComplete: step.complete,
+      icon: stepIcons[step.id],
+      view: step.view,
+    }))
+  ), [journey.steps]);
 
-  const completionPct = Math.round((initializationSteps.filter(s => s.isComplete).length / initializationSteps.length) * 100);
+  const completionPct = journey.completionPct;
   const isFullyInitialized = completionPct === 100;
 
   const wellnessData = useMemo(() => {
@@ -110,20 +121,20 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
       {/* Onboarding Directive */}
       {!isFullyInitialized && (
         <div className="bg-white p-8 md:p-12 rounded-[3.5rem] border border-slate-200 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-indigo-50 blur-[100px] rounded-full translate-x-1/2 -translate-y-1/2" />
+          <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-teal-50 blur-[100px] rounded-full translate-x-1/2 -translate-y-1/2" />
           <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-6">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-indigo-100">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-teal-50 text-teal-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-teal-100">
                 <Zap size={14} className="animate-pulse"/> Initialization Required
               </div>
-              <h2 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-tight">Your Strategy Terminal <br/><span className="text-indigo-600 underline decoration-indigo-100 underline-offset-8">is Offline.</span></h2>
+              <h2 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-tight">Your Strategy Terminal <br/><span className="text-teal-600 underline decoration-teal-100 underline-offset-8">is Offline.</span></h2>
               <div className="space-y-2 pt-2">
                  <div className="flex justify-between items-end px-1">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Progress to Synchronization</span>
                     <span className="text-2xl font-black text-slate-900">{completionPct}%</span>
                  </div>
                  <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-50">
-                    <div className="h-full bg-indigo-600 transition-all duration-1000" style={{ width: `${completionPct}%` }} />
+                    <div className="h-full bg-teal-600 transition-all duration-1000" style={{ width: `${completionPct}%` }} />
                  </div>
               </div>
             </div>
@@ -136,10 +147,10 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                    className={`flex items-center gap-4 p-4 rounded-3xl transition-all border text-left group ${
                      step.isComplete 
                        ? 'bg-emerald-50 border-emerald-100 text-emerald-700' 
-                       : 'bg-slate-50 border-slate-100 text-slate-900 hover:border-indigo-300 hover:bg-white'
+                       : 'bg-slate-50 border-slate-100 text-slate-900 hover:border-teal-300 hover:bg-white'
                    }`}
                  >
-                    <div className={`p-2.5 rounded-2xl shrink-0 ${step.isComplete ? 'bg-emerald-500 text-white' : 'bg-white text-slate-300 group-hover:text-indigo-600 transition-colors shadow-sm'}`}>
+                    <div className={`p-2.5 rounded-2xl shrink-0 ${step.isComplete ? 'bg-emerald-500 text-white' : 'bg-white text-slate-300 group-hover:text-teal-600 transition-colors shadow-sm'}`}>
                        <step.icon size={18} />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -156,7 +167,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
       {/* Main Stats Node */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { label: 'Household Equity', value: `₹${netWorth.toLocaleString()}`, sub: 'Net Worth Node', icon: Landmark, color: 'indigo' },
+          { label: 'Household Equity', value: `₹${netWorth.toLocaleString()}`, sub: 'Net Worth Node', icon: Landmark, color: 'teal' },
           { label: 'Net Monthly Surplus', value: `₹${surplusValue.toLocaleString()}`, sub: `${Math.round(savingsRate)}% Savings Rate`, icon: Wallet, color: 'emerald' },
           { label: 'Debt Service Load', value: `${dtiRatio.toFixed(1)}%`, sub: 'Income-to-Debt Ratio', icon: CreditCard, color: dtiRatio > 40 ? 'rose' : 'slate' },
           { label: 'Asset Capacity', value: `₹${totalAssets.toLocaleString()}`, sub: 'Total Capital Holdings', icon: TrendingUp, color: 'amber' }
@@ -177,15 +188,15 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* Trajectory Insight */}
-        <div className="lg:col-span-2 bg-slate-950 p-10 md:p-14 rounded-[4rem] text-white relative overflow-hidden shadow-2xl border border-white/5">
-           <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4 pointer-events-none" />
+        <div className="lg:col-span-2 surface-dark p-10 md:p-14 rounded-[4rem] text-white relative overflow-hidden shadow-2xl border border-white/5">
+           <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4 pointer-events-none" />
            <div className="relative z-10 flex flex-col h-full space-y-10">
               <div className="flex justify-between items-start">
                  <div className="space-y-4">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/5 text-indigo-400 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/5 text-teal-400 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">
                        <LineChart size={14}/> Wealth Velocity
                     </div>
-                    <h3 className="text-4xl font-black tracking-tight">Projected <span className="text-indigo-500">Equity.</span></h3>
+                    <h3 className="text-4xl font-black tracking-tight">Projected <span className="text-teal-500">Equity.</span></h3>
                  </div>
                  <div className="text-right">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">5-Year Target</p>
@@ -198,8 +209,8 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                     <AreaChart data={trajectoryData}>
                        <defs>
                           <linearGradient id="nwGradient" x1="0" y1="0" x2="0" y2="1">
-                             <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                             <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                             <stop offset="5%" stopColor="#0f766e" stopOpacity={0.3}/>
+                             <stop offset="95%" stopColor="#0f766e" stopOpacity={0}/>
                           </linearGradient>
                        </defs>
                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
@@ -209,7 +220,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                           contentStyle={{ backgroundColor: '#0f172a', borderRadius: '16px', border: '1px solid #1e293b', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', padding: '12px', fontWeight: 'bold' }}
                           formatter={(val: number) => `₹${val.toLocaleString()}`}
                        />
-                       <Area type="monotone" dataKey="nw" stroke="#6366f1" strokeWidth={4} fillOpacity={1} fill="url(#nwGradient)" />
+                       <Area type="monotone" dataKey="nw" stroke="#0f766e" strokeWidth={4} fillOpacity={1} fill="url(#nwGradient)" />
                     </AreaChart>
                  </ResponsiveContainer>
               </div>
@@ -219,7 +230,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
         {/* Holistic Wellness Radar */}
         <div className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-sm flex flex-col justify-between h-full">
            <div className="space-y-2">
-              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl w-fit"><BrainCircuit size={24}/></div>
+              <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl w-fit"><BrainCircuit size={24}/></div>
               <h3 className="text-xl font-black text-slate-900 tracking-tight italic">Node Health.</h3>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Actuarial Calibration</p>
            </div>
@@ -229,7 +240,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={wellnessData}>
                    <PolarGrid stroke="#f1f5f9" />
                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 900 }} />
-                   <Radar name="Status" dataKey="A" stroke="#6366f1" strokeWidth={3} fill="#6366f1" fillOpacity={0.15} />
+                   <Radar name="Status" dataKey="A" stroke="#0f766e" strokeWidth={3} fill="#0f766e" fillOpacity={0.15} />
                  </RadarChart>
               </ResponsiveContainer>
            </div>
@@ -284,7 +295,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
          <div className="bg-white p-10 md:p-12 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden flex flex-col justify-between">
             <div className="flex justify-between items-center mb-10">
                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl"><RefreshCw size={24}/></div>
+                  <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl"><RefreshCw size={24}/></div>
                   <div>
                      <h3 className="text-xl font-black text-slate-900 tracking-tight italic">Rebalancing Alert.</h3>
                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Strategy Corrections</p>
@@ -309,7 +320,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                </div>
             </div>
 
-            <button onClick={() => setView('investment-plan')} className="mt-8 py-5 bg-slate-900 text-white rounded-3xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-2">
+            <button onClick={() => setView('investment-plan')} className="mt-8 py-5 bg-slate-900 text-white rounded-3xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-600 transition-all flex items-center justify-center gap-2">
                Execute Portfolio Rebalance <ArrowRight size={14}/>
             </button>
          </div>

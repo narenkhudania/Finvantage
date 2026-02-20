@@ -6,17 +6,12 @@ import {
   ChevronDown, Calculator, TrendingUp, Wallet, ArrowUpRight,
   ShieldAlert, CheckCircle2, Info, Landmark, BarChart3, ArrowRight
 } from 'lucide-react';
+import { clampNumber, parseNumber } from '../lib/validation';
 
 const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'analysis'>('analysis');
-  const [analysisConfig, setAnalysisConfig] = useState({
-    inflation: 6,
-    investmentRate: 11.5,
-    replacementYears: 20,
-    immediateNeeds: 1000000,
-    financialAssetDiscount: 50
-  });
+  const analysisConfig = state.insuranceAnalysis;
 
   const [newPolicy, setNewPolicy] = useState<Partial<Insurance>>({
     category: 'Life Insurance',
@@ -62,17 +57,34 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
     return { expenseReplacement, totalDebt, goalRequirements, totalExistingInsurance, usableAssets, totalRequirement, totalAvailable, gap, safetyScore: Math.min(100, Math.round((totalAvailable / (totalRequirement || 1)) * 100)) };
   }, [state, analysisConfig]);
 
+  const updateAnalysisConfig = (field: keyof typeof analysisConfig, value: number) => {
+    const sanitized = parseNumber(value, analysisConfig[field] as number);
+    let nextValue = sanitized;
+    if (field === 'inflation') nextValue = clampNumber(sanitized, 0, 15);
+    if (field === 'investmentRate') nextValue = clampNumber(sanitized, 0, 25);
+    if (field === 'replacementYears') nextValue = clampNumber(sanitized, 1, 60);
+    if (field === 'immediateNeeds') nextValue = Math.max(0, sanitized);
+    if (field === 'financialAssetDiscount') nextValue = clampNumber(sanitized, 0, 100);
+
+    updateState({
+      insuranceAnalysis: {
+        ...analysisConfig,
+        [field]: nextValue,
+      },
+    });
+  };
+
   return (
     <div className="space-y-8 md:space-y-10 animate-in fade-in duration-700 pb-24">
       {/* Dynamic Header */}
-      <div className="bg-[#0b0f1a] p-8 md:p-16 rounded-[2.5rem] md:rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-8 md:p-16 rounded-[2.5rem] md:rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8 md:gap-12">
           <div className="space-y-4 md:space-y-6">
-            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-teal-500/10 text-teal-300 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <ShieldCheck size={14}/> Risk Protection Node
             </div>
-            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Shield <br/><span className="text-indigo-500">Security.</span></h2>
+            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Shield <br/><span className="text-teal-500">Security.</span></h2>
             <p className="text-slate-400 text-sm md:text-lg font-medium max-w-lg leading-relaxed">
               Auditing <span className="text-white font-bold">Human Life Value</span> against debt liabilities.
             </p>
@@ -89,8 +101,8 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
 
       {/* Tabs - Better for mobile */}
       <div className="flex p-1.5 bg-white rounded-2xl md:rounded-[2.5rem] border border-slate-200 w-full md:w-fit mx-auto shadow-sm">
-        <button onClick={() => setActiveTab('analysis')} className={`flex-1 md:flex-none px-4 md:px-10 py-3 md:py-4 rounded-xl md:rounded-[2rem] text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'analysis' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}>Analysis</button>
-        <button onClick={() => setActiveTab('inventory')} className={`flex-1 md:flex-none px-4 md:px-10 py-3 md:py-4 rounded-xl md:rounded-[2rem] text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'inventory' ? 'bg-indigo-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}>Inventory</button>
+        <button onClick={() => setActiveTab('analysis')} className={`flex-1 md:flex-none px-4 md:px-10 py-3 md:py-4 rounded-xl md:rounded-[2rem] text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'analysis' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}>Analysis</button>
+        <button onClick={() => setActiveTab('inventory')} className={`flex-1 md:flex-none px-4 md:px-10 py-3 md:py-4 rounded-xl md:rounded-[2rem] text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'inventory' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}>Inventory</button>
       </div>
 
       {activeTab === 'analysis' ? (
@@ -102,8 +114,8 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
                        <div className="space-y-6">
                           <div className="space-y-3">
-                             <div className="flex justify-between items-center"><label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Inflation</label><span className="text-lg md:text-xl font-black text-indigo-600">{analysisConfig.inflation}%</span></div>
-                             <input type="range" min="3" max="12" step="0.5" value={analysisConfig.inflation} onChange={e => setAnalysisConfig({...analysisConfig, inflation: parseFloat(e.target.value)})} className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-indigo-600" />
+                             <div className="flex justify-between items-center"><label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Inflation</label><span className="text-lg md:text-xl font-black text-teal-600">{analysisConfig.inflation}%</span></div>
+                             <input type="range" min="0" max="15" step="0.5" value={analysisConfig.inflation} onChange={e => updateAnalysisConfig('inflation', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-teal-600" />
                           </div>
                        </div>
                     </div>
@@ -134,7 +146,7 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
               {state.insurance.map((policy) => (
                 <div key={policy.id} className="bg-white p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-200 shadow-sm group transition-all flex flex-col justify-between min-h-[200px]">
                    <div className="flex justify-between items-start">
-                      <div className={`w-12 h-12 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0 ${policy.category === 'Life Insurance' ? 'bg-indigo-50 text-indigo-600' : 'bg-emerald-50 text-emerald-600'}`}><ShieldCheck size={24} md:size={28} /></div>
+                      <div className={`w-12 h-12 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center shrink-0 ${policy.category === 'Life Insurance' ? 'bg-teal-50 text-teal-600' : 'bg-emerald-50 text-emerald-600'}`}><ShieldCheck size={24} md:size={28} /></div>
                       <button onClick={() => removePolicy(policy.id)} className="p-2 text-slate-200 hover:text-rose-500 transition-colors"><Trash2 size={18} /></button>
                    </div>
                    <div className="mt-4 md:mt-6">

@@ -9,6 +9,7 @@ import {
   AlertTriangle, Lightbulb, BarChart3
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell } from 'recharts';
+import { parseNumber } from '../lib/validation';
 
 const LOAN_TYPES: { type: LoanType, icon: any }[] = [
   { type: 'Home Loan', icon: Home },
@@ -25,6 +26,9 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
   const [showAdd, setShowAdd] = useState(false);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
   const [lumpSumAmount, setLumpSumAmount] = useState<string>('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formWarning, setFormWarning] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   
   const [newLoan, setNewLoan] = useState<Partial<Loan>>({
     type: 'Home Loan',
@@ -41,7 +45,58 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
   });
 
   const handleAdd = () => {
-    const loan = { ...newLoan, id: Math.random().toString(36).substr(2, 9) } as Loan;
+    setFormError(null);
+    setFormWarning(null);
+
+    const source = (newLoan.source || '').trim();
+    const sanctionedAmount = parseNumber(newLoan.sanctionedAmount || 0, 0);
+    const outstandingAmount = parseNumber(newLoan.outstandingAmount || 0, 0);
+    const interestRate = parseNumber(newLoan.interestRate || 0, 0);
+    const remainingTenure = parseNumber(newLoan.remainingTenure || 0, 0);
+    const emi = parseNumber(newLoan.emi || 0, 0);
+    const owner = newLoan.owner || 'self';
+
+    if (!source) {
+      setFormError('Loan source is required.');
+      return;
+    }
+    if (sanctionedAmount < outstandingAmount) {
+      setFormError('Sanctioned amount must be >= outstanding amount.');
+      return;
+    }
+    if (interestRate <= 0 || interestRate > 40) {
+      setFormError('Interest rate must be between 1% and 40%.');
+      return;
+    }
+    if (remainingTenure <= 0) {
+      setFormError('Remaining tenure must be greater than 0.');
+      return;
+    }
+    if (emi <= 0) {
+      setFormError('EMI must be greater than 0.');
+      return;
+    }
+    if (!owner || (owner !== 'self' && !state.family.find(f => f.id === owner))) {
+      setFormError('Owner must be Self or a valid family member.');
+      return;
+    }
+    if (sanctionedAmount === 0 && outstandingAmount > 0) {
+      setFormWarning('Sanctioned amount is 0 but outstanding is set.');
+      setNotice('Loan saved with 0 sanctioned amount. Consider updating for accuracy.');
+      setTimeout(() => setNotice(null), 4000);
+    }
+
+    const loan = {
+      ...newLoan,
+      id: Math.random().toString(36).substr(2, 9),
+      source,
+      owner,
+      sanctionedAmount,
+      outstandingAmount,
+      interestRate,
+      remainingTenure,
+      emi,
+    } as Loan;
     updateState({ loans: [...state.loans, loan] });
     setShowAdd(false);
     setNewLoan({ type: 'Home Loan', sourceType: 'Bank', owner: 'self', source: '', sanctionedAmount: 0, outstandingAmount: 0, interestRate: 8.5, remainingTenure: 120, emi: 0, notes: '', lumpSumRepayments: [] });
@@ -141,27 +196,129 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-24">
+      {notice && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl px-6 py-3 text-[10px] font-black uppercase tracking-widest">
+          {notice}
+        </div>
+      )}
       {/* Header Strategy Block */}
-      <div className="bg-[#0b0f1a] p-12 md:p-16 rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
+      <div className="surface-dark p-12 md:p-16 rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12 text-left">
           <div className="space-y-6">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-500/10 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-500/20">
+            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
               <Activity size={14}/> Liability Architecture
             </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Debt <br/><span className="text-indigo-500">Inventory.</span></h2>
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Debt <br/><span className="text-teal-500">Inventory.</span></h2>
             <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
               Monitoring <span className="text-white font-bold">{state.loans.length} active lines</span> for <span className="text-white font-bold">{state.profile.firstName} {state.profile.lastName}</span>.
             </p>
           </div>
           <button 
-            onClick={() => setShowAdd(true)}
-            className="px-12 py-8 bg-indigo-600 hover:bg-indigo-50 text-white hover:text-indigo-600 rounded-[2.5rem] transition-all flex items-center gap-4 font-black uppercase text-sm tracking-[0.25em] shadow-2xl active:scale-95 shrink-0"
+            onClick={() => setShowAdd(prev => !prev)}
+            className="px-12 py-8 bg-teal-600 hover:bg-teal-50 text-white hover:text-teal-600 rounded-[2.5rem] transition-all flex items-center gap-4 font-black uppercase text-sm tracking-[0.25em] shadow-2xl active:scale-95 shrink-0"
           >
-            <Plus size={22} /> Add Loan Profile
+            <Plus size={22} /> {showAdd ? 'Close Form' : 'Add Loan Profile'}
           </button>
         </div>
       </div>
+
+      {showAdd && (
+        <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] w-full shadow-2xl ring-1 ring-slate-200/70 overflow-hidden border border-white/20">
+          <div className="p-6 sm:p-10 md:p-12 border-b border-slate-50 flex justify-between items-center bg-white/90 text-left">
+            <div className="flex items-center gap-6">
+              <div className="p-4 bg-teal-50 text-teal-600 rounded-[1.5rem]"><Calculator size={28}/></div>
+              <div>
+                 <h3 className="text-3xl font-black text-slate-900 tracking-tight">Debt Origination</h3>
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Institutional Credit Profile</p>
+              </div>
+            </div>
+            <button onClick={() => setShowAdd(false)} className="p-4 bg-slate-50 hover:bg-rose-50 hover:text-rose-500 rounded-3xl text-slate-400 transition-all"><Plus size={32} className="rotate-45" /></button>
+          </div>
+          
+          <div className="p-6 sm:p-10 md:p-12 space-y-8 text-left bg-white/70">
+             {formError && (
+               <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold">
+                 {formError}
+               </div>
+             )}
+             {formWarning && (
+               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs font-bold">
+                 {formWarning}
+               </div>
+             )}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Loan Type</label>
+                  <select 
+                    value={newLoan.type}
+                    onChange={e => setNewLoan({...newLoan, type: e.target.value as LoanType})}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none"
+                  >
+                     {LOAN_TYPES.map(lt => <option key={lt.type}>{lt.type}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Source Type</label>
+                  <select 
+                    value={newLoan.sourceType}
+                    onChange={e => setNewLoan({...newLoan, sourceType: e.target.value as LoanSourceType})}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none"
+                  >
+                     {SOURCE_TYPES.map(st => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                </div>
+             </div>
+
+             <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Institution Name / Source</label>
+                <input type="text" value={newLoan.source} onChange={e => setNewLoan({...newLoan, source: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="HDFC, SBI, NBFC Name, etc." />
+             </div>
+
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Sanctioned Amount</label>
+                  <input type="number" value={newLoan.sanctionedAmount || ''} onChange={e => setNewLoan({...newLoan, sanctionedAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Current Outstanding</label>
+                  <input type="number" value={newLoan.outstandingAmount || ''} onChange={e => setNewLoan({...newLoan, outstandingAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
+                </div>
+             </div>
+
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Monthly EMI</label>
+                  <input type="number" value={newLoan.emi || ''} onChange={e => setNewLoan({...newLoan, emi: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Interest Rate (%)</label>
+                  <input type="number" step="0.1" value={newLoan.interestRate || ''} onChange={e => setNewLoan({...newLoan, interestRate: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Remaining Tenure</label>
+                  <input type="number" value={newLoan.remainingTenure || ''} onChange={e => setNewLoan({...newLoan, remainingTenure: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                </div>
+             </div>
+
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Owner</label>
+                  <select value={newLoan.owner} onChange={e => setNewLoan({...newLoan, owner: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none">
+                    <option value="self">Self</option>
+                    {state.family.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Loan Notes</label>
+                  <input type="text" value={newLoan.notes || ''} onChange={e => setNewLoan({...newLoan, notes: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="Any special notes" />
+                </div>
+             </div>
+
+             <button onClick={handleAdd} className="w-full py-8 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase tracking-[0.4em] text-lg hover:bg-teal-600 transition-all shadow-2xl flex items-center justify-center gap-6">Secure Credit Record <ArrowUpRight size={32}/></button>
+          </div>
+        </div>
+      )}
 
       {/* Insights Section */}
       {consolidationInsights.length > 0 && (
@@ -172,8 +329,8 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {consolidationInsights.map((insight, i) => (
-              <div key={i} className={`p-6 rounded-[2.5rem] border flex gap-4 items-start bg-white shadow-sm transition-all hover:shadow-md ${insight.priority === 'high' ? 'border-amber-200 bg-amber-50/30' : 'border-indigo-100 bg-indigo-50/30'}`}>
-                <div className={`p-3 rounded-2xl ${insight.priority === 'high' ? 'bg-amber-100 text-amber-600' : 'bg-indigo-100 text-indigo-600'}`}>
+              <div key={i} className={`p-6 rounded-[2.5rem] border flex gap-4 items-start bg-white shadow-sm transition-all hover:shadow-md ${insight.priority === 'high' ? 'border-amber-200 bg-amber-50/30' : 'border-teal-100 bg-teal-50/30'}`}>
+                <div className={`p-3 rounded-2xl ${insight.priority === 'high' ? 'bg-amber-100 text-amber-600' : 'bg-teal-100 text-teal-600'}`}>
                   <Zap size={20} />
                 </div>
                 <div className="text-left">
@@ -196,10 +353,10 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Monthly EMI Load</p>
           <h4 className="text-3xl font-black text-slate-900 tracking-tighter">₹{totalEMI.toLocaleString()}</h4>
         </div>
-        <div className="bg-slate-950 p-8 rounded-[2.5rem] text-white flex flex-col justify-center relative overflow-hidden group text-left">
+        <div className="surface-dark p-8 rounded-[2.5rem] text-white flex flex-col justify-center relative overflow-hidden group text-left">
            <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingDown size={80}/></div>
            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Debt-to-Income</p>
-           <h4 className="text-3xl font-black text-indigo-400 tracking-tighter">
+           <h4 className="text-3xl font-black text-teal-400 tracking-tighter">
              {state.profile.income.salary > 0 ? ((totalEMI / state.profile.income.salary) * 100).toFixed(1) : 0}%
            </h4>
         </div>
@@ -227,7 +384,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           const payoffProgress = Math.min(100, Math.round(((loan.sanctionedAmount - loan.outstandingAmount) / (loan.sanctionedAmount || 1)) * 100));
 
           return (
-            <div key={loan.id} className="bg-white rounded-[3.5rem] border border-slate-200 shadow-sm overflow-hidden hover:border-indigo-300 transition-all">
+            <div key={loan.id} className="bg-white rounded-[3.5rem] border border-slate-200 shadow-sm overflow-hidden hover:border-teal-300 transition-all">
               <div 
                 className="p-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-10 cursor-pointer"
                 onClick={() => setExpandedLoanId(isExpanded ? null : loan.id)}
@@ -238,7 +395,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                   </div>
                   <div className="space-y-2 flex-1">
                     <div className="flex items-center gap-3">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg">{loan.source}</span>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-teal-600 bg-teal-50 px-3 py-1 rounded-lg">{loan.source}</span>
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{loan.sourceType} • {loan.type}</span>
                     </div>
                     <h4 className="text-3xl font-black text-slate-900 tracking-tighter">₹{loan.outstandingAmount.toLocaleString()}</h4>
@@ -255,7 +412,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                    </div>
                    <div>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Rate</p>
-                      <p className="text-lg font-black text-indigo-600">{loan.interestRate}%</p>
+                      <p className="text-lg font-black text-teal-600">{loan.interestRate}%</p>
                    </div>
                    <div>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ends In</p>
@@ -282,13 +439,13 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                                  type="number" 
                                  value={lumpSumAmount} 
                                  onChange={e => setLumpSumAmount(e.target.value)} 
-                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-black text-lg outline-none focus:border-indigo-600" 
+                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-black text-lg outline-none focus:border-teal-600" 
                                  placeholder="Amount ₹"
                                  onClick={e => e.stopPropagation()}
                               />
                               <button 
                                  onClick={(e) => { e.stopPropagation(); addLumpSum(loan.id); }}
-                                 className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+                                 className="w-full py-4 bg-teal-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-700 transition-all flex items-center justify-center gap-2"
                               >
                                  Record Payment <ArrowDownToLine size={14}/>
                               </button>
@@ -307,9 +464,9 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
 
                         {/* Notes Section */}
                         {loan.notes && (
-                          <div className="bg-indigo-50 p-8 rounded-[2.5rem] border border-indigo-100 text-left">
-                            <h5 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2"><MessageSquare size={14}/> Internal Notes</h5>
-                            <p className="text-sm font-bold text-indigo-900 italic leading-relaxed">"{loan.notes}"</p>
+                          <div className="bg-teal-50 p-8 rounded-[2.5rem] border border-teal-100 text-left">
+                            <h5 className="text-[10px] font-black text-teal-400 uppercase tracking-widest mb-3 flex items-center gap-2"><MessageSquare size={14}/> Internal Notes</h5>
+                            <p className="text-sm font-bold text-teal-900 italic leading-relaxed">"{loan.notes}"</p>
                           </div>
                         )}
 
@@ -350,7 +507,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                         <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
                            <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center">
                               <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detailed Amortization Node</h5>
-                              <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">12 Month Window</span>
+                              <span className="text-[9px] font-black text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full uppercase">12 Month Window</span>
                            </div>
                            <div className="overflow-x-auto max-h-[300px] no-scrollbar">
                               <table className="w-full text-left">
@@ -384,92 +541,6 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
         })}
       </div>
 
-      {showAdd && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-3xl z-[70] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[4rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 h-[85vh] flex flex-col border border-white/20">
-            <div className="p-12 border-b border-slate-50 flex justify-between items-center bg-white sticky top-0 z-30 text-left">
-              <div className="flex items-center gap-6">
-                <div className="p-4 bg-indigo-50 text-indigo-600 rounded-[1.5rem]"><Calculator size={28}/></div>
-                <div>
-                   <h3 className="text-3xl font-black text-slate-900 tracking-tight">Debt Origination</h3>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Institutional Credit Profile</p>
-                </div>
-              </div>
-              <button onClick={() => setShowAdd(false)} className="p-4 bg-slate-50 hover:bg-rose-50 hover:text-rose-500 rounded-3xl text-slate-400 transition-all"><Plus size={32} className="rotate-45" /></button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-12 space-y-8 no-scrollbar text-left">
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Loan Type</label>
-                    <select 
-                      value={newLoan.type}
-                      onChange={e => setNewLoan({...newLoan, type: e.target.value as LoanType})}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none"
-                    >
-                       {LOAN_TYPES.map(lt => <option key={lt.type}>{lt.type}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Source Type</label>
-                    <select 
-                      value={newLoan.sourceType}
-                      onChange={e => setNewLoan({...newLoan, sourceType: e.target.value as LoanSourceType})}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none"
-                    >
-                       {SOURCE_TYPES.map(st => <option key={st} value={st}>{st}</option>)}
-                    </select>
-                  </div>
-               </div>
-
-               <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Institution Name / Source</label>
-                  <input type="text" value={newLoan.source} onChange={e => setNewLoan({...newLoan, source: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="HDFC, SBI, NBFC Name, etc." />
-               </div>
-
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Sanctioned Amount</label>
-                    <input type="number" value={newLoan.sanctionedAmount || ''} onChange={e => setNewLoan({...newLoan, sanctionedAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Current Outstanding</label>
-                    <input type="number" value={newLoan.outstandingAmount || ''} onChange={e => setNewLoan({...newLoan, outstandingAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
-                  </div>
-               </div>
-
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Monthly EMI</label>
-                    <input type="number" value={newLoan.emi || ''} onChange={e => setNewLoan({...newLoan, emi: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Interest Rate (%)</label>
-                    <input type="number" step="0.1" value={newLoan.interestRate || ''} onChange={e => setNewLoan({...newLoan, interestRate: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Remaining (Mo)</label>
-                    <input type="number" value={newLoan.remainingTenure || ''} onChange={e => setNewLoan({...newLoan, remainingTenure: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
-                  </div>
-               </div>
-
-               <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><MessageSquare size={12}/> Specific Terms / Comments</label>
-                  <textarea 
-                    value={newLoan.notes} 
-                    onChange={e => setNewLoan({...newLoan, notes: e.target.value})} 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-medium outline-none resize-none h-24" 
-                    placeholder="e.g. Floating rate, part-payment allowed after 1yr, etc."
-                  />
-               </div>
-            </div>
-
-            <div className="p-10 border-t border-slate-100 bg-white">
-               <button onClick={handleAdd} className="w-full py-8 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase tracking-[0.4em] text-lg hover:bg-indigo-600 transition-all shadow-2xl flex items-center justify-center gap-6">Secure Credit Record <ArrowUpRight size={32}/></button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

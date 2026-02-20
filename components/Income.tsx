@@ -6,6 +6,7 @@ import {
   ChevronRight, Users, ArrowUpRight, Plus, Info, Wallet, Landmark,
   LineChart, CheckCircle2
 } from 'lucide-react';
+import { clampNumber, parseNumber } from '../lib/validation';
 
 interface IncomeProps {
   state: FinanceState;
@@ -25,18 +26,23 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
   , [members, selectedId]);
 
   const updateIncomeField = (field: keyof DetailedIncome, value: number) => {
+    const sanitized = Math.max(0, parseNumber(value, 0));
+    const finalValue =
+      field === 'expectedIncrease'
+        ? clampNumber(sanitized, 0, 25)
+        : sanitized;
     if (selectedId === 'self') {
       updateState({
         profile: {
           ...state.profile,
-          income: { ...state.profile.income, [field]: value }
+          income: { ...state.profile.income, [field]: finalValue }
         }
       });
     } else {
       updateState({
         family: state.family.map(f => 
           f.id === selectedId 
-            ? { ...f, income: { ...f.income, [field]: value } }
+            ? { ...f, income: { ...f.income, [field]: finalValue } }
             : f
         )
       });
@@ -56,10 +62,10 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
   }, [totalIncome, currentMember.income.expectedIncrease]);
 
   const IncomeInput = ({ label, icon: Icon, value, field, description }: any) => (
-    <div className="group bg-white p-6 rounded-[2.5rem] border border-slate-200 hover:border-indigo-400 transition-all shadow-sm">
+    <div className="group bg-white p-6 rounded-[2.5rem] border border-slate-200 hover:border-teal-400 transition-all shadow-sm">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-slate-50 text-slate-400 group-hover:bg-indigo-600 group-hover:text-white rounded-2xl transition-all">
+          <div className="p-3 bg-slate-50 text-slate-400 group-hover:bg-teal-600 group-hover:text-white rounded-2xl transition-all">
             <Icon size={18} />
           </div>
           <div>
@@ -88,7 +94,7 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
       <div className="space-y-4">
         <div className="flex items-center justify-between px-2">
           <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Household Earner Selection</h3>
-          <div className="flex items-center gap-2 text-[10px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+          <div className="flex items-center gap-2 text-[10px] font-black text-teal-600 bg-teal-50 px-3 py-1 rounded-full">
             <Users size={12}/> {members.length} Members Active
           </div>
         </div>
@@ -101,11 +107,11 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
               className={`relative flex-shrink-0 w-48 p-6 rounded-[2.5rem] border-2 transition-all text-left overflow-hidden group ${
                 selectedId === member.id 
                   ? 'bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20' 
-                  : 'bg-white border-slate-200 text-slate-900 hover:border-indigo-300'
+                  : 'bg-white border-slate-200 text-slate-900 hover:border-teal-300'
               }`}
             >
               {selectedId === member.id && (
-                <div className="absolute top-4 right-4 text-indigo-400 animate-pulse">
+                <div className="absolute top-4 right-4 text-teal-400 animate-pulse">
                   <CheckCircle2 size={16} />
                 </div>
               )}
@@ -114,7 +120,7 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
               </p>
               <h4 className="text-lg font-black tracking-tight">{member.name}</h4>
               <div className="mt-4 flex items-center justify-between">
-                <span className={`text-[10px] font-bold ${selectedId === member.id ? 'text-indigo-400' : 'text-indigo-600'}`}>
+                <span className={`text-[10px] font-bold ${selectedId === member.id ? 'text-teal-400' : 'text-teal-600'}`}>
                   ${((member.income.salary || 0) + (member.income.bonus || 0) + (member.income.investment || 0)).toLocaleString()}
                 </span>
                 <ChevronRight size={14} className={selectedId === member.id ? 'text-white' : 'text-slate-200'} />
@@ -125,9 +131,9 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
           {/* Prompt to add more family members */}
           <button 
             onClick={() => {/* In App.tsx renderView should handle this if view state is lifted */ window.location.hash = '#family'}} 
-            className="flex-shrink-0 w-48 p-6 rounded-[2.5rem] border-2 border-dashed border-slate-200 bg-slate-50/50 flex flex-col items-center justify-center gap-2 group hover:bg-indigo-50 hover:border-indigo-200 transition-all"
+            className="flex-shrink-0 w-48 p-6 rounded-[2.5rem] border-2 border-dashed border-slate-200 bg-slate-50/50 flex flex-col items-center justify-center gap-2 group hover:bg-teal-50 hover:border-teal-200 transition-all"
           >
-            <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 group-hover:text-indigo-600 group-hover:border-indigo-200 transition-all">
+            <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 group-hover:text-teal-600 group-hover:border-teal-200 transition-all">
               <Plus size={20} />
             </div>
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Add Member</span>
@@ -145,7 +151,7 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
                 <Briefcase size={120} />
              </div>
              <div>
-                <p className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] mb-2">Income Stream Analysis</p>
+                <p className="text-[10px] font-black text-teal-600 uppercase tracking-[0.2em] mb-2">Income Stream Analysis</p>
                 <h2 className="text-3xl font-black text-slate-900">{currentMember.name}'s Benefits</h2>
                 <p className="text-sm font-medium text-slate-500 max-w-sm mt-2">Adjust monthly inflows and expected annual hikes to project wealth trajectory.</p>
              </div>
@@ -180,21 +186,21 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
           <div className="bg-white p-10 rounded-[3.5rem] border border-slate-200 shadow-sm flex flex-col space-y-8">
              <div className="flex items-center justify-between">
                 <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                   <TrendingUp className="text-indigo-600" size={20} /> Career Growth
+                   <TrendingUp className="text-teal-600" size={20} /> Career Growth
                 </h3>
-                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><LineChart size={18}/></div>
+                <div className="p-2 bg-teal-50 text-teal-600 rounded-xl"><LineChart size={18}/></div>
              </div>
              
              <div className="space-y-6">
                 <div className="flex justify-between items-center">
                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Expected Increase</span>
-                   <span className="text-2xl font-black text-indigo-600">{currentMember.income.expectedIncrease}%</span>
+                   <span className="text-2xl font-black text-teal-600">{currentMember.income.expectedIncrease}%</span>
                 </div>
                 <input 
-                   type="range" min="0" max="40" step="1"
+                   type="range" min="0" max="25" step="1"
                    value={currentMember.income.expectedIncrease}
                    onChange={(e) => updateIncomeField('expectedIncrease', parseInt(e.target.value))}
-                   className="w-full h-2 bg-slate-100 rounded-full appearance-none cursor-pointer accent-indigo-600"
+                   className="w-full h-2 bg-slate-100 rounded-full appearance-none cursor-pointer accent-teal-600"
                 />
                 <div className="flex justify-between text-[8px] font-black text-slate-300 uppercase tracking-tighter">
                    <span>Conservative</span>
@@ -213,7 +219,7 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
                     </span>
                   </div>
                 </div>
-                <div className="p-4 bg-slate-950 rounded-[2rem] text-white">
+                <div className="p-4 surface-dark rounded-[2rem] text-white">
                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Strategy Tip</p>
                    <p className="text-[10px] font-medium leading-relaxed text-slate-400 italic">
                      "Allocating 50% of your annual {currentMember.income.expectedIncrease}% raise to Equity will shave 18 months off your retirement goal."
@@ -223,11 +229,11 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
           </div>
 
           {/* Combined Household Summary */}
-          <div className="bg-indigo-600 p-10 rounded-[3.5rem] text-white space-y-6 relative overflow-hidden group shadow-2xl shadow-indigo-600/30">
+          <div className="bg-teal-600 p-10 rounded-[3.5rem] text-white space-y-6 relative overflow-hidden group shadow-2xl shadow-teal-600/30">
              <div className="absolute bottom-0 right-0 w-48 h-48 bg-white/10 blur-[80px] rounded-full translate-x-1/2 translate-y-1/2 group-hover:scale-110 transition-transform duration-1000" />
              <div className="p-3 bg-white/20 rounded-2xl w-fit"><Wallet size={24}/></div>
              <div>
-                <p className="text-[10px] font-black text-indigo-200 uppercase tracking-[0.2em] mb-1">Combined Monthly Household</p>
+                <p className="text-[10px] font-black text-teal-200 uppercase tracking-[0.2em] mb-1">Combined Monthly Household</p>
                 <h3 className="text-4xl font-black">
                   ${(state.family.reduce((acc, f) => {
                     const i = f.income;
@@ -236,7 +242,7 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
                   ((state.profile.income.salary || 0) + (state.profile.income.bonus || 0) + (state.profile.income.reimbursements || 0) + (state.profile.income.business || 0) + (state.profile.income.rental || 0) + (state.profile.income.investment || 0))).toLocaleString()}
                 </h3>
              </div>
-             <button onClick={() => {/* Lifted state usually needed to set dashboard, assuming App handles hash/state */ window.location.hash = '#dashboard'}} className="w-full py-4 bg-white text-indigo-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 transition-all flex items-center justify-center gap-2">
+             <button onClick={() => {/* Lifted state usually needed to set dashboard, assuming App handles hash/state */ window.location.hash = '#dashboard'}} className="w-full py-4 bg-white text-teal-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-50 transition-all flex items-center justify-center gap-2">
                 View Cash Flow Radar <ChevronRight size={14} />
              </button>
           </div>
