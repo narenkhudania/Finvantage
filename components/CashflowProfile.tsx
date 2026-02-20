@@ -67,7 +67,8 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
     if (existing) {
       newExpenses = state.detailedExpenses.map(e => e.category === categoryName ? { ...e, amount } : e);
     } else {
-      newExpenses = [...state.detailedExpenses, { category: categoryName, amount, inflationRate: 6, tenure: 34 }];
+      const year = new Date().getFullYear();
+      newExpenses = [...state.detailedExpenses, { category: categoryName, amount, inflationRate: 6, tenure: 34, frequency: 'Monthly', startYear: year, endYear: year + 34 }];
     }
     updateState({ detailedExpenses: newExpenses });
   };

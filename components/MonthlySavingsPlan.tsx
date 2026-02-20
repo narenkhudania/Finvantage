@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { FinanceState } from '../types';
 import { formatCurrency } from '../lib/currency';
+import { annualizeAmount } from '../lib/financeMath';
 
 const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [activeView, setActiveView] = useState<'matrix' | 'ledger'>('matrix');
@@ -16,7 +17,11 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
     const monthlyIncome = (state.profile.income.salary || 0) + (state.profile.income.investment || 0);
     const survival = state.profile.monthlyExpenses || 0;
     const servicing = state.loans.reduce((acc, l) => acc + (l.emi || 0), 0);
-    const success = (15000) + (70000); // NPS + Portfolio SIP mock
+    const commitmentMonthly = (state.investmentCommitments || []).reduce((sum, c) => {
+      const annual = annualizeAmount(c.amount, c.frequency);
+      return sum + (annual / 12);
+    }, 0);
+    const success = commitmentMonthly > 0 ? commitmentMonthly : (15000 + 70000); // fallback mock
 
     return {
       income: monthlyIncome,

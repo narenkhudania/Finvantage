@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { FinanceState, DetailedIncome, Goal, RelativeDate } from '../types';
 import { formatCurrency } from '../lib/currency';
+import { annualizeAmount, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption } from '../lib/financeMath';
+import { inferTenureMonths } from '../lib/loanMath';
 
 interface CashflowProps {
   state: FinanceState;
@@ -38,23 +40,114 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
   const projectionData = useMemo(() => {
     const data = [];
     let cumulativeSurplus = 0;
+    let corpus = state.assets.reduce((sum, a) => sum + a.currentValue, 0);
 
-    const baseInflow = calculateTotalMemberIncome(state.profile.income) + 
-                      state.family.reduce((sum, f) => sum + calculateTotalMemberIncome(f.income), 0);
+    const hasCashflows = (state.cashflows || []).length > 0;
+    const hasCommitments = (state.investmentCommitments || []).length > 0;
+
+    const incomeMembers = [
+      { income: state.profile.income },
+      ...state.family.map(f => ({ income: f.income })),
+    ];
+    const baseMonthlyIncome = incomeMembers.reduce((sum, m) => sum + calculateTotalMemberIncome(m.income), 0);
+    const totalIncomeForGrowth = incomeMembers.reduce((sum, m) => sum + calculateTotalMemberIncome(m.income), 0);
+    const weightedGrowth = incomeMembers.reduce((sum, m) => {
+      const memberTotal = calculateTotalMemberIncome(m.income);
+      return sum + (memberTotal * (m.income.expectedIncrease || 0));
+    }, 0);
+    const incomeGrowthRate = totalIncomeForGrowth > 0 ? (weightedGrowth / totalIncomeForGrowth) / 100 : 0;
+
+    const baseInflow = hasCashflows
+      ? 0
+      : baseMonthlyIncome;
     
     const baseLiving = state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0) || state.profile.monthlyExpenses;
     const baseDebt = state.loans.reduce((sum, l) => sum + l.emi, 0);
-    // Assuming portfolio SIPs are part of committed investments
-    const committedInvestments = 85000; // Mock committed value for visualization
+    const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
 
-    for (let i = 0; i <= 35; i++) {
+    const endYear = getLifeExpectancyYear(state.profile.dob, state.profile.lifeExpectancy) ?? (currentYear + 35);
+    const projectionYears = Math.max(1, endYear - currentYear);
+
+    for (let i = 0; i <= projectionYears; i++) {
       const year = currentYear + i;
-      const growthFactor = Math.pow(1.06, i); 
-      
-      const yearlyInflow = baseInflow * 12 * growthFactor;
-      const yearlyLiving = baseLiving * 12 * growthFactor;
-      const yearlyDebt = baseDebt * 12; 
-      const yearlyCommitted = committedInvestments * 12 * growthFactor;
+      const growthFactor = Math.pow(1 + incomeGrowthRate, i); 
+
+      const yearlyInflow = hasCashflows
+        ? (state.cashflows || []).reduce((sum, flow) => {
+            if (flow.flowType && flow.flowType !== 'Income') return sum;
+            if (year < flow.startYear || year > flow.endYear) return sum;
+            const yearsFromStart = Math.max(0, year - flow.startYear);
+            const baseAnnual = annualizeAmount(flow.amount, flow.frequency);
+            const adjusted = baseAnnual * Math.pow(1 + (flow.growthRate || 0) / 100, yearsFromStart);
+            if (flow.frequency === 'One time') {
+              return sum + (year === flow.startYear ? adjusted : 0);
+            }
+            return sum + adjusted;
+          }, 0)
+        : baseInflow * 12 * growthFactor;
+
+      const expenseFromFlows = (state.cashflows || []).reduce((sum, flow) => {
+        if (flow.flowType !== 'Expense') return sum;
+        if (year < flow.startYear || year > flow.endYear) return sum;
+        const yearsFromStart = Math.max(0, year - flow.startYear);
+        const baseAnnual = annualizeAmount(flow.amount, flow.frequency);
+        const adjusted = baseAnnual * Math.pow(1 + (flow.growthRate || 0) / 100, yearsFromStart);
+        if (flow.frequency === 'One time') {
+          return sum + (year === flow.startYear ? adjusted : 0);
+        }
+        return sum + adjusted;
+      }, 0);
+
+      const yearlyLiving = (state.detailedExpenses || []).length > 0
+        ? state.detailedExpenses.reduce((sum, e) => {
+            const frequency = e.frequency || 'Monthly';
+            const startYear = e.startYear ?? currentYear;
+            const endYearForExpense = e.endYear ?? endYear;
+            if (year < startYear || year > endYearForExpense) return sum;
+            const yearsFromStart = Math.max(0, year - startYear);
+            const baseAnnual = annualizeAmount(e.amount, frequency);
+            const adjusted = baseAnnual * Math.pow(1 + (e.inflationRate || 0) / 100, yearsFromStart);
+            if (frequency === 'One time') {
+              return sum + (year === startYear ? adjusted : 0);
+            }
+            return sum + adjusted;
+          }, 0) + expenseFromFlows
+        : (baseLiving * 12 * Math.pow(1.06, i)) + expenseFromFlows;
+
+      const yearlyDebt = state.loans.reduce((sum, loan) => {
+        const start = loan.startYear ?? currentYear;
+        const tenureMonths = inferTenureMonths(loan).months;
+        const tenureYears = Math.ceil(tenureMonths / 12);
+        const end = start + Math.max(0, tenureYears - 1);
+        if (year < start || year > end) return sum;
+        return sum + (loan.emi || 0) * 12;
+      }, 0); 
+
+      const commitmentTotal = hasCommitments
+        ? (state.investmentCommitments || []).reduce((sum, c) => {
+            if (year < c.startYear || year > c.endYear) return sum;
+            const yearsFromStart = Math.max(0, year - c.startYear);
+            const baseAnnual = annualizeAmount(c.amount, c.frequency);
+            const adjusted = baseAnnual * Math.pow(1 + (c.stepUp || 0) / 100, yearsFromStart);
+            if (c.frequency === 'One time') {
+              return sum + (year === c.startYear ? adjusted : 0);
+            }
+            return sum + adjusted;
+          }, 0)
+        : 0;
+
+      const assetContributionTotal = (state.assets || []).reduce((sum, asset) => {
+        if (!asset.monthlyContribution || !asset.contributionFrequency) return sum;
+        const sYear = asset.contributionStartYear ?? currentYear;
+        const eYear = asset.contributionEndYear ?? endYear;
+        if (year < sYear || year > eYear) return sum;
+        const yearsFromStart = Math.max(0, year - sYear);
+        const baseAnnual = annualizeAmount(asset.monthlyContribution, asset.contributionFrequency);
+        const adjusted = baseAnnual * Math.pow(1 + (asset.contributionStepUp || 0) / 100, yearsFromStart);
+        return sum + adjusted;
+      }, 0);
+
+      const yearlyCommitted = commitmentTotal + assetContributionTotal;
       
       const activeGoals = state.goals.filter(g => {
         const sYear = resolveYear(g.startDate);
@@ -63,20 +156,33 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
       });
 
       const goalRequirement = activeGoals.reduce((sum, g) => {
-        const inflationAdjustedGoal = g.targetAmountToday * Math.pow(1 + (g.inflationRate / 100), i);
+        const inflationAdjustedGoal = g.startGoalAmount
+          ? g.startGoalAmount * Math.pow(1 + (g.inflationRate / 100), Math.max(0, year - resolveYear(g.startDate)))
+          : g.targetAmountToday * Math.pow(1 + (g.inflationRate / 100), i);
         if (g.isRecurring) {
           const sDate = resolveYear(g.startDate);
-          const eDate = resolveYear(g.endDate);
-          const duration = Math.max(1, eDate - sDate + 1);
-          return sum + (inflationAdjustedGoal / duration);
+          const interval = getGoalIntervalYears(g.frequency);
+          if (interval > 1) {
+            return sum + ((year - sDate) % interval === 0 ? inflationAdjustedGoal : 0);
+          }
+          if (g.frequency === 'Monthly') {
+            return sum + (inflationAdjustedGoal * 12);
+          }
+          return sum + inflationAdjustedGoal;
         } else {
           return year === resolveYear(g.endDate) ? sum + inflationAdjustedGoal : sum;
         }
       }, 0);
 
-      const totalOutflow = yearlyLiving + yearlyDebt + goalRequirement;
-      const netSurplus = yearlyInflow - totalOutflow;
+      const totalExpenses = yearlyLiving + yearlyDebt;
+      const netSurplus = yearlyInflow - totalExpenses - yearlyCommitted;
+      const totalOutflow = totalExpenses + yearlyCommitted + goalRequirement;
+      const netAfterGoals = yearlyInflow - totalOutflow;
+      const savingsRatio = yearlyInflow > 0 ? (netSurplus / yearlyInflow) * 100 : 0;
+      const debtServicingRatio = yearlyInflow > 0 ? (yearlyDebt / yearlyInflow) * 100 : 0;
+
       cumulativeSurplus += netSurplus;
+      corpus = (corpus * (1 + assumedReturn / 100)) + netAfterGoals;
 
       data.push({
         year,
@@ -86,8 +192,12 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
         committed: Math.round(yearlyCommitted),
         goalRequirement: Math.round(goalRequirement),
         totalOutflow: Math.round(totalOutflow),
-        surplus: Math.round(netSurplus),
+        surplus: Math.round(netAfterGoals),
+        netSurplus: Math.round(netSurplus),
         cumulative: Math.round(cumulativeSurplus),
+        savingsRatio: Number(savingsRatio.toFixed(2)),
+        debtServicingRatio: Number(debtServicingRatio.toFixed(2)),
+        corpus: Math.round(corpus),
         age: (birthYear ? year - birthYear : 30 + i)
       });
     }
@@ -118,6 +228,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
   }, [state.profile]);
 
   const currencyCountry = state.profile.country;
+  const currentSnapshot = projectionData[0];
 
   return (
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-6 duration-1000 pb-24">
@@ -138,11 +249,34 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
              </div>
              <div className="text-left">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Peak Surplus Capacity</p>
-                <h4 className="text-4xl font-black text-white">{formatCurrency(Math.max(...projectionData.map(d => d.surplus)), currencyCountry)}</h4>
+                <h4 className="text-4xl font-black text-white">{formatCurrency(Math.max(...projectionData.map(d => d.netSurplus || d.surplus)), currencyCountry)}</h4>
              </div>
           </div>
         </div>
       </div>
+
+      {currentSnapshot && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Annual Inflow</p>
+            <h4 className="text-2xl font-black text-slate-900">{formatCurrency(currentSnapshot.inflow, currencyCountry)}</h4>
+          </div>
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Annual Expenses</p>
+            <h4 className="text-2xl font-black text-rose-600">{formatCurrency(currentSnapshot.living + currentSnapshot.debt, currencyCountry)}</h4>
+          </div>
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Net Surplus (Pre-Goals)</p>
+            <h4 className={`text-2xl font-black ${currentSnapshot.netSurplus >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {formatCurrency(currentSnapshot.netSurplus, currencyCountry)}
+            </h4>
+          </div>
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Debt Servicing Ratio</p>
+            <h4 className="text-2xl font-black text-slate-900">{currentSnapshot.debtServicingRatio.toFixed(2)}%</h4>
+          </div>
+        </div>
+      )}
 
       {/* Outflow Breakdown (Stacked Bar) */}
       <div className="bg-white p-12 rounded-[5rem] border border-slate-200 shadow-sm flex flex-col">

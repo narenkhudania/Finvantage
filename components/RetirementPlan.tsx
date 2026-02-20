@@ -2,6 +2,7 @@
 import React, { useMemo } from 'react';
 import { FinanceState, DetailedIncome } from '../types';
 import { formatCurrency } from '../lib/currency';
+import { getRiskReturnAssumption } from '../lib/financeMath';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   BarChart, Bar, Legend, Cell 
@@ -25,12 +26,12 @@ const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
     let currentWealth = state.assets.reduce((sum, a) => sum + a.currentValue, 0);
     const yearlySavings = (householdIncome - householdExpenses) * 12;
     const currentYear = new Date().getFullYear();
+    const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
     const data = [];
 
     for (let i = 0; i <= 20; i++) {
       const year = currentYear + i;
-      // Compounding previous wealth at 8% + adding new yearly savings
-      currentWealth = (currentWealth * 1.08) + yearlySavings;
+      currentWealth = (currentWealth * (1 + assumedReturn / 100)) + yearlySavings;
       
       data.push({
         year: year.toString(),
@@ -40,7 +41,7 @@ const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
       });
     }
     return data;
-  }, [householdIncome, householdExpenses, state.assets]);
+  }, [householdIncome, householdExpenses, state.assets, state.riskProfile?.level]);
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 pb-24">
@@ -56,7 +57,7 @@ const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
             <h2 className="text-5xl md:text-7xl font-black tracking-tight leading-[0.9]">Simulation <br/><span className="text-teal-500">Trajectory.</span></h2>
             <p className="text-slate-400 text-lg font-medium leading-relaxed">
               Mapping your household's 20-year accumulation phase based on actual savings rate, 
-              assumed 8% market return, and 5% steady-state inflation.
+              risk-adjusted market return, and 5% steady-state inflation.
             </p>
           </div>
           

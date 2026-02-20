@@ -9,7 +9,7 @@ import {
   Info, DollarSign, User, Wallet, Percent, LayoutGrid, Layers,
   BarChart3, Settings2
 } from 'lucide-react';
-import { Goal, GoalType, FinanceState, RelativeDate, RelativeDateType, ResourceBucket, ExpenseItem } from '../types';
+import { Goal, GoalType, FinanceState, RelativeDate, RelativeDateType, ResourceBucket, ExpenseItem, LoanType } from '../types';
 import { parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
@@ -64,6 +64,7 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
     targetAmountToday: 0,
     inflationRate: 6,
     currentAmount: 0,
+    loan: { enabled: false },
   };
 
   const [newGoal, setNewGoal] = useState<Partial<Goal>>(initialNewGoal);
@@ -77,9 +78,17 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
 
   const handleEdit = (goal: Goal) => {
     setEditingId(goal.id);
-    setNewGoal(goal);
+    setNewGoal({ ...goal, loan: goal.loan ?? { enabled: false } });
     setStep(1);
     setShowAdd(true);
+  };
+
+  const computeEmi = (principal: number, annualRate: number, years: number) => {
+    if (principal <= 0 || annualRate <= 0 || years <= 0) return 0;
+    const monthlyRate = annualRate / 12 / 100;
+    const months = years * 12;
+    const factor = Math.pow(1 + monthlyRate, months);
+    return Math.round((principal * monthlyRate * factor) / (factor - 1));
   };
 
   const handleSave = () => {
@@ -134,22 +143,101 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
       setTimeout(() => setNotice(null), 4000);
     }
 
+    const yearsToStart = Math.max(0, startYear - currentYear);
+    const startGoalAmount = targetAmount * Math.pow(1 + (inflationRate / 100), yearsToStart);
+
+    const mapGoalLoanType = (goalType: GoalType): LoanType => {
+      if (goalType === 'Car') return 'Car Loan';
+      if (goalType === 'Land / Home' || goalType === 'Holiday Home' || goalType === 'Home Renovation' || goalType === 'Commercial') return 'Property Purchase';
+      return 'Personal Loan';
+    };
+
+    let loan = newGoal.loan;
+    let updatedLoans = state.loans;
+    let loanNotice: string | null = null;
+    if (loan?.enabled) {
+      const loanPercent = parseNumber(loan.percent ?? 0, 0);
+      const loanValueInput = parseNumber(loan.value ?? 0, 0);
+      const loanValue = loanValueInput > 0 ? loanValueInput : (loanPercent > 0 ? (startGoalAmount * loanPercent) / 100 : 0);
+      const roi = parseNumber(loan.roi ?? 0, 0);
+      const tenure = parseNumber(loan.tenure ?? 0, 0);
+
+      if (loanValue <= 0) {
+        setFormError('Loan percent or value is required when loan is enabled.');
+        return;
+      }
+      if (roi <= 0 || tenure <= 0) {
+        setFormError('Loan ROI and tenure are required when loan is enabled.');
+        return;
+      }
+
+      const emi = computeEmi(loanValue, roi, tenure);
+      const percent = loanPercent > 0 ? loanPercent : (startGoalAmount > 0 ? (loanValue / startGoalAmount) * 100 : undefined);
+      const loanId = loan.loanId;
+      const loanRecord = {
+        id: loanId || Math.random().toString(36).substr(2, 9),
+        type: mapGoalLoanType(newGoal.type || 'Others'),
+        owner: 'self',
+        source: 'Goal Financing',
+        sourceType: 'Bank',
+        sanctionedAmount: Math.round(loanValue),
+        outstandingAmount: Math.round(loanValue),
+        interestRate: roi,
+        remainingTenure: Math.round(tenure * 12),
+        emi,
+        startYear: startYear,
+        notes: `Auto-created from goal: ${description}`,
+        lumpSumRepayments: [],
+      };
+
+      if (loanId && state.loans.some(l => l.id === loanId)) {
+        updatedLoans = state.loans.map(l => l.id === loanId ? { ...l, ...loanRecord } : l);
+        loanNotice = 'Loan record updated in Liabilities.';
+      } else {
+        updatedLoans = [...state.loans, loanRecord];
+        loanNotice = 'Loan record created in Liabilities.';
+      }
+
+      loan = {
+        enabled: true,
+        loanId: loanRecord.id,
+        percent: percent ? Number(percent.toFixed(2)) : undefined,
+        value: Math.round(loanValue),
+        tenure,
+        roi,
+        emi,
+      };
+    } else if (newGoal.loan?.loanId) {
+      updatedLoans = state.loans.filter(l => l.id !== newGoal.loan?.loanId);
+      loan = { enabled: false };
+      loanNotice = 'Loan record removed from Liabilities.';
+    }
+
     const sanitizedGoal = {
       ...newGoal,
       description,
       targetAmountToday: targetAmount,
+      startGoalAmount: Math.round(startGoalAmount),
       currentAmount: Math.max(0, currentAmount),
       inflationRate,
+      loan,
     } as Goal;
 
     if (editingId) {
-      updateState({ goals: state.goals.map(g => g.id === editingId ? { ...sanitizedGoal, id: editingId } as Goal : g) });
+      updateState({
+        goals: state.goals.map(g => g.id === editingId ? { ...sanitizedGoal, id: editingId } as Goal : g),
+        loans: updatedLoans,
+      });
     } else {
       const goal = { ...sanitizedGoal, id: Math.random().toString(36).substr(2, 9) } as Goal;
-      updateState({ goals: [...state.goals, goal] });
+      updateState({ goals: [...state.goals, goal], loans: updatedLoans });
     }
     setShowAdd(false);
     setEditingId(null);
+    if (loanNotice) {
+      setNotice(loanNotice);
+      setTimeout(() => setNotice(null), 4000);
+    }
   };
 
   const removeGoal = (id: string) => {
@@ -301,7 +389,7 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                         <div className="space-y-4 animate-in slide-in-from-top-4 text-left">
                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Milestone Frequency Strategy</label>
                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                              {['Monthly', 'Yearly', 'Every 2-5 Years', 'Every 2-15 Years'].map(f => (
+                              {['Monthly', 'Yearly', 'Every 2-5 Years', 'Every 2-15 Years', 'Once in 10 years'].map(f => (
                                 <button
                                   key={f}
                                   type="button"
@@ -371,6 +459,78 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                      />
                   </div>
 
+                  <div className="space-y-6 p-10 bg-white rounded-[3.5rem] border border-slate-200 shadow-sm text-left">
+                     <div className="flex items-center justify-between gap-6">
+                        <div>
+                           <p className="text-[12px] font-black text-slate-900 uppercase tracking-widest">Loan Bridge</p>
+                           <p className="text-xs font-medium text-slate-400">Enable if part of the goal will be funded via a loan.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNewGoal(prev => ({ ...prev, loan: { ...(prev.loan || { enabled: false }), enabled: !prev.loan?.enabled } }))}
+                          className={`w-20 h-10 rounded-full transition-all relative ${newGoal.loan?.enabled ? 'bg-teal-600' : 'bg-slate-200'}`}
+                        >
+                          <div className={`absolute top-1 w-8 h-8 rounded-full bg-white transition-all shadow-md ${newGoal.loan?.enabled ? 'left-11' : 'left-1'}`} />
+                        </button>
+                     </div>
+
+                     {newGoal.loan?.enabled && (
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                         <div className="space-y-2">
+                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loan % of Goal</label>
+                           <input
+                             type="number"
+                             value={newGoal.loan?.percent ?? ''}
+                             onChange={e => setNewGoal(prev => ({ ...prev, loan: { ...(prev.loan || { enabled: true }), percent: parseFloat(e.target.value) } }))}
+                             className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                             placeholder="e.g. 55"
+                           />
+                         </div>
+                         <div className="space-y-2">
+                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loan Value</label>
+                           <input
+                             type="number"
+                             value={newGoal.loan?.value ?? ''}
+                             onChange={e => setNewGoal(prev => ({ ...prev, loan: { ...(prev.loan || { enabled: true }), value: parseFloat(e.target.value) } }))}
+                             className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                             placeholder={`${currencySymbol} 0`}
+                           />
+                         </div>
+                         <div className="space-y-2">
+                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tenure (Years)</label>
+                           <input
+                             type="number"
+                             value={newGoal.loan?.tenure ?? ''}
+                             onChange={e => setNewGoal(prev => ({ ...prev, loan: { ...(prev.loan || { enabled: true }), tenure: parseFloat(e.target.value) } }))}
+                             className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                           />
+                         </div>
+                         <div className="space-y-2">
+                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ROI (%)</label>
+                           <input
+                             type="number"
+                             value={newGoal.loan?.roi ?? ''}
+                             onChange={e => setNewGoal(prev => ({ ...prev, loan: { ...(prev.loan || { enabled: true }), roi: parseFloat(e.target.value) } }))}
+                             className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                           />
+                         </div>
+                         <div className="md:col-span-2 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Estimated EMI</p>
+                           <p className="text-lg font-black text-slate-900">
+                             {formatCurrency(
+                               computeEmi(
+                                 Number(newGoal.loan?.value || 0),
+                                 Number(newGoal.loan?.roi || 0),
+                                 Number(newGoal.loan?.tenure || 0)
+                               ),
+                               currencyCountry
+                             )}
+                           </p>
+                         </div>
+                       </div>
+                     )}
+                  </div>
+
                   <button onClick={handleSave} className="w-full py-10 bg-teal-600 text-white rounded-[4rem] font-black uppercase tracking-[0.4em] text-xl hover:bg-teal-500 transition-all shadow-2xl flex items-center justify-center gap-6">
                      {editingId ? 'Update Strategic Mission' : 'Deploy Strategic Mission'} <Rocket size={32}/>
                   </button>
@@ -392,9 +552,10 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
             const startYear = resolveYear(goal.startDate);
             const yearsToStart = Math.max(0, startYear - currentYear);
             
-            // Calc Inflation Adjusted Target (FV)
+            // Calc Inflation Adjusted Target (Start Year)
             const targetFV = goal.targetAmountToday * Math.pow(1 + (goal.inflationRate / 100), yearsToStart);
-            const progressPct = targetFV > 0 ? Math.min(100, (goal.currentAmount / targetFV) * 100) : 0;
+            const startGoalAmount = goal.startGoalAmount ?? targetFV;
+            const progressPct = startGoalAmount > 0 ? Math.min(100, (goal.currentAmount / startGoalAmount) * 100) : 0;
 
             return (
               <div key={goal.id} className="bg-white p-10 md:p-12 rounded-[4.5rem] border border-slate-200 shadow-sm hover:border-teal-400 transition-all flex flex-col gap-8 relative overflow-hidden group">
@@ -420,8 +581,8 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                           <h5 className="text-2xl font-black text-slate-900">{progressPct.toFixed(1)}%</h5>
                        </div>
                        <div className="text-right">
-                          <p className="text-[10px] font-black text-teal-600 uppercase tracking-widest mb-1">FV Target</p>
-                          <h5 className="text-lg font-black text-teal-600">{formatCurrency(Math.round(targetFV), currencyCountry)}</h5>
+                          <p className="text-[10px] font-black text-teal-600 uppercase tracking-widest mb-1">Start Goal Amount</p>
+                          <h5 className="text-lg font-black text-teal-600">{formatCurrency(Math.round(startGoalAmount), currencyCountry)}</h5>
                        </div>
                     </div>
                     <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
@@ -431,6 +592,12 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                        <span>Saved: {formatCurrency(goal.currentAmount, currencyCountry)}</span>
                        <span>Today's Value: {formatCurrency(goal.targetAmountToday, currencyCountry)}</span>
                     </div>
+                    {goal.loan?.enabled && (
+                      <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                        <span>Loan EMI: {formatCurrency(goal.loan.emi || 0, currencyCountry)}</span>
+                        <span>Loan %: {goal.loan.percent ? `${goal.loan.percent}%` : '—'}</span>
+                      </div>
+                    )}
                  </div>
 
                  <div className="flex gap-3 justify-end mt-4 pt-4 border-t border-slate-50">

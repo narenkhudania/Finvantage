@@ -53,7 +53,7 @@ const INITIAL_STATE: FinanceState = {
     state: '', country: 'India', incomeSource: 'salaried',
     income: { ...INITIAL_INCOME }, monthlyExpenses: 0,
   },
-  family: [], detailedExpenses: [], assets: [], loans: [],
+  family: [], detailedExpenses: [], cashflows: [], investmentCommitments: [], assets: [], loans: [],
   insurance: [],
   insuranceAnalysis: {
     inflation: 6,
@@ -90,6 +90,8 @@ const normalizeState = (raw: Partial<FinanceState> | null | undefined): FinanceS
     profile,
     family: Array.isArray(raw?.family) ? raw!.family : base.family,
     detailedExpenses: Array.isArray(raw?.detailedExpenses) ? raw!.detailedExpenses : base.detailedExpenses,
+    cashflows: Array.isArray(raw?.cashflows) ? raw!.cashflows : base.cashflows,
+    investmentCommitments: Array.isArray(raw?.investmentCommitments) ? raw!.investmentCommitments : base.investmentCommitments,
     assets: Array.isArray(raw?.assets) ? raw!.assets : base.assets,
     loans: Array.isArray(raw?.loans) ? raw!.loans : base.loans,
     insurance: Array.isArray(raw?.insurance) ? raw!.insurance : base.insurance,

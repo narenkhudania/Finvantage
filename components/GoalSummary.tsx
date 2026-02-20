@@ -6,8 +6,9 @@ import {
   Layers, CheckCircle2, Circle, ArrowRight, Wallet,
   PieChart, RefreshCw, Zap, Activity, ShieldCheck, Edit3
 } from 'lucide-react';
-import { FinanceState, Goal, RelativeDate, ResourceBucket } from '../types';
+import { FinanceState, Goal, RelativeDate } from '../types';
 import { formatCurrency } from '../lib/currency';
+import { buildDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption } from '../lib/financeMath';
 
 const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [hoveredGoalId, setHoveredGoalId] = useState<string | null>(null);
@@ -26,39 +27,72 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
   };
 
   const goalsData = useMemo(() => {
-    return state.goals.sort((a,b) => a.priority - b.priority).map((goal, idx) => {
-      const sYear = resolveYear(goal.startDate);
-      const eYear = resolveYear(goal.endDate);
-      const yearsToStart = Math.max(0, sYear - currentYear);
-      const duration = Math.max(1, eYear - sYear + 1);
-      
-      const inflation = goal.inflationRate / 100;
-      const fvAtStart = goal.targetAmountToday * Math.pow(1 + inflation, yearsToStart);
-      
-      let sumCorpus = 0;
-      if (goal.isRecurring) {
-        // Simple accumulation for recurring goals
-        for (let i = 0; i < duration; i++) {
-          sumCorpus += goal.targetAmountToday * Math.pow(1 + inflation, yearsToStart + i);
+    const baseReturn = getRiskReturnAssumption(state.riskProfile?.level);
+    const retirementYear = state.profile.dob
+      ? new Date(state.profile.dob).getFullYear() + state.profile.retirementAge
+      : (currentYear + 30);
+
+    const maxGoalYear = state.goals.reduce((maxYear, goal) => {
+      return Math.max(maxYear, resolveYear(goal.endDate));
+    }, currentYear + 1);
+    const endYear = Math.max(
+      maxGoalYear,
+      getLifeExpectancyYear(state.profile.dob, state.profile.lifeExpectancy) ?? (currentYear + 35),
+    );
+
+    const discountFactors = buildDiscountFactors(currentYear, endYear, retirementYear, baseReturn);
+
+    return state.goals
+      .slice()
+      .sort((a, b) => a.priority - b.priority)
+      .map((goal, idx) => {
+        const sYear = resolveYear(goal.startDate);
+        const eYear = resolveYear(goal.endDate);
+        const yearsToStart = Math.max(0, sYear - currentYear);
+        const inflation = goal.inflationRate / 100;
+        const fvAtStart = goal.startGoalAmount ?? (goal.targetAmountToday * Math.pow(1 + inflation, yearsToStart));
+
+        let sumCorpus = 0;
+        let currentCorpusRequired = 0;
+        for (let year = sYear; year <= eYear; year++) {
+          const nominal = (() => {
+            if (!goal.isRecurring) {
+              return year === eYear ? fvAtStart : 0;
+            }
+            const yearsFromStart = Math.max(0, year - sYear);
+            const baseAmount = fvAtStart * Math.pow(1 + inflation, yearsFromStart);
+            const interval = getGoalIntervalYears(goal.frequency);
+            if (interval > 1 && (year - sYear) % interval !== 0) {
+              return 0;
+            }
+            if (goal.frequency === 'Monthly') {
+              return baseAmount * 12;
+            }
+            return baseAmount;
+          })();
+
+          if (nominal <= 0) continue;
+          sumCorpus += nominal;
+          const factor = discountFactors[year] || 1;
+          currentCorpusRequired += nominal / factor;
         }
-      } else {
-        sumCorpus = fvAtStart;
-      }
 
-      const progressPct = sumCorpus > 0 ? Math.min(100, (goal.currentAmount / sumCorpus) * 100) : 0;
+        const progressPct = sumCorpus > 0 ? Math.min(100, (goal.currentAmount / sumCorpus) * 100) : 0;
 
-      return {
-        ...goal,
-        srNo: idx + 1,
-        startYear: sYear,
-        endYear: eYear,
-        corpusAtStart: fvAtStart,
-        sumCorpus,
-        progressPct
-      };
-    });
-  }, [state.goals, currentYear, birthYear]);
+        return {
+          ...goal,
+          srNo: idx + 1,
+          startYear: sYear,
+          endYear: eYear,
+          corpusAtStart: fvAtStart,
+          sumCorpus,
+          currentCorpusRequired,
+          progressPct
+        };
+      });
+  }, [state.goals, state.profile, currentYear, birthYear]);
 
+  const totalCurrentCorpus = goalsData.reduce((acc, g) => acc + g.currentCorpusRequired, 0);
   const totalSumCorpus = goalsData.reduce((acc, g) => acc + g.sumCorpus, 0);
 
   const currencyCountry = state.profile.country;
@@ -77,9 +111,62 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
           </div>
           
           <div className="bg-white/5 border border-white/10 p-10 rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner">
-             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global Lifecycle Corpus (FV)</p>
+             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total Corpus (Nominal)</p>
              <h4 className="text-4xl md:text-5xl font-black text-white tracking-tighter">{formatCurrency(totalSumCorpus, currencyCountry, { maximumFractionDigits: 0 })}</h4>
+             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Corpus Required</p>
+             <h4 className="text-xl md:text-2xl font-black text-emerald-300 tracking-tight">{formatCurrency(totalCurrentCorpus, currencyCountry, { maximumFractionDigits: 0 })}</h4>
           </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-8 md:p-10 border-b border-slate-100">
+          <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">Goal Summary</h3>
+          <p className="text-xs md:text-sm text-slate-500 font-medium mt-2">Current corpus is discounted by the year-specific return curve.</p>
+        </div>
+        <div className="overflow-x-auto no-scrollbar">
+          <table className="w-full min-w-[1100px] text-left">
+            <thead>
+              <tr className="bg-slate-50/60">
+                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Sr No</th>
+                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Summary</th>
+                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Current Value</th>
+                <th className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Inflation</th>
+                <th className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">Occurrence</th>
+                <th className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Start Year</th>
+                <th className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">End Year</th>
+                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Current Corpus Required</th>
+                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Corpus Required at Start</th>
+                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Sum of Corpus Required</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {goalsData.map(goal => (
+                <tr key={goal.id} className="hover:bg-teal-50/30 transition-colors">
+                  <td className="px-6 py-4 text-xs font-black text-slate-900">{goal.srNo}</td>
+                  <td className="px-6 py-4 text-xs font-bold text-slate-700">{goal.type}</td>
+                  <td className="px-6 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(goal.targetAmountToday), currencyCountry)}</td>
+                  <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{goal.inflationRate}%</td>
+                  <td className="px-4 py-4 text-[11px] font-bold text-slate-600">
+                    {goal.isRecurring ? (goal.frequency || 'Yearly') : 'One time'}
+                  </td>
+                  <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{goal.startYear}</td>
+                  <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{goal.endYear}</td>
+                  <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(goal.currentCorpusRequired), currencyCountry)}</td>
+                  <td className="px-6 py-4 text-xs font-bold text-slate-600 text-right">
+                    {goal.isRecurring ? '—' : formatCurrency(Math.round(goal.corpusAtStart), currencyCountry)}
+                  </td>
+                  <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(goal.sumCorpus), currencyCountry)}</td>
+                </tr>
+              ))}
+              <tr className="bg-slate-50/60">
+                <td className="px-6 py-4 text-xs font-black text-slate-500" colSpan={7}>Total</td>
+                <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(totalCurrentCorpus), currencyCountry)}</td>
+                <td className="px-6 py-4 text-xs font-black text-slate-500 text-right">—</td>
+                <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(totalSumCorpus), currencyCountry)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -100,6 +187,7 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
                 <div className="space-y-3 text-left">
                    <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Inflation Burden</span><span className="text-rose-400">+{goal.inflationRate}% p.a.</span></div>
                    <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Projected FV (Year {goal.startYear})</span><span className="text-teal-400">{formatCurrency(Math.round(goal.corpusAtStart), currencyCountry)}</span></div>
+                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Current Corpus Required</span><span className="text-teal-400">{formatCurrency(Math.round(goal.currentCorpusRequired), currencyCountry)}</span></div>
                    <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Global Sum Required</span><span className="text-teal-400">{formatCurrency(Math.round(goal.sumCorpus), currencyCountry)}</span></div>
                    <div className="flex justify-between text-xs font-bold border-t border-white/10 pt-4"><span className="opacity-70 uppercase tracking-widest">Funding Deficit</span><span className="text-emerald-400">{formatCurrency(Math.max(0, Math.round(goal.sumCorpus - goal.currentAmount)), currencyCountry)}</span></div>
                 </div>

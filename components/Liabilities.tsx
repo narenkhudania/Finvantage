@@ -11,6 +11,7 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell } from 'recharts';
 import { parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
+import { buildAmortizationSchedule, calculateEmi, inferTenureMonths } from '../lib/loanMath';
 
 const LOAN_TYPES: { type: LoanType, icon: any }[] = [
   { type: 'Home Loan', icon: Home },
@@ -41,6 +42,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     interestRate: 8.5,
     remainingTenure: 120,
     emi: 0,
+    startYear: new Date().getFullYear(),
     notes: '',
     lumpSumRepayments: []
   });
@@ -55,6 +57,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     const interestRate = parseNumber(newLoan.interestRate || 0, 0);
     const remainingTenure = parseNumber(newLoan.remainingTenure || 0, 0);
     const emi = parseNumber(newLoan.emi || 0, 0);
+    const startYear = newLoan.startYear ? parseNumber(newLoan.startYear, new Date().getFullYear()) : undefined;
     const owner = newLoan.owner || 'self';
 
     if (!source) {
@@ -73,10 +76,6 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
       setFormError('Remaining tenure must be greater than 0.');
       return;
     }
-    if (emi <= 0) {
-      setFormError('EMI must be greater than 0.');
-      return;
-    }
     if (!owner || (owner !== 'self' && !state.family.find(f => f.id === owner))) {
       setFormError('Owner must be Self or a valid family member.');
       return;
@@ -84,6 +83,32 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     if (sanctionedAmount === 0 && outstandingAmount > 0) {
       setFormWarning('Sanctioned amount is 0 but outstanding is set.');
       setNotice('Loan saved with 0 sanctioned amount. Consider updating for accuracy.');
+      setTimeout(() => setNotice(null), 4000);
+    }
+    if (startYear && (startYear < 1900 || startYear > new Date().getFullYear() + 50)) {
+      setFormError('Start year looks invalid.');
+      return;
+    }
+
+    let finalEmi = emi;
+    if (finalEmi <= 0) {
+      const tempLoan = {
+        id: 'tmp',
+        type: newLoan.type || 'Home Loan',
+        owner,
+        source,
+        sourceType: newLoan.sourceType || 'Bank',
+        sanctionedAmount,
+        outstandingAmount,
+        interestRate,
+        remainingTenure,
+        emi: 0,
+        startYear,
+        lumpSumRepayments: [],
+      } as Loan;
+      const inferred = inferTenureMonths(tempLoan);
+      finalEmi = Math.round(calculateEmi(outstandingAmount, interestRate, inferred.months));
+      setNotice('EMI auto-calculated from rate and tenure.');
       setTimeout(() => setNotice(null), 4000);
     }
 
@@ -96,11 +121,12 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
       outstandingAmount,
       interestRate,
       remainingTenure,
-      emi,
+      emi: finalEmi,
+      startYear,
     } as Loan;
     updateState({ loans: [...state.loans, loan] });
     setShowAdd(false);
-    setNewLoan({ type: 'Home Loan', sourceType: 'Bank', owner: 'self', source: '', sanctionedAmount: 0, outstandingAmount: 0, interestRate: 8.5, remainingTenure: 120, emi: 0, notes: '', lumpSumRepayments: [] });
+    setNewLoan({ type: 'Home Loan', sourceType: 'Bank', owner: 'self', source: '', sanctionedAmount: 0, outstandingAmount: 0, interestRate: 8.5, remainingTenure: 120, emi: 0, startYear: new Date().getFullYear(), notes: '', lumpSumRepayments: [] });
   };
 
   const removeLoan = (id: string) => {
@@ -132,40 +158,21 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
 
   // Amortization Calculator with Lump Sum Projection
   const calculateProjections = (loan: Loan, simulateExtra: number = 0) => {
-    const monthlyRate = loan.interestRate / 12 / 100;
-    const balance = loan.outstandingAmount - simulateExtra;
-    
-    let tempBalance = balance;
-    let totalInterest = 0;
-    let months = 0;
-    const schedule = [];
-    
-    // Calculate for next 12 months for the table/chart
-    let monthCounter = balance;
-    for (let i = 1; i <= 12; i++) {
-      if (monthCounter <= 0) break;
-      const interest = monthCounter * monthlyRate;
-      const principal = Math.min(monthCounter, loan.emi - interest);
-      monthCounter -= principal;
-      schedule.push({ 
-        month: `Mo ${i}`, 
-        interest: Math.round(interest), 
-        principal: Math.round(principal), 
-        balance: Math.max(0, Math.round(monthCounter)) 
-      });
-    }
-
-    // Full projection to calculate total interest and tenure
-    let fullBalance = balance;
-    while (fullBalance > 0 && months < 600) { 
-      const interest = fullBalance * monthlyRate;
-      const principal = Math.min(fullBalance, loan.emi - interest);
-      fullBalance -= principal;
-      totalInterest += interest;
-      months++;
-    }
-
-    return { schedule, totalInterest, monthsRemaining: months };
+    const projection = buildAmortizationSchedule(loan, { extraPayment: simulateExtra });
+    const schedule = projection.schedule.slice(0, 12).map((row, i) => ({
+      month: `Mo ${i + 1}`,
+      interest: row.interest,
+      principal: row.principal,
+      balance: row.closingBalance,
+    }));
+    return { 
+      schedule,
+      fullSchedule: projection.schedule,
+      totalInterest: projection.totalInterest,
+      monthsRemaining: projection.monthsRemaining,
+      emi: projection.emi,
+      basis: projection.basis,
+    };
   };
 
   // Consolidation suggestions
@@ -290,10 +297,11 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                 </div>
              </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Monthly EMI</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Monthly EMI (Optional)</label>
                   <input type="number" value={newLoan.emi || ''} onChange={e => setNewLoan({...newLoan, emi: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Leave blank to auto-calculate</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Interest Rate (%)</label>
@@ -302,6 +310,11 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Remaining Tenure</label>
                   <input type="number" value={newLoan.remainingTenure || ''} onChange={e => setNewLoan({...newLoan, remainingTenure: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Enter years or months — system auto-detects using EMI</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Start Year</label>
+                  <input type="number" value={newLoan.startYear || ''} onChange={e => setNewLoan({...newLoan, startYear: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" />
                 </div>
              </div>
 
@@ -381,11 +394,16 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           const simulatedExtra = parseFloat(lumpSumAmount) || 0;
           const simulatedProj = calculateProjections(loan, simulatedExtra);
           
-          const { schedule, totalInterest, monthsRemaining } = currentProj;
+          const { schedule, totalInterest, monthsRemaining, fullSchedule, emi: calculatedEmi, basis } = currentProj;
           const interestSaved = Math.max(0, currentProj.totalInterest - simulatedProj.totalInterest);
           const tenureSaved = Math.max(0, currentProj.monthsRemaining - simulatedProj.monthsRemaining);
 
           const payoffProgress = Math.min(100, Math.round(((loan.sanctionedAmount - loan.outstandingAmount) / (loan.sanctionedAmount || 1)) * 100));
+          const monthlyRate = loan.interestRate / 12 / 100;
+          const monthlyInterest = loan.outstandingAmount * monthlyRate;
+          const isNegativeAmort = loan.emi > 0 && loan.emi <= monthlyInterest;
+          const emiGap = Math.abs((loan.emi || 0) - calculatedEmi);
+          const showEmiHint = loan.emi <= 0 || (emiGap > Math.max(500, calculatedEmi * 0.05));
 
           return (
             <div key={loan.id} className="bg-white rounded-[3.5rem] border border-slate-200 shadow-sm overflow-hidden hover:border-teal-300 transition-all">
@@ -412,7 +430,10 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                 <div className="grid grid-cols-3 gap-8 text-center shrink-0 border-l border-slate-100 pl-8">
                    <div>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">EMI</p>
-                      <p className="text-lg font-black text-slate-900">{formatCurrency(loan.emi, currencyCountry)}</p>
+                      <p className="text-lg font-black text-slate-900">{formatCurrency(loan.emi || calculatedEmi, currencyCountry)}</p>
+                      {showEmiHint && (
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">Calc: {formatCurrency(Math.round(calculatedEmi), currencyCountry)}</p>
+                      )}
                    </div>
                    <div>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Rate</p>
@@ -421,6 +442,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                    <div>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Ends In</p>
                       <p className="text-lg font-black text-slate-900">{monthsRemaining} Mo</p>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">{basis === 'years' ? 'Tenure in years' : 'Tenure in months'}</p>
                    </div>
                 </div>
 
@@ -477,6 +499,11 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                         <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white space-y-4 text-left">
                            <div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase">Projected Total Interest</span><span className="text-sm font-black text-rose-400">{formatCurrency(Math.round(totalInterest), currencyCountry)}</span></div>
                            <div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase">Current Ends In</span><span className="text-sm font-black text-emerald-400">{monthsRemaining} Months</span></div>
+                           {isNegativeAmort && (
+                             <div className="p-3 bg-rose-500/10 border border-rose-400/20 rounded-xl text-[10px] font-bold text-rose-300">
+                               EMI is below monthly interest. Balance will grow unless EMI is increased.
+                             </div>
+                           )}
                         </div>
                      </div>
 
@@ -530,6 +557,41 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                                           <td className="px-4 py-4 text-[10px] font-bold text-rose-500 text-right">{formatCurrency(row.interest, currencyCountry)}</td>
                                           <td className="px-4 py-4 text-[10px] font-bold text-emerald-500 text-right">{formatCurrency(row.principal, currencyCountry)}</td>
                                           <td className="px-8 py-4 text-[10px] font-black text-slate-900 text-right">{formatCurrency(row.balance, currencyCountry)}</td>
+                                       </tr>
+                                    ))}
+                                 </tbody>
+                              </table>
+                           </div>
+                        </div>
+
+                        <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
+                           <div className="px-8 py-5 border-b border-slate-100 flex justify-between items-center">
+                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Full Amortization Schedule</h5>
+                              <span className="text-[9px] font-black text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full uppercase">Monthly</span>
+                           </div>
+                           <div className="overflow-x-auto max-h-[360px] no-scrollbar">
+                              <table className="w-full text-left min-w-[760px]">
+                                 <thead className="bg-slate-50 sticky top-0 z-10">
+                                    <tr>
+                                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase">Month</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Opening</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Interest</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">EMI</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Principal</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Extra</th>
+                                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Closing</th>
+                                    </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-slate-50">
+                                    {fullSchedule.map((row) => (
+                                       <tr key={row.month} className="hover:bg-slate-50 transition-colors">
+                                          <td className="px-6 py-4 text-[10px] font-black text-slate-600">Mo {row.month}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-slate-600 text-right">{formatCurrency(row.openingBalance, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-rose-500 text-right">{formatCurrency(row.interest, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-slate-600 text-right">{formatCurrency(row.emi, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-emerald-500 text-right">{formatCurrency(row.principal, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-slate-500 text-right">{row.extraPayment ? formatCurrency(row.extraPayment, currencyCountry) : '—'}</td>
+                                          <td className="px-6 py-4 text-[10px] font-black text-slate-900 text-right">{formatCurrency(row.closingBalance, currencyCountry)}</td>
                                        </tr>
                                     ))}
                                  </tbody>

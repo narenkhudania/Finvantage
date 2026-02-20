@@ -97,6 +97,7 @@ create table if not exists public.family_members (
   relation text not null,
   age integer not null default 0,
   is_dependent boolean default false,
+  retirement_age integer,
   monthly_expenses numeric default 0,
   salary numeric default 0,
   bonus numeric default 0,
@@ -143,11 +144,55 @@ create table if not exists public.expenses (
   inflation_rate numeric default 6,
   tenure integer default 34,
   start_year integer,
+  end_year integer,
+  frequency text,
+  notes text,
   created_at timestamptz default now(),
   unique (user_id, category)
 );
 
 create index if not exists expenses_user_id_idx on public.expenses(user_id);
+
+-- ─────────────────────────────────────────────────────────────
+-- Cashflows
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.cashflows (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  owner_ref text not null,
+  label text not null,
+  amount numeric default 0,
+  frequency text not null,
+  growth_rate numeric default 0,
+  start_year integer not null,
+  end_year integer not null,
+  notes text,
+  flow_type text default 'Income',
+  created_at timestamptz default now()
+);
+
+create index if not exists cashflows_user_id_idx on public.cashflows(user_id);
+
+-- ─────────────────────────────────────────────────────────────
+-- Investment Commitments
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.investment_commitments (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  owner_ref text not null,
+  label text not null,
+  amount numeric default 0,
+  frequency text not null,
+  step_up numeric default 0,
+  start_year integer not null,
+  end_year integer not null,
+  notes text,
+  created_at timestamptz default now()
+);
+
+create index if not exists investment_commitments_user_id_idx on public.investment_commitments(user_id);
 
 -- ─────────────────────────────────────────────────────────────
 -- Assets
@@ -166,6 +211,11 @@ create table if not exists public.assets (
   available_for_goals boolean default false,
   available_from integer,
   tenure integer,
+  monthly_contribution numeric default 0,
+  contribution_frequency text,
+  contribution_step_up numeric default 0,
+  contribution_start_year integer,
+  contribution_end_year integer,
   created_at timestamptz default now()
 );
 
@@ -188,6 +238,7 @@ create table if not exists public.loans (
   remaining_tenure integer default 120,
   emi numeric default 0,
   notes text,
+  start_year integer,
   lump_sum_repayments jsonb default '[]'::jsonb,
   created_at timestamptz default now()
 );
@@ -212,8 +263,10 @@ create table if not exists public.goals (
   end_date_type text not null,
   end_date_value integer not null,
   target_amount_today numeric default 0,
+  start_goal_amount numeric,
   inflation_rate numeric default 6,
   current_amount numeric default 0,
+  loan_details jsonb,
   desired_retirement_age integer,
   expected_monthly_expenses_after_retirement numeric,
   retirement_handling text,
@@ -231,6 +284,8 @@ alter table public.profiles enable row level security;
 alter table public.family_members enable row level security;
 alter table public.income_profiles enable row level security;
 alter table public.expenses enable row level security;
+alter table public.cashflows enable row level security;
+alter table public.investment_commitments enable row level security;
 alter table public.assets enable row level security;
 alter table public.loans enable row level security;
 alter table public.goals enable row level security;
@@ -303,6 +358,40 @@ drop policy if exists expenses_delete on public.expenses;
 create policy expenses_delete on public.expenses
 for delete using (user_id = auth.uid());
 
+-- Cashflows
+drop policy if exists cashflows_select on public.cashflows;
+create policy cashflows_select on public.cashflows
+for select using (user_id = auth.uid());
+
+drop policy if exists cashflows_insert on public.cashflows;
+create policy cashflows_insert on public.cashflows
+for insert with check (user_id = auth.uid());
+
+drop policy if exists cashflows_update on public.cashflows;
+create policy cashflows_update on public.cashflows
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists cashflows_delete on public.cashflows;
+create policy cashflows_delete on public.cashflows
+for delete using (user_id = auth.uid());
+
+-- Investment Commitments
+drop policy if exists investment_commitments_select on public.investment_commitments;
+create policy investment_commitments_select on public.investment_commitments
+for select using (user_id = auth.uid());
+
+drop policy if exists investment_commitments_insert on public.investment_commitments;
+create policy investment_commitments_insert on public.investment_commitments
+for insert with check (user_id = auth.uid());
+
+drop policy if exists investment_commitments_update on public.investment_commitments;
+create policy investment_commitments_update on public.investment_commitments
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists investment_commitments_delete on public.investment_commitments;
+create policy investment_commitments_delete on public.investment_commitments
+for delete using (user_id = auth.uid());
+
 -- Assets
 drop policy if exists assets_select on public.assets;
 create policy assets_select on public.assets
@@ -367,11 +456,26 @@ create table if not exists public.insurances (
   insured text not null,
   sum_assured numeric default 0,
   premium numeric default 0,
+  begin_year integer,
+  ppt_end_year integer,
+  maturity_type text,
+  annual_premiums_left integer,
   premium_end_year integer,
   maturity_date date,
   is_money_back boolean default false,
   money_back_years integer[] default '{}',
   money_back_amounts numeric[] default '{}',
+  income_from integer,
+  income_to integer,
+  income_growth numeric,
+  income_type text,
+  income_year_1 numeric,
+  income_year_2 numeric,
+  income_year_3 numeric,
+  income_year_4 numeric,
+  sum_insured numeric,
+  deductible numeric,
+  things_covered text,
   created_at timestamptz default now()
 );
 
@@ -444,6 +548,18 @@ create table if not exists public.insurance_analysis_config (
 );
 
 -- ─────────────────────────────────────────────────────────────
+-- Report Snapshots
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.report_snapshots (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  payload jsonb not null,
+  generated_at timestamptz not null default now(),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- ─────────────────────────────────────────────────────────────
 -- Estate Flags
 -- ─────────────────────────────────────────────────────────────
 
@@ -465,6 +581,7 @@ alter table public.notifications enable row level security;
 alter table public.risk_profiles enable row level security;
 alter table public.estate_flags enable row level security;
 alter table public.insurance_analysis_config enable row level security;
+alter table public.report_snapshots enable row level security;
 
 -- Insurances
 drop policy if exists insurances_select on public.insurances;
@@ -566,4 +683,21 @@ for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 drop policy if exists insurance_analysis_delete on public.insurance_analysis_config;
 create policy insurance_analysis_delete on public.insurance_analysis_config
+for delete using (user_id = auth.uid());
+
+-- Report Snapshots
+drop policy if exists report_snapshots_select on public.report_snapshots;
+create policy report_snapshots_select on public.report_snapshots
+for select using (user_id = auth.uid());
+
+drop policy if exists report_snapshots_insert on public.report_snapshots;
+create policy report_snapshots_insert on public.report_snapshots
+for insert with check (user_id = auth.uid());
+
+drop policy if exists report_snapshots_update on public.report_snapshots;
+create policy report_snapshots_update on public.report_snapshots
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists report_snapshots_delete on public.report_snapshots;
+create policy report_snapshots_delete on public.report_snapshots
 for delete using (user_id = auth.uid());

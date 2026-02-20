@@ -29,6 +29,7 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
     relation: 'Spouse',
     age: 30,
     isDependent: true,
+    retirementAge: undefined,
     income: { ...initialIncome },
     monthlyExpenses: 0
   });
@@ -46,6 +47,13 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
       setFormError('Age must be between 0 and 110.');
       return;
     }
+    if (!newMember.isDependent) {
+      const retirementAge = Number(newMember.retirementAge);
+      if (!Number.isFinite(retirementAge) || retirementAge <= age || retirementAge > 100) {
+        setFormError('Retirement age must be greater than current age and <= 100 for independent members.');
+        return;
+      }
+    }
     const member: FamilyMember = { ...newMember, id: Math.random().toString(36).substr(2, 9) };
     if (member.isDependent && age > 25) {
       setNotice('Dependent age is over 25. Please confirm this is intended.');
@@ -53,7 +61,7 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
     }
     updateState({ family: [...state.family, member] });
     setShowAdd(false);
-    setNewMember({ name: '', relation: 'Spouse', age: 30, isDependent: true, income: { ...initialIncome }, monthlyExpenses: 0 });
+    setNewMember({ name: '', relation: 'Spouse', age: 30, isDependent: true, retirementAge: undefined, income: { ...initialIncome }, monthlyExpenses: 0 });
   };
 
   const removeMember = (id: string) => {
@@ -131,6 +139,20 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
                 {newMember.isDependent ? 'Dependent' : 'Independent'}
               </button>
             </div>
+            {!newMember.isDependent && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Retirement Age</label>
+                <input
+                  required
+                  type="number"
+                  min={newMember.age + 1}
+                  max={100}
+                  value={newMember.retirementAge ?? ''}
+                  onChange={e => setNewMember({ ...newMember, retirementAge: parseInt(e.target.value) })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                />
+              </div>
+            )}
             <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black text-lg shadow-xl shadow-slate-900/10">Add to Profile</button>
           </form>
         </div>
@@ -159,7 +181,9 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
                 </div>
                 <div>
                   <h4 className="font-black text-slate-900 text-lg">{member.name}</h4>
-                  <p className="text-xs font-bold text-slate-400">{member.relation} • Age {member.age}</p>
+                  <p className="text-xs font-bold text-slate-400">
+                    {member.relation} • Age {member.age}{member.retirementAge ? ` • Retire ${member.retirementAge}` : ''}
+                  </p>
                 </div>
               </div>
               <button 

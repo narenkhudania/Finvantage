@@ -32,6 +32,7 @@ interface Recommendation {
 const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [activeTab, setActiveTab] = useState<'audit' | 'strategy'>('strategy');
   const totalAssets = useMemo(() => state.assets.reduce((sum, a) => sum + a.currentValue, 0), [state.assets]);
+  const currentYear = new Date().getFullYear();
   
   const currentAllocation = useMemo(() => {
     const groups = state.assets.reduce((acc, asset) => {
@@ -53,6 +54,47 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
 
   const weightedAvgReturn = currentAllocation.reduce((sum, a) => sum + (a.growthRate * (a.value / (totalAssets || 1))), 0);
 
+  const instrumentRows = useMemo(() => {
+    const grouped = state.assets.reduce((acc, asset) => {
+      const key = (asset.subCategory || asset.name || asset.category).trim();
+      if (!acc[key]) {
+        acc[key] = {
+          name: key,
+          category: asset.category,
+          totalValue: 0,
+          growthWeighted: 0,
+          availableValue: 0,
+          availableForGoals: false,
+          availableFrom: undefined as number | undefined,
+        };
+      }
+      acc[key].totalValue += asset.currentValue;
+      acc[key].growthWeighted += asset.currentValue * (asset.growthRate || 0);
+      if (asset.availableForGoals) {
+        acc[key].availableValue += asset.currentValue;
+        acc[key].availableForGoals = true;
+        acc[key].availableFrom = acc[key].availableFrom ? Math.min(acc[key].availableFrom, asset.availableFrom || currentYear) : (asset.availableFrom || currentYear);
+      }
+      return acc;
+    }, {} as Record<string, { name: string; category: string; totalValue: number; growthWeighted: number; availableValue: number; availableForGoals: boolean; availableFrom?: number }>);
+
+    const rows = Object.values(grouped).map(row => {
+      const growthRate = row.totalValue > 0 ? row.growthWeighted / row.totalValue : 0;
+      return {
+        ...row,
+        growthRate,
+        allocationPct: (row.totalValue / (totalAssets || 1)) * 100,
+      };
+    }).sort((a, b) => b.totalValue - a.totalValue);
+
+    const availableTotal = rows.reduce((sum, r) => sum + r.availableValue, 0);
+    const weightedReturn = availableTotal > 0
+      ? rows.reduce((sum, r) => sum + (r.availableValue * r.growthRate), 0) / availableTotal
+      : 0;
+
+    return { rows, availableTotal, weightedReturn };
+  }, [state.assets, totalAssets, currentYear]);
+
   const idealAllocation = useMemo(() => {
     const risk = state.riskProfile?.level || 'Balanced';
     if (risk === 'Conservative') return { Equity: 25, Debt: 60, 'Gold/Silver': 15, Liquid: 0 };
@@ -62,6 +104,62 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
     if (risk === 'Very Aggressive') return { Equity: 90, Debt: 5, 'Gold/Silver': 5, Liquid: 0 };
     return { Equity: 60, Debt: 30, 'Gold/Silver': 10, Liquid: 0 };
   }, [state.riskProfile]);
+
+  const bucketTargets = useMemo(() => {
+    const allocation = idealAllocation as Record<string, number>;
+    return {
+      equity: allocation['Equity'] || 0,
+      debt: allocation['Debt'] || 0,
+      gold: allocation['Gold/Silver'] || 0,
+      liquid: allocation['Liquid'] || 0,
+    };
+  }, [idealAllocation]);
+
+  const mapInstrumentBucket = (category: string) => {
+    if (category === 'Equity') return 'equity';
+    if (category === 'Debt') return 'debt';
+    if (category === 'Liquid') return 'liquid';
+    if (category === 'Gold/Silver') return 'gold';
+    return null;
+  };
+
+  const recommendedRows = useMemo(() => {
+    const availableTotal = instrumentRows.availableTotal || 0;
+    const bucketTotals = instrumentRows.rows.reduce((acc, row) => {
+      const bucket = mapInstrumentBucket(row.category);
+      if (!bucket) return acc;
+      acc[bucket] = (acc[bucket] || 0) + row.availableValue;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const targetByBucket = {
+      equity: availableTotal * (bucketTargets.equity / 100),
+      debt: availableTotal * (bucketTargets.debt / 100),
+      gold: availableTotal * (bucketTargets.gold / 100),
+      liquid: availableTotal * (bucketTargets.liquid / 100),
+    };
+
+    return instrumentRows.rows.map(row => {
+      const bucket = mapInstrumentBucket(row.category);
+      if (!bucket || row.availableValue <= 0 || (bucketTotals[bucket] || 0) === 0) {
+        return { ...row, targetValue: 0, targetAllocation: 0 };
+      }
+      const ratio = row.availableValue / bucketTotals[bucket];
+      const targetValue = targetByBucket[bucket] * ratio;
+      const targetAllocation = availableTotal > 0 ? (targetValue / availableTotal) * 100 : 0;
+      return { ...row, targetValue, targetAllocation };
+    });
+  }, [instrumentRows, bucketTargets]);
+
+  const rebalancePlan = useMemo(() => {
+    return recommendedRows
+      .map(row => {
+        const delta = (row.targetValue || 0) - row.availableValue;
+        return { name: row.name, delta };
+      })
+      .filter(item => Math.abs(item.delta) > 0.01)
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  }, [recommendedRows]);
 
   const driftData = useMemo(() => {
     const labels = ['Equity', 'Debt', 'Gold/Silver'];
@@ -188,6 +286,124 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         </div>
       ) : (
         <div className="space-y-12 animate-in fade-in slide-in-from-bottom-6">
+          <div className="bg-white rounded-[2rem] md:rounded-[4rem] border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 md:px-10 py-6 md:py-8 border-b border-slate-100 bg-slate-50/60 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h3 className="text-lg md:text-2xl font-black text-slate-900">Current Investment Allocation</h3>
+                <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Available value totals {formatCurrency(Math.round(instrumentRows.availableTotal), currencyCountry)}</p>
+              </div>
+              <div className="bg-white px-4 py-3 rounded-2xl border border-slate-200">
+                <p className="text-[8px] font-black text-slate-400 uppercase">Expected Return (Avail.)</p>
+                <p className="text-lg font-black text-slate-900">{instrumentRows.weightedReturn.toFixed(2)}%</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto no-scrollbar">
+              <table className="w-full min-w-[1100px] text-left">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase">Instrument</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Consolidated</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">% Allocation</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-center">Avail. for Goals</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Avail. From</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Exp. Growth</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Available Value</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Allocation</th>
+                    <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Expected Return</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {instrumentRows.rows.map(row => {
+                    const availableAllocation = instrumentRows.availableTotal > 0 ? (row.availableValue / instrumentRows.availableTotal) * 100 : 0;
+                    return (
+                      <tr key={row.name} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="px-6 py-4 text-xs font-bold text-slate-700">{row.name}</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(row.totalValue), currencyCountry)}</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{row.allocationPct.toFixed(0)}%</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-600 text-center">{row.availableValue > 0 ? 'Yes' : 'No'}</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{row.availableValue > 0 ? row.availableFrom : '—'}</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{row.growthRate.toFixed(2)}%</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(row.availableValue), currencyCountry)}</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{availableAllocation.toFixed(0)}%</td>
+                        <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{row.growthRate.toFixed(2)}%</td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="bg-slate-50/60">
+                    <td className="px-6 py-4 text-xs font-black text-slate-500" colSpan={6}>Total</td>
+                    <td className="px-4 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(instrumentRows.availableTotal), currencyCountry)}</td>
+                    <td className="px-4 py-4 text-xs font-black text-slate-900 text-right">100%</td>
+                    <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{instrumentRows.weightedReturn.toFixed(2)}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-[2rem] md:rounded-[4rem] border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 md:px-10 py-6 md:py-8 border-b border-slate-100 bg-slate-50/60 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h3 className="text-lg md:text-2xl font-black text-slate-900">Recommended Allocation (Risk Profile)</h3>
+                <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Target mix: Equity {bucketTargets.equity}% • Debt {bucketTargets.debt}% • Gold {bucketTargets.gold}% • Liquid {bucketTargets.liquid}%</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto no-scrollbar">
+              <table className="w-full min-w-[900px] text-left">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase">Instrument</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Available Value</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Target Allocation</th>
+                    <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Target Value</th>
+                    <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Rebalance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {recommendedRows.map(row => {
+                    const delta = (row.targetValue || 0) - row.availableValue;
+                    const deltaLabel = delta >= 0 ? 'Invest' : 'Reduce';
+                    return (
+                      <tr key={`rec-${row.name}`} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="px-6 py-4 text-xs font-bold text-slate-700">{row.name}</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(row.availableValue), currencyCountry)}</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{(row.targetAllocation || 0).toFixed(0)}%</td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(row.targetValue || 0), currencyCountry)}</td>
+                        <td className={`px-6 py-4 text-xs font-black text-right ${delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {deltaLabel} {formatCurrency(Math.abs(Math.round(delta)), currencyCountry)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="bg-slate-50/60">
+                    <td className="px-6 py-4 text-xs font-black text-slate-500">Total</td>
+                    <td className="px-4 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(instrumentRows.availableTotal), currencyCountry)}</td>
+                    <td className="px-4 py-4 text-xs font-black text-slate-900 text-right">100%</td>
+                    <td className="px-4 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(instrumentRows.availableTotal), currencyCountry)}</td>
+                    <td className="px-6 py-4 text-xs font-black text-slate-500 text-right">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {rebalancePlan.length > 0 && (
+            <div className="bg-white rounded-[2rem] md:rounded-[4rem] border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 md:px-10 py-6 md:py-8 border-b border-slate-100 bg-slate-50/60">
+                <h3 className="text-lg md:text-2xl font-black text-slate-900">Reallocation Actions</h3>
+              </div>
+              <div className="p-6 space-y-3">
+                {rebalancePlan.map(item => (
+                  <div key={item.name} className="flex justify-between text-xs font-bold text-slate-700">
+                    <span>{item.name}</span>
+                    <span className={item.delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                      {item.delta >= 0 ? 'Invest' : 'Reduce'} {formatCurrency(Math.abs(Math.round(item.delta)), currencyCountry)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Allocation Drift Map */}
             <div className="bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-sm flex flex-col h-full lg:col-span-1">

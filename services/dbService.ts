@@ -10,6 +10,8 @@ import type {
   FamilyMember,
   DetailedIncome,
   ExpenseItem,
+  CashflowItem,
+  InvestmentCommitment,
   Asset,
   Loan,
   Goal,
@@ -20,6 +22,7 @@ import type {
   RiskProfile,
   InsuranceAnalysisConfig,
 } from '../types';
+import { buildReportSnapshot } from '../lib/report';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -61,6 +64,7 @@ function rowToFamilyMember(row: Record<string, any>): FamilyMember {
     relation:        row.relation,
     age:             Number(row.age              ?? 0),
     isDependent:     Boolean(row.is_dependent),
+    retirementAge:   row.retirement_age ?? undefined,
     monthlyExpenses: Number(row.monthly_expenses ?? 0),
     income:          rowToIncome(row),
   };
@@ -73,6 +77,9 @@ function rowToExpense(row: Record<string, any>): ExpenseItem {
     inflationRate: Number(row.inflation_rate  ?? 6),
     tenure:        Number(row.tenure          ?? 34),
     startYear:     row.start_year ?? undefined,
+    endYear:       row.end_year ?? undefined,
+    frequency:     row.frequency ?? undefined,
+    notes:         row.notes ?? undefined,
   };
 }
 
@@ -89,6 +96,11 @@ function rowToAsset(row: Record<string, any>): Asset {
     availableForGoals: Boolean(row.available_for_goals),
     availableFrom:     row.available_from ?? undefined,
     tenure:            row.tenure         ?? undefined,
+    monthlyContribution:   row.monthly_contribution ?? undefined,
+    contributionFrequency: row.contribution_frequency ?? undefined,
+    contributionStepUp:    row.contribution_step_up ?? undefined,
+    contributionStartYear: row.contribution_start_year ?? undefined,
+    contributionEndYear:   row.contribution_end_year ?? undefined,
   };
 }
 
@@ -105,6 +117,7 @@ function rowToLoan(row: Record<string, any>): Loan {
     remainingTenure:   Number(row.remaining_tenure    ?? 120),
     emi:               Number(row.emi                 ?? 0),
     notes:             row.notes ?? undefined,
+    startYear:         row.start_year ?? undefined,
     lumpSumRepayments: Array.isArray(row.lump_sum_repayments)
                          ? row.lump_sum_repayments : [],
   };
@@ -122,8 +135,10 @@ function rowToGoal(row: Record<string, any>): Goal {
     startDate:       { type: row.start_date_type, value: Number(row.start_date_value) },
     endDate:         { type: row.end_date_type,   value: Number(row.end_date_value)   },
     targetAmountToday:   Number(row.target_amount_today ?? 0),
+    startGoalAmount:     row.start_goal_amount ?? undefined,
     inflationRate:       Number(row.inflation_rate      ?? 6),
     currentAmount:       Number(row.current_amount      ?? 0),
+    loan:                row.loan_details ?? undefined,
     desiredRetirementAge:                    row.desired_retirement_age ?? undefined,
     expectedMonthlyExpensesAfterRetirement:  row.expected_monthly_expenses_after_retirement ?? undefined,
     retirementHandling:                      row.retirement_handling ?? undefined,
@@ -140,11 +155,55 @@ function rowToInsurance(row: Record<string, any>): Insurance {
     insured: row.insured,
     sumAssured: Number(row.sum_assured ?? 0),
     premium: Number(row.premium ?? 0),
+    beginYear: row.begin_year ?? undefined,
+    pptEndYear: row.ppt_end_year ?? undefined,
+    maturityType: row.maturity_type ?? undefined,
+    annualPremiumsLeft: row.annual_premiums_left ?? undefined,
     premiumEndYear: row.premium_end_year ?? undefined,
     maturityDate: row.maturity_date ?? undefined,
     isMoneyBack: Boolean(row.is_money_back),
     moneyBackYears: Array.isArray(row.money_back_years) ? row.money_back_years : [],
     moneyBackAmounts: Array.isArray(row.money_back_amounts) ? row.money_back_amounts : [],
+    incomeFrom: row.income_from ?? undefined,
+    incomeTo: row.income_to ?? undefined,
+    incomeGrowth: row.income_growth ?? undefined,
+    incomeType: row.income_type ?? undefined,
+    incomeYear1: row.income_year_1 ?? undefined,
+    incomeYear2: row.income_year_2 ?? undefined,
+    incomeYear3: row.income_year_3 ?? undefined,
+    incomeYear4: row.income_year_4 ?? undefined,
+    sumInsured: row.sum_insured ?? undefined,
+    deductible: row.deductible ?? undefined,
+    thingsCovered: row.things_covered ?? undefined,
+  };
+}
+
+function rowToCashflow(row: Record<string, any>): CashflowItem {
+  return {
+    id: row.id,
+    owner: row.owner_ref,
+    label: row.label,
+    amount: Number(row.amount ?? 0),
+    frequency: row.frequency,
+    growthRate: Number(row.growth_rate ?? 0),
+    startYear: Number(row.start_year ?? new Date().getFullYear()),
+    endYear: Number(row.end_year ?? new Date().getFullYear()),
+    notes: row.notes ?? undefined,
+    flowType: row.flow_type ?? undefined,
+  };
+}
+
+function rowToInvestmentCommitment(row: Record<string, any>): InvestmentCommitment {
+  return {
+    id: row.id,
+    owner: row.owner_ref,
+    label: row.label,
+    amount: Number(row.amount ?? 0),
+    frequency: row.frequency,
+    stepUp: Number(row.step_up ?? 0),
+    startYear: Number(row.start_year ?? new Date().getFullYear()),
+    endYear: Number(row.end_year ?? new Date().getFullYear()),
+    notes: row.notes ?? undefined,
   };
 }
 
@@ -217,7 +276,7 @@ export async function loadFinanceData(
 
   const [
     profileRes, familyRes, incomeRes,
-    expensesRes, assetsRes, loansRes, goalsRes,
+    expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
     insuranceRes, transactionsRes, notificationsRes,
     riskProfileRes, estateRes, insuranceAnalysisRes,
   ] = await Promise.all([
@@ -229,6 +288,8 @@ export async function loadFinanceData(
     supabase.from('family_members').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('income_profiles').select('*').eq('user_id', user.id),
     supabase.from('expenses').select('*').eq('user_id', user.id).order('category'),
+    supabase.from('cashflows').select('*').eq('user_id', user.id).order('created_at'),
+    supabase.from('investment_commitments').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('assets').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('loans').select('*').eq('user_id', user.id).order('created_at'),
     supabase.from('goals').select('*').eq('user_id', user.id).order('priority'),
@@ -285,6 +346,8 @@ export async function loadFinanceData(
     },
     family:           familyWithIncome,
     detailedExpenses: (expensesRes.data ?? []).map(rowToExpense),
+    cashflows:        (cashflowsRes.data ?? []).map(rowToCashflow),
+    investmentCommitments: (commitmentsRes.data ?? []).map(rowToInvestmentCommitment),
     assets:           (assetsRes.data   ?? []).map(rowToAsset),
     loans:            (loansRes.data    ?? []).map(rowToLoan),
     goals:            (goalsRes.data    ?? []).map(rowToGoal),
@@ -345,11 +408,13 @@ export async function saveFinanceData(
 
   // ── Steps 3–6: independent tables, run in parallel
   const [
-    expensesRes, assetsRes, loansRes, goalsRes,
+    expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
     insuranceRes, transactionsRes, notificationsRes,
-    riskProfileRes, estateRes, insuranceAnalysisRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes, reportSnapshotRes,
   ] = await Promise.allSettled([
     saveExpenses(uid, state.detailedExpenses),
+    saveCashflows(uid, state.cashflows),
+    saveInvestmentCommitments(uid, state.investmentCommitments),
     saveAssets(uid, state.assets),
     saveLoans(uid, state.loans),
     saveGoals(uid, state.goals),
@@ -359,8 +424,11 @@ export async function saveFinanceData(
     saveRiskProfile(uid, state.riskProfile),
     saveEstateFlags(uid, state.estate),
     saveInsuranceAnalysis(uid, state.insuranceAnalysis),
+    saveReportSnapshot(uid, state),
   ]);
 
+  if (cashflowsRes.status === 'fulfilled' && cashflowsRes.value)  dbUpdates.cashflows     = cashflowsRes.value;
+  if (commitmentsRes.status === 'fulfilled' && commitmentsRes.value) dbUpdates.investmentCommitments = commitmentsRes.value;
   if (assetsRes.status === 'fulfilled' && assetsRes.value)        dbUpdates.assets        = assetsRes.value;
   if (loansRes.status === 'fulfilled' && loansRes.value)          dbUpdates.loans         = loansRes.value;
   if (goalsRes.status === 'fulfilled' && goalsRes.value)          dbUpdates.goals         = goalsRes.value;
@@ -368,20 +436,20 @@ export async function saveFinanceData(
   if (transactionsRes.status === 'fulfilled' && transactionsRes.value) dbUpdates.transactions = transactionsRes.value;
   if (notificationsRes.status === 'fulfilled' && notificationsRes.value) dbUpdates.notifications = notificationsRes.value;
 
-  ['expenses','assets','loans','goals','insurances','transactions','notifications','riskProfile','estateFlags','insuranceAnalysis'].forEach((label, i) => {
+  ['expenses','cashflows','investmentCommitments','assets','loans','goals','insurances','transactions','notifications','riskProfile','estateFlags','insuranceAnalysis','reportSnapshot'].forEach((label, i) => {
     const r = [
-      expensesRes, assetsRes, loansRes, goalsRes,
+      expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
       insuranceRes, transactionsRes, notificationsRes,
-      riskProfileRes, estateRes, insuranceAnalysisRes,
+      riskProfileRes, estateRes, insuranceAnalysisRes, reportSnapshotRes,
     ][i];
     if (r.status === 'rejected')
       console.error(`[dbService] ${label} save failed:`, (r as PromiseRejectedResult).reason);
   });
 
   const failures = [
-    expensesRes, assetsRes, loansRes, goalsRes,
+    expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
     insuranceRes, transactionsRes, notificationsRes,
-    riskProfileRes, estateRes, insuranceAnalysisRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes, reportSnapshotRes,
   ].filter(r => r.status === 'rejected').length;
 
   if (failures > 0) {
@@ -419,6 +487,7 @@ async function saveFamilyMembers(
     relation:         m.relation,
     age:              m.age,
     is_dependent:     m.isDependent,
+    retirement_age:   m.retirementAge ?? null,
     monthly_expenses: m.monthlyExpenses,
     ...incomeToColumns(m.income),
   }));
@@ -505,11 +574,115 @@ async function saveExpenses(
     inflation_rate: e.inflationRate,
     tenure:         e.tenure,
     start_year:     e.startYear ?? null,
+    end_year:       e.endYear ?? null,
+    frequency:      e.frequency ?? null,
+    notes:          e.notes ?? null,
   }));
   const { error } = await supabase
     .from('expenses')
     .upsert(rows, { onConflict: 'user_id,category' });
   if (error) throw error;
+}
+
+async function saveCashflows(
+  uid: string,
+  cashflows: CashflowItem[],
+): Promise<CashflowItem[] | null> {
+  if (cashflows.length === 0) {
+    await supabase.from('cashflows').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = cashflows.every(c => isUuid(c.id));
+
+  const rows = cashflows.map(c => ({
+    id:         hasOnlyUuidIds ? c.id : undefined,
+    user_id:    uid,
+    owner_ref:  c.owner,
+    label:      c.label,
+    amount:     c.amount,
+    frequency:  c.frequency,
+    growth_rate: c.growthRate,
+    start_year: c.startYear,
+    end_year:   c.endYear,
+    notes:      c.notes ?? null,
+    flow_type:  c.flowType ?? null,
+  }));
+
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('cashflows')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = cashflows.map(c => c.id);
+    await supabase
+      .from('cashflows')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('cashflows').delete().eq('user_id', uid);
+
+  const { data, error } = await supabase
+    .from('cashflows')
+    .insert(rows.map(({ id, ...rest }) => rest))
+    .select();
+  if (error) throw error;
+  return (data ?? []).map(rowToCashflow);
+}
+
+async function saveInvestmentCommitments(
+  uid: string,
+  commitments: InvestmentCommitment[],
+): Promise<InvestmentCommitment[] | null> {
+  if (commitments.length === 0) {
+    await supabase.from('investment_commitments').delete().eq('user_id', uid);
+    return null;
+  }
+
+  const hasOnlyUuidIds = commitments.every(c => isUuid(c.id));
+
+  const rows = commitments.map(c => ({
+    id:         hasOnlyUuidIds ? c.id : undefined,
+    user_id:    uid,
+    owner_ref:  c.owner,
+    label:      c.label,
+    amount:     c.amount,
+    frequency:  c.frequency,
+    step_up:    c.stepUp,
+    start_year: c.startYear,
+    end_year:   c.endYear,
+    notes:      c.notes ?? null,
+  }));
+
+  if (hasOnlyUuidIds) {
+    const { error } = await supabase
+      .from('investment_commitments')
+      .upsert(rows, { onConflict: 'id' });
+    if (error) throw error;
+
+    const ids = commitments.map(c => c.id);
+    await supabase
+      .from('investment_commitments')
+      .delete()
+      .eq('user_id', uid)
+      .not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+
+    return null;
+  }
+
+  await supabase.from('investment_commitments').delete().eq('user_id', uid);
+
+  const { data, error } = await supabase
+    .from('investment_commitments')
+    .insert(rows.map(({ id, ...rest }) => rest))
+    .select();
+  if (error) throw error;
+  return (data ?? []).map(rowToInvestmentCommitment);
 }
 
 
@@ -537,6 +710,11 @@ async function saveAssets(
     available_for_goals: a.availableForGoals,
     available_from:      a.availableFrom ?? null,
     tenure:              a.tenure ?? null,
+    monthly_contribution:    a.monthlyContribution ?? null,
+    contribution_frequency:  a.contributionFrequency ?? null,
+    contribution_step_up:    a.contributionStepUp ?? null,
+    contribution_start_year: a.contributionStartYear ?? null,
+    contribution_end_year:   a.contributionEndYear ?? null,
   }));
 
   if (hasOnlyUuidIds) {
@@ -590,6 +768,7 @@ async function saveLoans(
     remaining_tenure:   l.remainingTenure,
     emi:                l.emi,
     notes:              l.notes ?? null,
+    start_year:         l.startYear ?? null,
     lump_sum_repayments: l.lumpSumRepayments ?? [],
   }));
 
@@ -645,8 +824,10 @@ async function saveGoals(
     end_date_type:    g.endDate.type,
     end_date_value:   g.endDate.value,
     target_amount_today:   g.targetAmountToday,
+    start_goal_amount:     g.startGoalAmount ?? null,
     inflation_rate:        g.inflationRate,
     current_amount:        g.currentAmount,
+    loan_details:          g.loan ?? null,
     desired_retirement_age:                    g.desiredRetirementAge ?? null,
     expected_monthly_expenses_after_retirement: g.expectedMonthlyExpensesAfterRetirement ?? null,
     retirement_handling:                       g.retirementHandling ?? null,
@@ -699,11 +880,26 @@ async function saveInsurances(
     insured:            p.insured,
     sum_assured:        p.sumAssured,
     premium:            p.premium,
+    begin_year:         p.beginYear ?? null,
+    ppt_end_year:       p.pptEndYear ?? null,
+    maturity_type:      p.maturityType ?? null,
+    annual_premiums_left: p.annualPremiumsLeft ?? null,
     premium_end_year:   p.premiumEndYear ?? null,
     maturity_date:      p.maturityDate ?? null,
     is_money_back:      p.isMoneyBack,
     money_back_years:   p.moneyBackYears ?? [],
     money_back_amounts: p.moneyBackAmounts ?? [],
+    income_from:        p.incomeFrom ?? null,
+    income_to:          p.incomeTo ?? null,
+    income_growth:      p.incomeGrowth ?? null,
+    income_type:        p.incomeType ?? null,
+    income_year_1:      p.incomeYear1 ?? null,
+    income_year_2:      p.incomeYear2 ?? null,
+    income_year_3:      p.incomeYear3 ?? null,
+    income_year_4:      p.incomeYear4 ?? null,
+    sum_insured:        p.sumInsured ?? null,
+    deductible:         p.deductible ?? null,
+    things_covered:     p.thingsCovered ?? null,
   }));
 
   if (hasOnlyUuidIds) {
@@ -879,6 +1075,22 @@ async function saveInsuranceAnalysis(
       replacement_years: config.replacementYears,
       immediate_needs: config.immediateNeeds,
       financial_asset_discount: config.financialAssetDiscount,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+async function saveReportSnapshot(
+  uid: string,
+  state: FinanceState,
+): Promise<void> {
+  const payload = buildReportSnapshot(state);
+  const { error } = await supabase
+    .from('report_snapshots')
+    .upsert({
+      user_id: uid,
+      payload,
+      generated_at: payload.generatedAt,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
   if (error) throw error;

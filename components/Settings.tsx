@@ -7,6 +7,7 @@ import {
   Layout
 } from 'lucide-react';
 import { FinanceState } from '../types';
+import { getRetirementYear, getLifeExpectancyYear } from '../lib/financeMath';
 
 interface SettingsProps {
   state: FinanceState;
@@ -17,6 +18,8 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'system' | 'datalab'>('profile');
   const [copied, setCopied] = useState(false);
+  const retirementYear = getRetirementYear(state.profile.dob, state.profile.retirementAge);
+  const lifeExpectancyYear = getLifeExpectancyYear(state.profile.dob, state.profile.lifeExpectancy);
 
   const copyData = () => {
     navigator.clipboard.writeText(JSON.stringify(state, null, 2));
@@ -62,6 +65,14 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
                  <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Location Context</label>
                     <input type="text" value={state.profile.city} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" disabled />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Retirement Year</label>
+                    <input type="text" value={retirementYear ?? '—'} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" disabled />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Life Expectancy Year</label>
+                    <input type="text" value={lifeExpectancyYear ?? '—'} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" disabled />
                  </div>
               </div>
            </div>

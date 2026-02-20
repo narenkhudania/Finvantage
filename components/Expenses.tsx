@@ -31,7 +31,8 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
     if (existing) {
       newExpenses = state.detailedExpenses.map(e => e.category === categoryName ? { ...e, amount } : e);
     } else {
-      newExpenses = [...state.detailedExpenses, { category: categoryName, amount, inflationRate: 6, tenure: 10 }];
+      const year = new Date().getFullYear();
+      newExpenses = [...state.detailedExpenses, { category: categoryName, amount, inflationRate: 6, tenure: 10, frequency: 'Monthly', startYear: year, endYear: year + 10 }];
     }
     updateState({ detailedExpenses: newExpenses });
   };

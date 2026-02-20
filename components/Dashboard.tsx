@@ -14,9 +14,12 @@ import {
   LayoutGrid, ArrowDownRight, Users, ListChecks,
   PieChart, BarChart3, LineChart, RefreshCw
 } from 'lucide-react';
-import { FinanceState, DetailedIncome, View } from '../types';
+import { FinanceState, DetailedIncome, View, Asset, Loan } from '../types';
 import { getJourneyProgress } from '../lib/journey';
+import { getRiskReturnAssumption } from '../lib/financeMath';
 import { formatCurrency } from '../lib/currency';
+import { buildReportSnapshot } from '../lib/report';
+import CommandReport from './CommandReport';
 
 interface DashboardProps {
   state: FinanceState;
@@ -26,6 +29,7 @@ interface DashboardProps {
 const COLORS = ['#0f766e', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#84cc16'];
 
 const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
+  const todayLabel = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
   const calculateTotalMemberIncome = (income: DetailedIncome) => {
     return (income.salary || 0) + (income.bonus || 0) + (income.reimbursements || 0) + 
            (income.business || 0) + (income.rental || 0) + (income.investment || 0);
@@ -59,6 +63,130 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
     return Object.entries(groups).map(([name, value]) => ({ name, value }));
   }, [state.assets]);
 
+  const netWorthSummary = useMemo(() => {
+    const financialSet = new Set(['Liquid', 'Debt', 'Equity', 'Gold/Silver']);
+    const physicalSet = new Set(['Real Estate']);
+    const personalSet = new Set(['Personal']);
+
+    const financial = state.assets
+      .filter(a => financialSet.has(a.category))
+      .reduce((sum, a) => sum + a.currentValue, 0);
+    const physical = state.assets
+      .filter(a => physicalSet.has(a.category))
+      .reduce((sum, a) => sum + a.currentValue, 0);
+    const personal = state.assets
+      .filter(a => personalSet.has(a.category))
+      .reduce((sum, a) => sum + a.currentValue, 0);
+
+    const total = financial + physical + personal;
+    const liabilities = totalLoans;
+    const net = total - liabilities;
+
+    return {
+      financial,
+      physical,
+      personal,
+      totalAssets: total,
+      liabilities,
+      netWorth: net,
+      pct: (value: number) => (total > 0 ? (value / total) * 100 : 0),
+      pctLiabilities: (value: number) => (liabilities > 0 ? (value / liabilities) * 100 : 0),
+    };
+  }, [state.assets, totalLoans]);
+
+  const statementData = useMemo(() => {
+    const financialSet = new Set(['Liquid', 'Debt', 'Equity', 'Gold/Silver']);
+
+    const isResidentialAsset = (asset: Asset) => {
+      const label = `${asset.subCategory || ''} ${asset.name || ''}`.toLowerCase();
+      return /residential|home|house|apartment|villa|bungalow/.test(label);
+    };
+
+    const formatAssetLabel = (asset: Asset) => {
+      const name = (asset.name || '').trim();
+      const sub = (asset.subCategory || '').trim();
+      if (asset.category === 'Gold/Silver') return name ? `Gold (${name})` : 'Gold / Silver';
+      if (asset.category === 'Equity') return 'Portfolio (Equity & Mutual Fund)';
+      if (asset.category === 'Liquid') return sub ? `Cash in Hand (${sub})` : 'Cash in Hand (Bank Balance)';
+      if (asset.category === 'Debt') {
+        const combo = `${sub} ${name}`.toLowerCase();
+        if (/nps|epf|gpf|dsop/.test(combo)) return 'Other Govt. Schemes (NPS & EPF)';
+        return sub || 'Debt Instruments';
+      }
+      if (asset.category === 'Real Estate') {
+        const label = name || sub || 'Property';
+        return isResidentialAsset(asset) ? `Residential Property (${label})` : `Investment Property (${label})`;
+      }
+      if (asset.category === 'Personal') {
+        const label = name || sub || 'Personal Asset';
+        if (/car|bike|vehicle|two wheeler|two-wheeler/.test(label.toLowerCase())) {
+          return `Car / Two Wheeler (${label})`;
+        }
+        if (/house|home|residential/.test(label.toLowerCase())) {
+          return `Residential Property (${label})`;
+        }
+        return `House Contents (${label})`;
+      }
+      return name || sub || asset.category;
+    };
+
+    const addRow = (map: Record<string, number>, label: string, value: number) => {
+      map[label] = (map[label] || 0) + value;
+    };
+
+    const investmentsMap: Record<string, number> = {};
+    const otherMap: Record<string, number> = {};
+
+    state.assets.forEach(asset => {
+      const label = formatAssetLabel(asset);
+      const isInvestment = financialSet.has(asset.category) || (asset.category === 'Real Estate' && !isResidentialAsset(asset));
+      if (isInvestment) addRow(investmentsMap, label, asset.currentValue);
+      else addRow(otherMap, label, asset.currentValue);
+    });
+
+    const investments = Object.entries(investmentsMap)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
+    const otherAssets = Object.entries(otherMap)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
+
+    const totalInvestments = investments.reduce((sum, a) => sum + a.value, 0);
+    const totalOtherAssets = otherAssets.reduce((sum, a) => sum + a.value, 0);
+    const totalAssets = totalInvestments + totalOtherAssets;
+
+    const liabilities = state.loans
+      .map((loan: Loan) => ({ label: `${loan.owner === 'self' ? state.profile.firstName : 'Member'}'s ${loan.type}`.replace("Self's", `${state.profile.firstName}'s`), value: loan.outstandingAmount }))
+      .filter(l => l.value > 0)
+      .sort((a, b) => b.value - a.value);
+    const totalLiabilities = liabilities.reduce((sum, l) => sum + l.value, 0);
+    const netWorth = totalAssets - totalLiabilities;
+    const debtToAssets = totalAssets > 0 ? totalLiabilities / totalAssets : 0;
+
+    const majorAssets = [...state.assets]
+      .sort((a, b) => b.currentValue - a.currentValue)
+      .slice(0, 3)
+      .map(a => formatAssetLabel(a));
+    const majorLiabilities = [...state.loans]
+      .sort((a, b) => b.outstandingAmount - a.outstandingAmount)
+      .slice(0, 2)
+      .map(l => `${l.type}`);
+
+    return {
+      investments,
+      otherAssets,
+      liabilities,
+      totalInvestments,
+      totalOtherAssets,
+      totalAssets,
+      totalLiabilities,
+      netWorth,
+      debtToAssets,
+      majorAssets,
+      majorLiabilities,
+    };
+  }, [state.assets, state.loans, state.profile.firstName]);
+
   // Chart Data: Budget Partition
   const budgetData = useMemo(() => [
     { name: 'Survival', value: householdExpenses, color: '#f59e0b' },
@@ -71,14 +199,16 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
     const data = [];
     let currentNW = netWorth;
     const year = new Date().getFullYear();
+    const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
     for (let i = 0; i < 6; i++) {
       data.push({ year: year + i, nw: Math.round(currentNW) });
-      currentNW = (currentNW * 1.08) + (surplusValue * 12); // Assume 8% growth + yearly surplus
+      currentNW = (currentNW * (1 + assumedReturn / 100)) + (surplusValue * 12);
     }
     return data;
-  }, [netWorth, surplusValue]);
+  }, [netWorth, surplusValue, state.riskProfile?.level]);
 
   const journey = useMemo(() => getJourneyProgress(state), [state]);
+  const reportSnapshot = useMemo(() => buildReportSnapshot(state), [state]);
   const stepIcons: Record<string, any> = {
     family: Users,
     inflow: TrendingUp,
@@ -294,6 +424,57 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
             </div>
          </div>
 
+         {/* Net Worth Summary */}
+         <div className="bg-white p-10 md:p-12 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden">
+            <div className="flex justify-between items-center mb-8">
+               <div className="flex items-center gap-4">
+                  <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl"><Landmark size={24}/></div>
+                  <div>
+                     <h3 className="text-xl font-black text-slate-900 tracking-tight">Net Worth Composition.</h3>
+                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Financial vs Physical vs Personal</p>
+                  </div>
+               </div>
+               <div className="bg-slate-50 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500">
+                 Net Worth: {formatCurrency(netWorthSummary.netWorth, currencyCountry)}
+               </div>
+            </div>
+
+            <div className="overflow-x-auto no-scrollbar">
+               <table className="w-full text-left min-w-[520px]">
+                  <thead>
+                    <tr className="bg-slate-50/50">
+                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
+                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Value</th>
+                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">% of Assets</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[
+                      { label: 'Financial Assets', value: netWorthSummary.financial },
+                      { label: 'Physical Assets', value: netWorthSummary.physical },
+                      { label: 'Personal Assets', value: netWorthSummary.personal },
+                    ].map(row => (
+                      <tr key={row.label}>
+                        <td className="px-6 py-4 text-xs font-black text-slate-900">{row.label}</td>
+                        <td className="px-6 py-4 text-right text-xs font-black text-slate-900">{formatCurrency(row.value, currencyCountry)}</td>
+                        <td className="px-6 py-4 text-right text-xs font-black text-slate-500">{netWorthSummary.pct(row.value).toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-slate-50/60">
+                      <td className="px-6 py-4 text-xs font-black text-slate-900">Total Assets</td>
+                      <td className="px-6 py-4 text-right text-xs font-black text-slate-900">{formatCurrency(netWorthSummary.totalAssets, currencyCountry)}</td>
+                      <td className="px-6 py-4 text-right text-xs font-black text-slate-500">100%</td>
+                    </tr>
+                    <tr>
+                      <td className="px-6 py-4 text-xs font-black text-rose-600">Total Liabilities</td>
+                      <td className="px-6 py-4 text-right text-xs font-black text-rose-600">{formatCurrency(netWorthSummary.liabilities, currencyCountry)}</td>
+                      <td className="px-6 py-4 text-right text-xs font-black text-rose-400">—</td>
+                    </tr>
+                  </tbody>
+               </table>
+            </div>
+         </div>
+
          {/* Strategic Action Feed */}
          <div className="bg-white p-10 md:p-12 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden flex flex-col justify-between">
             <div className="flex justify-between items-center mb-10">
@@ -329,6 +510,8 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
          </div>
 
       </div>
+
+      <CommandReport snapshot={reportSnapshot} />
     </div>
   );
 };

@@ -5,6 +5,8 @@ export type AssetType = 'Liquid' | 'Debt' | 'Equity' | 'Real Estate' | 'Personal
 export type Relation = 'Spouse' | 'Child' | 'Parent' | 'Other';
 export type InsuranceCategory = 'Life Insurance' | 'General Insurance';
 export type InsuranceType = 'Term' | 'Endowment' | 'Money Back' | 'ULIP' | 'Annuity' | 'Health' | 'Critical Illness' | 'Personal Accident' | 'Home' | 'Car' | 'Others';
+export type CashflowFrequency = 'Monthly' | 'Quarterly' | 'Annually' | 'One time';
+export type InvestmentFrequency = 'Monthly' | 'Quarterly' | 'Annually' | 'One time';
 
 export interface Notification {
   id: string;
@@ -66,6 +68,9 @@ export interface ExpenseItem {
   inflationRate: number;
   tenure: number;
   startYear?: number;
+  endYear?: number;
+  frequency?: CashflowFrequency;
+  notes?: string;
 }
 
 export interface FamilyMember {
@@ -74,6 +79,7 @@ export interface FamilyMember {
   relation: Relation;
   age: number;
   isDependent: boolean;
+  retirementAge?: number;
   income: DetailedIncome;
   monthlyExpenses: number;
 }
@@ -90,6 +96,11 @@ export interface Asset {
   availableForGoals: boolean;
   availableFrom?: number;
   tenure?: number;
+  monthlyContribution?: number;
+  contributionFrequency?: InvestmentFrequency;
+  contributionStepUp?: number;
+  contributionStartYear?: number;
+  contributionEndYear?: number;
 }
 
 export interface Loan {
@@ -104,6 +115,7 @@ export interface Loan {
   remainingTenure: number; 
   emi: number;
   notes?: string;
+  startYear?: number;
   lumpSumRepayments: { year: number; amount: number }[];
 }
 
@@ -114,6 +126,16 @@ export interface RelativeDate {
   value: number; 
 }
 
+export interface GoalLoan {
+  enabled: boolean;
+  loanId?: string;
+  percent?: number;
+  value?: number;
+  tenure?: number;
+  roi?: number;
+  emi?: number;
+}
+
 export interface Goal {
   id: string;
   type: GoalType;
@@ -121,12 +143,14 @@ export interface Goal {
   priority: number;
   resourceBuckets: ResourceBucket[];
   isRecurring: boolean;
-  frequency?: 'Monthly' | 'Yearly' | 'Every 2-5 Years' | 'Every 5-10 Years' | 'Every 2-15 Years';
+  frequency?: 'Monthly' | 'Yearly' | 'Every 2-5 Years' | 'Every 5-10 Years' | 'Every 2-15 Years' | 'Once in 10 years';
   startDate: RelativeDate;
   endDate: RelativeDate;
   targetAmountToday: number;
+  startGoalAmount?: number;
   inflationRate: number;
   currentAmount: number;
+  loan?: GoalLoan;
   desiredRetirementAge?: number;
   expectedMonthlyExpensesAfterRetirement?: number;
   retirementHandling?: 'CurrentExpenses' | 'Estimate' | 'Detailed';
@@ -139,6 +163,94 @@ export interface InsuranceAnalysisConfig {
   replacementYears: number;
   immediateNeeds: number;
   financialAssetDiscount: number;
+}
+
+export interface AllocationBreakdown {
+  equity: number;
+  debt: number;
+  gold: number;
+  liquid: number;
+}
+
+export interface ReportValueItem {
+  label: string;
+  value: number;
+}
+
+export interface ReportSnapshot {
+  generatedAt: string;
+  asOf: string;
+  currency: string;
+  intro: {
+    completionPct: number;
+    memberCount: number;
+    goalCount: number;
+    assetCount: number;
+    liabilityCount: number;
+  };
+  executiveSummary: {
+    netWorth: number;
+    totalAssets: number;
+    totalLiabilities: number;
+    monthlySurplus: number;
+    savingsRatePct: number;
+    dtiPct: number;
+    riskLevel?: RiskLevel;
+  };
+  statementOfPosition: {
+    investments: ReportValueItem[];
+    otherAssets: ReportValueItem[];
+    liabilities: ReportValueItem[];
+    totals: {
+      investments: number;
+      otherAssets: number;
+      assets: number;
+      liabilities: number;
+      netWorth: number;
+      debtToAssets: number;
+    };
+    majorAssets: string[];
+    majorLiabilities: string[];
+  };
+  cashFlow: {
+    monthly: {
+      income: number;
+      expenses: number;
+      debt: number;
+      surplus: number;
+    };
+    annual: {
+      income: number;
+      expenses: number;
+      debt: number;
+      surplus: number;
+    };
+  };
+  goals: {
+    totalGoals: number;
+    fundedCount: number;
+    totalTargetToday: number;
+    totalCurrent: number;
+    nextGoal?: {
+      label: string;
+      year?: number;
+      amount?: number;
+    };
+  };
+  riskProfile: {
+    score: number;
+    level?: RiskLevel;
+    recommendedAllocation: AllocationBreakdown;
+    currentAllocation: AllocationBreakdown;
+  };
+  assumptions: {
+    inflation: number;
+    investmentRate: number;
+    expectedIncomeGrowth: number;
+    retirementAge: number;
+    lifeExpectancy: number;
+    returnAssumption: number;
+  };
 }
 
 export interface FinanceState {
@@ -164,6 +276,8 @@ export interface FinanceState {
   riskProfile?: RiskProfile;
   family: FamilyMember[];
   detailedExpenses: ExpenseItem[];
+  cashflows: CashflowItem[];
+  investmentCommitments: InvestmentCommitment[];
   assets: Asset[];
   loans: Loan[];
   insurance: Insurance[];
@@ -185,11 +299,26 @@ export type Insurance = {
   insured: string;
   sumAssured: number;
   premium: number;
+  beginYear?: number;
+  pptEndYear?: number;
+  maturityType?: string;
+  annualPremiumsLeft?: number;
   premiumEndYear?: number;
   maturityDate?: string;
   isMoneyBack: boolean;
   moneyBackYears: number[];
   moneyBackAmounts: number[];
+  incomeFrom?: number;
+  incomeTo?: number;
+  incomeGrowth?: number;
+  incomeType?: string;
+  incomeYear1?: number;
+  incomeYear2?: number;
+  incomeYear3?: number;
+  incomeYear4?: number;
+  sumInsured?: number;
+  deductible?: number;
+  thingsCovered?: string;
 };
 
 export type View = 
@@ -223,4 +352,29 @@ export interface Transaction {
   amount: number;
   category: string;
   type: TransactionType;
+}
+
+export interface CashflowItem {
+  id: string;
+  owner: string;
+  label: string;
+  amount: number;
+  frequency: CashflowFrequency;
+  growthRate: number;
+  startYear: number;
+  endYear: number;
+  notes?: string;
+  flowType?: 'Income' | 'Expense';
+}
+
+export interface InvestmentCommitment {
+  id: string;
+  owner: string;
+  label: string;
+  amount: number;
+  frequency: InvestmentFrequency;
+  stepUp: number;
+  startYear: number;
+  endYear: number;
+  notes?: string;
 }
