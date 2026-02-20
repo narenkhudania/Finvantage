@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { FinanceState, DetailedIncome } from '../types';
 import { clampNumber, parseNumber } from '../lib/validation';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 interface InflowProfileProps {
   state: FinanceState;
@@ -29,7 +30,9 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
     }, 0);
   }, [members]);
 
-  const updateIncomeField = (id: string, field: keyof DetailedIncome, value: number) => {
+  const sanitizeDigits = (value: string) => value.replace(/[^\d]/g, '');
+
+  const updateIncomeField = (id: string, field: keyof DetailedIncome, value: number | string) => {
     const sanitized = Math.max(0, parseNumber(value, 0));
     const finalValue =
       field === 'expectedIncrease'
@@ -47,8 +50,8 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
   };
 
   const IncomeForm = ({ member }: { member: any }) => (
-    <div className="bg-slate-50 p-8 md:p-12 rounded-[3.5rem] border border-slate-200 animate-in slide-in-from-top-6 duration-500 space-y-10">
-      <div className="flex justify-between items-center">
+    <div className="bg-slate-50 p-6 md:p-12 rounded-[3.5rem] border border-slate-200 animate-in slide-in-from-top-6 duration-500 space-y-10">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
          <h3 className="text-xl md:text-2xl font-black text-slate-900 flex items-center gap-3"><Edit3 className="text-teal-600"/> Calibrate: {member.name}</h3>
          <button onClick={() => setEditingId(null)} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-colors">Close Form</button>
       </div>
@@ -66,10 +69,12 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                 <div className="relative group">
                    <item.icon className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-teal-600 transition-colors" size={18}/>
                    <input 
-                    type="number" 
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={member.income[item.field] || ''} 
-                    onChange={e => updateIncomeField(member.id, item.field, parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-14 py-4 font-black text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
+                    onChange={e => updateIncomeField(member.id, item.field, sanitizeDigits(e.target.value))}
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-12 md:px-14 py-3.5 md:py-4 font-black text-lg md:text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
                     placeholder="0"
                    />
                 </div>
@@ -88,10 +93,12 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                 <div className="relative group">
                    <item.icon className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-teal-600 transition-colors" size={18}/>
                    <input 
-                    type="number" 
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={member.income[item.field] || ''} 
-                    onChange={e => updateIncomeField(member.id, item.field, parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-14 py-4 font-black text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
+                    onChange={e => updateIncomeField(member.id, item.field, sanitizeDigits(e.target.value))}
+                    className="w-full bg-white border border-slate-200 rounded-2xl px-12 md:px-14 py-3.5 md:py-4 font-black text-lg md:text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
                     placeholder="0"
                    />
                 </div>
@@ -101,6 +108,9 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
       </div>
     </div>
   );
+
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
 
   return (
     <div className="space-y-8 md:space-y-12 animate-in fade-in duration-700 pb-24">
@@ -116,7 +126,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
           </div>
           <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner w-full md:min-w-[300px]">
              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Aggregated Monthly</p>
-             <h4 className="text-4xl md:text-6xl font-black tracking-tighter text-emerald-400">₹{totalHouseholdInflow.toLocaleString()}</h4>
+             <h4 className="text-4xl md:text-6xl font-black tracking-tighter text-emerald-400">{formatCurrency(totalHouseholdInflow, currencyCountry)}</h4>
           </div>
         </div>
       </div>
@@ -125,17 +135,48 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
            <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-sm overflow-hidden">
-              <div className="px-8 md:px-12 py-8 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
+              <div className="px-6 md:px-12 py-6 md:py-8 bg-slate-50/50 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                  <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">Node Contributions</h3>
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{members.length} Active Earners</p>
               </div>
-              <div className="overflow-x-auto no-scrollbar">
+
+              {/* Mobile Cards */}
+              <div className="md:hidden p-6 space-y-4">
+                {members.map(m => {
+                  const mTotal = (m.income.salary || 0) + (m.income.bonus || 0) + (m.income.reimbursements || 0) + (m.income.business || 0) + (m.income.rental || 0) + (m.income.investment || 0);
+                  const share = (mTotal / (totalHouseholdInflow || 1)) * 100;
+                  return (
+                    <div key={m.id} className="border border-slate-200 rounded-3xl p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400"><User size={20}/></div>
+                          <div>
+                            <p className="text-sm font-black text-slate-900">{m.name}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{m.relation}</p>
+                          </div>
+                        </div>
+                        <button onClick={() => setEditingId(m.id)} className="p-2.5 bg-slate-100 text-slate-400 hover:bg-teal-600 hover:text-white rounded-xl transition-all shadow-sm"><Edit3 size={16}/></button>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Monthly Inflow</p>
+                          <p className="text-lg font-black text-slate-900">{formatCurrency(mTotal, currencyCountry)}</p>
+                        </div>
+                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-50 text-teal-600 rounded-full text-[10px] font-black border border-teal-100">{share.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto no-scrollbar">
                  <table className="w-full text-left min-w-[720px]">
                     <thead>
                        <tr className="bg-white">
                           <th className="px-8 md:px-12 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Earner Name</th>
                           <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Relation</th>
-                          <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Inflow (₹)</th>
+                          <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Inflow ({currencySymbol})</th>
                           <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Share</th>
                           <th className="px-8 md:px-12 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
                        </tr>
@@ -153,7 +194,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                                    </div>
                                 </td>
                                 <td className="px-6 py-6 text-[10px] font-bold text-slate-500 uppercase">{m.relation}</td>
-                                <td className="px-6 py-6 text-sm font-black text-slate-900 text-right">₹{mTotal.toLocaleString()}</td>
+                                <td className="px-6 py-6 text-sm font-black text-slate-900 text-right">{formatCurrency(mTotal, currencyCountry)}</td>
                                 <td className="px-6 py-6 text-center">
                                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-50 text-teal-600 rounded-full text-[10px] font-black border border-teal-100">{share.toFixed(1)}%</div>
                                 </td>
@@ -188,7 +229,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                     <div key={i} className="space-y-2">
                        <div className="flex justify-between items-end">
                           <span className="text-[10px] font-black uppercase text-slate-400">{pool.label}</span>
-                          <span className="text-sm font-black">₹{pool.val.toLocaleString()}</span>
+                          <span className="text-sm font-black">{formatCurrency(pool.val, currencyCountry)}</span>
                        </div>
                        <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                           <div className="h-full transition-all duration-1000" style={{ width: `${(pool.val / (totalHouseholdInflow || 1)) * 100}%`, backgroundColor: pool.color }} />

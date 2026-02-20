@@ -34,6 +34,7 @@ import { supabase } from './services/supabase';
 import { signOut } from './services/authService';
 import { saveFinanceData, loadFinanceData } from './services/dbService';
 import { getJourneyProgress } from './lib/journey';
+import { setActiveCountry } from './lib/currency';
 
 const LOCAL_KEY        = 'finvantage_active_session';
 const SAVE_DEBOUNCE_MS = 1500;
@@ -224,6 +225,10 @@ const App: React.FC = () => {
 
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [financeState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setActiveCountry(financeState.profile?.country || 'India');
+  }, [financeState.profile?.country]);
 
   // ── Logout ────────────────────────────────────────────────────
   const handleLogout = async () => {
