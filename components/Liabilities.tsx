@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell } from 'recharts';
 import { parseNumber } from '../lib/validation';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 const LOAN_TYPES: { type: LoanType, icon: any }[] = [
   { type: 'Home Loan', icon: Home },
@@ -194,6 +195,9 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     return insights;
   }, [state.loans]);
 
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
+
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-24">
       {notice && (
@@ -278,11 +282,11 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Sanctioned Amount</label>
-                  <input type="number" value={newLoan.sanctionedAmount || ''} onChange={e => setNewLoan({...newLoan, sanctionedAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
+                  <input type="number" value={newLoan.sanctionedAmount || ''} onChange={e => setNewLoan({...newLoan, sanctionedAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder={currencySymbol} />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Current Outstanding</label>
-                  <input type="number" value={newLoan.outstandingAmount || ''} onChange={e => setNewLoan({...newLoan, outstandingAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder="₹" />
+                  <input type="number" value={newLoan.outstandingAmount || ''} onChange={e => setNewLoan({...newLoan, outstandingAmount: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-6 py-4 font-bold outline-none" placeholder={currencySymbol} />
                 </div>
              </div>
 
@@ -347,11 +351,11 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-center text-left">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Outstanding</p>
-          <h4 className="text-3xl font-black text-rose-600 tracking-tighter">₹{totalOutstanding.toLocaleString()}</h4>
+          <h4 className="text-3xl font-black text-rose-600 tracking-tighter">{formatCurrency(totalOutstanding, currencyCountry)}</h4>
         </div>
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col justify-center text-left">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Monthly EMI Load</p>
-          <h4 className="text-3xl font-black text-slate-900 tracking-tighter">₹{totalEMI.toLocaleString()}</h4>
+          <h4 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(totalEMI, currencyCountry)}</h4>
         </div>
         <div className="surface-dark p-8 rounded-[2.5rem] text-white flex flex-col justify-center relative overflow-hidden group text-left">
            <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingDown size={80}/></div>
@@ -398,7 +402,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                       <span className="text-[10px] font-black uppercase tracking-widest text-teal-600 bg-teal-50 px-3 py-1 rounded-lg">{loan.source}</span>
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{loan.sourceType} • {loan.type}</span>
                     </div>
-                    <h4 className="text-3xl font-black text-slate-900 tracking-tighter">₹{loan.outstandingAmount.toLocaleString()}</h4>
+                    <h4 className="text-3xl font-black text-slate-900 tracking-tighter">{formatCurrency(loan.outstandingAmount, currencyCountry)}</h4>
                     <div className="w-full max-w-[240px] h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden">
                        <div className="h-full bg-emerald-500" style={{ width: `${payoffProgress}%` }} />
                     </div>
@@ -408,7 +412,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                 <div className="grid grid-cols-3 gap-8 text-center shrink-0 border-l border-slate-100 pl-8">
                    <div>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">EMI</p>
-                      <p className="text-lg font-black text-slate-900">₹{loan.emi.toLocaleString()}</p>
+                      <p className="text-lg font-black text-slate-900">{formatCurrency(loan.emi, currencyCountry)}</p>
                    </div>
                    <div>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Rate</p>
@@ -440,7 +444,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                                  value={lumpSumAmount} 
                                  onChange={e => setLumpSumAmount(e.target.value)} 
                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-black text-lg outline-none focus:border-teal-600" 
-                                 placeholder="Amount ₹"
+                                 placeholder={`Amount ${currencySymbol}`}
                                  onClick={e => e.stopPropagation()}
                               />
                               <button 
@@ -455,7 +459,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 animate-in zoom-in-95">
                                <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-2"><Lightbulb size={12}/> Projected Savings</p>
                                <div className="space-y-1">
-                                 <div className="flex justify-between text-xs font-bold text-slate-600"><span>Interest Saved:</span><span className="text-emerald-700">₹{Math.round(interestSaved).toLocaleString()}</span></div>
+                                 <div className="flex justify-between text-xs font-bold text-slate-600"><span>Interest Saved:</span><span className="text-emerald-700">{formatCurrency(Math.round(interestSaved), currencyCountry)}</span></div>
                                  <div className="flex justify-between text-xs font-bold text-slate-600"><span>Tenure Saved:</span><span className="text-emerald-700">-{tenureSaved} Months</span></div>
                                </div>
                              </div>
@@ -471,7 +475,7 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                         )}
 
                         <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white space-y-4 text-left">
-                           <div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase">Projected Total Interest</span><span className="text-sm font-black text-rose-400">₹{Math.round(totalInterest).toLocaleString()}</span></div>
+                           <div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase">Projected Total Interest</span><span className="text-sm font-black text-rose-400">{formatCurrency(Math.round(totalInterest), currencyCountry)}</span></div>
                            <div className="flex justify-between items-center"><span className="text-[10px] font-black text-slate-500 uppercase">Current Ends In</span><span className="text-sm font-black text-emerald-400">{monthsRemaining} Months</span></div>
                         </div>
                      </div>
@@ -523,9 +527,9 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                                     {schedule.map((row, i) => (
                                        <tr key={i} className="hover:bg-slate-50 transition-colors">
                                           <td className="px-8 py-4 text-[10px] font-black text-slate-600">{row.month}</td>
-                                          <td className="px-4 py-4 text-[10px] font-bold text-rose-500 text-right">₹{row.interest.toLocaleString()}</td>
-                                          <td className="px-4 py-4 text-[10px] font-bold text-emerald-500 text-right">₹{row.principal.toLocaleString()}</td>
-                                          <td className="px-8 py-4 text-[10px] font-black text-slate-900 text-right">₹{row.balance.toLocaleString()}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-rose-500 text-right">{formatCurrency(row.interest, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-emerald-500 text-right">{formatCurrency(row.principal, currencyCountry)}</td>
+                                          <td className="px-8 py-4 text-[10px] font-black text-slate-900 text-right">{formatCurrency(row.balance, currencyCountry)}</td>
                                        </tr>
                                     ))}
                                  </tbody>

@@ -7,6 +7,7 @@ import {
   Receipt, CreditCard, ShieldCheck, Zap, HeartPulse
 } from 'lucide-react';
 import { FinanceState, DetailedIncome, FamilyMember, ExpenseItem } from '../types';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 interface CashflowProfileProps {
   state: FinanceState;
@@ -83,6 +84,9 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
   const totalMonthlyDebt = state.loans.reduce((sum, l) => sum + l.emi, 0);
   const totalMonthlyOutflow = totalMonthlyExpenses + totalMonthlyDebt;
 
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
+
   const IncomeInput = ({ label, icon: Icon, value, field, description }: any) => (
     <div className="group bg-white p-6 rounded-[2.5rem] border border-slate-200 hover:border-teal-400 transition-all shadow-sm">
       <div className="flex items-center justify-between mb-4">
@@ -96,7 +100,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
         </div>
       </div>
       <div className="relative">
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 font-black text-2xl">₹</span>
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 font-black text-2xl">{currencySymbol}</span>
         <input 
           type="number"
           value={value || ''}
@@ -128,7 +132,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
           <div className="bg-white/5 border border-white/10 p-10 rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner w-full md:min-w-[320px]">
                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Monthly Net Surplus</p>
                <h4 className={`text-4xl md:text-5xl font-black tracking-tighter ${(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                  ₹{(totalMonthlyIncome - totalMonthlyOutflow).toLocaleString()}
+                  {formatCurrency(totalMonthlyIncome - totalMonthlyOutflow, currencyCountry)}
                </h4>
                <div className={`flex items-center gap-2 mt-2 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full border ${(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-rose-400 bg-rose-500/10 border-rose-500/20'}`}>
                   {(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? <TrendingUp size={12}/> : <ArrowDownRight size={12}/>}
@@ -160,7 +164,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
                 <p className={`text-[9px] font-black uppercase mb-1 ${selectedMemberId === member.id ? 'text-slate-500' : 'text-slate-400'}`}>{member.relation}</p>
                 <h4 className="text-lg font-black tracking-tight">{member.name}</h4>
                 <p className={`text-[10px] font-bold mt-4 ${selectedMemberId === member.id ? 'text-teal-400' : 'text-teal-600'}`}>
-                  ₹{((member.income.salary || 0) + (member.income.bonus || 0)).toLocaleString()}
+                  {formatCurrency((member.income.salary || 0) + (member.income.bonus || 0), currencyCountry)}
                 </p>
               </button>
             ))}
@@ -187,7 +191,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
                              <div className="flex-1">
                                 <p className="text-[10px] font-black text-slate-400 uppercase mb-1">{cat.name}</p>
                                 <div className="relative">
-                                   <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 font-bold">₹</span>
+                                   <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 font-bold">{currencySymbol}</span>
                                    <input 
                                       type="number" 
                                       value={state.detailedExpenses.find(e => e.category === cat.name)?.amount || ''} 
@@ -219,7 +223,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
                                 <p className="text-[10px] font-bold text-slate-400 uppercase">{loan.type}</p>
                                 <p className="text-sm font-black">{loan.source}</p>
                              </div>
-                             <p className="text-lg font-black text-rose-400">₹{loan.emi.toLocaleString()}</p>
+                             <p className="text-lg font-black text-rose-400">{formatCurrency(loan.emi, currencyCountry)}</p>
                           </div>
                        ))}
                        {state.loans.length === 0 && <p className="text-xs text-slate-500 italic">No active loan obligations detected.</p>}
@@ -227,7 +231,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
 
                     <div className="pt-8 border-t border-white/5 relative z-10 flex justify-between items-center">
                        <p className="text-[10px] font-black uppercase text-slate-500">Total Obligation</p>
-                       <p className="text-2xl font-black text-rose-500">₹{totalMonthlyDebt.toLocaleString()}</p>
+                       <p className="text-2xl font-black text-rose-500">{formatCurrency(totalMonthlyDebt, currencyCountry)}</p>
                     </div>
                  </div>
 

@@ -7,6 +7,7 @@ import {
   ShieldAlert, CheckCircle2, Info, Landmark, BarChart3, ArrowRight
 } from 'lucide-react';
 import { clampNumber, parseNumber } from '../lib/validation';
+import { formatCurrency } from '../lib/currency';
 
 const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
@@ -74,6 +75,8 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
     });
   };
 
+  const currencyCountry = state.profile.country;
+
   return (
     <div className="space-y-8 md:space-y-10 animate-in fade-in duration-700 pb-24">
       {/* Dynamic Header */}
@@ -130,8 +133,8 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                           <div className="grid grid-cols-2 gap-8">
                              <div className="space-y-3">
                                 <p className="text-[9px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Requirements</p>
-                                <div className="flex justify-between text-xs md:text-sm font-bold"><span className="text-slate-500">Debt Repayment</span><span className="text-slate-900">₹{Math.round(hlvData.totalDebt).toLocaleString()}</span></div>
-                                <div className="flex justify-between text-xs md:text-sm font-bold"><span className="text-slate-500">Income Replace</span><span className="text-slate-900">₹{Math.round(hlvData.expenseReplacement).toLocaleString()}</span></div>
+                                <div className="flex justify-between text-xs md:text-sm font-bold"><span className="text-slate-500">Debt Repayment</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.totalDebt), currencyCountry)}</span></div>
+                                <div className="flex justify-between text-xs md:text-sm font-bold"><span className="text-slate-500">Income Replace</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.expenseReplacement), currencyCountry)}</span></div>
                              </div>
                           </div>
                        </div>
@@ -150,7 +153,7 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                       <button onClick={() => removePolicy(policy.id)} className="p-2 text-slate-200 hover:text-rose-500 transition-colors"><Trash2 size={18} /></button>
                    </div>
                    <div className="mt-4 md:mt-6">
-                      <h4 className="text-xl md:text-2xl font-black text-slate-900">₹{policy.sumAssured.toLocaleString()}</h4>
+                      <h4 className="text-xl md:text-2xl font-black text-slate-900">{formatCurrency(policy.sumAssured, currencyCountry)}</h4>
                       <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase">{policy.type} • {getMemberName(policy.insured)}</p>
                    </div>
                 </div>

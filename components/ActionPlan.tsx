@@ -7,6 +7,7 @@ import {
   ChevronRight, ShieldCheck, Clock, Gauge, BarChart3, Lock
 } from 'lucide-react';
 import { FinanceState, DetailedIncome } from '../types';
+import { formatCurrency } from '../lib/currency';
 
 interface Action {
   id: number;
@@ -24,7 +25,7 @@ interface Action {
 const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [completedIds, setCompletedIds] = useState<number[]>([]);
 
-  const formatCurrency = (value: number) => Math.max(0, Math.round(value)).toLocaleString();
+  const currencyCountry = state.profile.country;
 
   const sumIncome = (income: DetailedIncome) => (
     (income.salary || 0) +
@@ -137,9 +138,9 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         id: ids.deficit,
         priority: 'Critical',
         title: 'Eliminate Cashflow Leakage',
-        description: `Monthly outflow exceeds inflow by ₹${formatCurrency(deficitMonthly)}. This deficit erodes your safety buffer.`,
+        description: `Monthly outflow exceeds inflow by ${formatCurrency(deficitMonthly, currencyCountry)}. This deficit erodes your safety buffer.`,
         impact: 'Stops Capital Erosion',
-        delta: `+₹${formatCurrency(deficitMonthly)}/mo`,
+        delta: `+${formatCurrency(deficitMonthly, currencyCountry)}/mo`,
         tactics: [
           'Cap discretionary spend at 15% of inflow',
           'Restructure high-interest EMIs first',
@@ -160,7 +161,7 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         title: 'Build Emergency Buffer',
         description: `Liquid assets cover ${calculations.emergencyMonths.toFixed(1)} months. Target 6 months for resilience.`,
         impact: 'Protects Downside',
-        delta: `₹${formatCurrency(bufferGap)} buffer`,
+        delta: `${formatCurrency(bufferGap, currencyCountry)} buffer`,
         tactics: [
           'Auto-sweep surplus into liquid funds',
           'Pause low-priority goals until buffer is complete',
@@ -182,7 +183,7 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         title: 'Reduce Debt Load',
         description: `Debt servicing consumes ${Math.round(calculations.debtRatio)}% of income. Prioritize ${highestInterestLoan.type} at ${highestInterestLoan.interestRate}% interest.`,
         impact: 'Boosts Savings Rate',
-        delta: `₹${formatCurrency(monthlyDebt)}/mo freed`,
+        delta: `${formatCurrency(monthlyDebt, currencyCountry)}/mo freed`,
         tactics: [
           'Prepay highest-interest debt first',
           'Explore refinancing if rate > 12%',
@@ -199,9 +200,9 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         id: ids.insurance,
         priority: 'Strategic',
         title: 'Close Protection Gap',
-        description: `Current coverage falls short by ₹${formatCurrency(calculations.insuranceGap)} based on HLV needs.`,
+        description: `Current coverage falls short by ${formatCurrency(calculations.insuranceGap, currencyCountry)} based on HLV needs.`,
         impact: 'Secures Family Goals',
-        delta: `₹${formatCurrency(calculations.insuranceGap)} cover`,
+        delta: `${formatCurrency(calculations.insuranceGap, currencyCountry)} cover`,
         tactics: [
           'Top up term cover for primary earner',
           'Verify employer cover and nominations',
@@ -222,7 +223,7 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         title: 'Increase Savings Rate',
         description: `Current savings rate is ${calculations.successRatio.toFixed(1)}%. Lift to 20% for faster goal funding.`,
         impact: 'Accelerates Goals',
-        delta: `+₹${formatCurrency(gap)}/mo`,
+        delta: `+${formatCurrency(gap, currencyCountry)}/mo`,
         tactics: [
           'Increase SIPs in line with inflow growth',
           'Cap lifestyle upgrades until 20% savings achieved',
@@ -431,7 +432,7 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                     <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl"><ShieldAlert size={20}/></div>
                     <div>
                        <p className="text-[9px] font-black text-slate-500 uppercase">Annual Deficit</p>
-                       <p className="text-xl font-black text-rose-500">₹{formatCurrency(calculations.deficit)}</p>
+                       <p className="text-xl font-black text-rose-500">{formatCurrency(calculations.deficit, currencyCountry)}</p>
                     </div>
                  </div>
                  <p className="text-[10px] font-medium text-slate-400 leading-relaxed italic">"A success velocity above 20% compounds your long-term trajectory faster than any other lever."</p>

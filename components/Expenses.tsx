@@ -2,6 +2,7 @@
 import React from 'react';
 import { FinanceState, ExpenseItem } from '../types';
 import { ShoppingCart, Home, Car, HeartPulse, Zap, Smartphone, Utensils, Plane, GraduationCap, ShieldCheck, Wallet, ChevronRight } from 'lucide-react';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 interface ExpensesProps {
   state: FinanceState;
@@ -50,6 +51,9 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
   const totalIncome = calculateTotalIncome();
   const surplus = totalIncome - totalOutflow;
 
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
       <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
@@ -60,11 +64,11 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
         <div className="flex gap-4">
            <div className="bg-rose-50 px-6 py-4 rounded-3xl border border-rose-100 text-center">
               <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest mb-1">Total Outflow</p>
-              <p className="text-xl font-black text-rose-600">${totalOutflow.toLocaleString()}</p>
+              <p className="text-xl font-black text-rose-600">{formatCurrency(totalOutflow, currencyCountry)}</p>
            </div>
            <div className="bg-emerald-50 px-6 py-4 rounded-3xl border border-emerald-100 text-center">
               <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Monthly Surplus</p>
-              <p className="text-xl font-black text-emerald-600">${surplus.toLocaleString()}</p>
+              <p className="text-xl font-black text-emerald-600">{formatCurrency(surplus, currencyCountry)}</p>
            </div>
         </div>
       </div>
@@ -81,7 +85,7 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
                  <h4 className="text-xs font-black text-slate-900">{cat.name}</h4>
               </div>
               <div className="relative">
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 font-black text-lg">$</span>
+                <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 font-black text-lg">{currencySymbol}</span>
                 <input 
                   type="number"
                   placeholder="0"

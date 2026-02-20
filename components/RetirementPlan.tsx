@@ -1,6 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { FinanceState, DetailedIncome } from '../types';
+import { formatCurrency } from '../lib/currency';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   BarChart, Bar, Legend, Cell 
@@ -8,6 +9,8 @@ import {
 import { CalendarDays, Wallet, TrendingUp, Sparkles, Activity, ShieldCheck, Target, AlertCircle, Info } from 'lucide-react';
 
 const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
+  const currencyCountry = state.profile.country;
+
   const calculateTotalMemberIncome = (income: DetailedIncome) => {
     return (income.salary || 0) + (income.bonus || 0) + (income.reimbursements || 0) + 
            (income.business || 0) + (income.rental || 0) + (income.investment || 0);
@@ -104,10 +107,15 @@ const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 800}} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 800}} tickFormatter={(val) => `$${val/1000}k`} />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 800}}
+                    tickFormatter={(val) => formatCurrency(val, currencyCountry, { notation: 'compact', maximumFractionDigits: 1 })}
+                  />
                   <Tooltip 
                     contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.15)', padding: '20px', fontWeight: 'bold' }}
-                    formatter={(val: number) => `$${val.toLocaleString()}`}
+                    formatter={(val: number) => formatCurrency(val, currencyCountry)}
                   />
                   <Area type="monotone" dataKey="totalWealth" stroke="#0f766e" strokeWidth={4} fillOpacity={1} fill="url(#colorNominal)" />
                   <Area type="monotone" dataKey="inflationAdjusted" stroke="#10b981" strokeWidth={4} fillOpacity={1} fill="url(#colorReal)" />
@@ -119,7 +127,7 @@ const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
               <div className="flex items-center gap-4">
                  <div className="p-3 bg-white rounded-2xl shadow-sm text-teal-600"><Info size={20}/></div>
                  <p className="text-xs text-slate-500 font-bold max-w-sm">
-                   At year 20, the gap between Nominal and Real wealth represents a <span className="text-rose-500">$2.1M purchasing power loss</span> due to inflation.
+                   At year 20, the gap between Nominal and Real wealth represents a <span className="text-rose-500">{formatCurrency(2100000, currencyCountry, { notation: 'compact', maximumFractionDigits: 1 })} purchasing power loss</span> due to inflation.
                  </p>
               </div>
               <button className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all">Adjust Inflation</button>

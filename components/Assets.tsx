@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { FinanceState, Asset, AssetType } from '../types';
 import { Plus, Trash2, Coins, TrendingUp, Home, Landmark, Briefcase, Car, Gem, CheckCircle2, Circle, Calendar, Percent } from 'lucide-react';
 import { clampNumber, parseNumber } from '../lib/validation';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 const ASSET_CLASSES: { name: AssetType, icon: any, subCategories: string[] }[] = [
   { name: 'Liquid', icon: Landmark, subCategories: ['Savings Account', 'Cash', 'Liquid Mutual Funds', 'Overnight Funds'] },
@@ -103,6 +104,9 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
 
   const totalAssetsValue = state.assets.reduce((sum, a) => sum + a.currentValue, 0);
 
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
       {notice && (
@@ -186,7 +190,7 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
             <div className="grid grid-cols-2 gap-6">
                <div className="space-y-2">
                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Coins size={12}/> Current Value</label>
-                 <input type="number" value={newAsset.currentValue || ''} onChange={e => setNewAsset({...newAsset, currentValue: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" placeholder="₹" />
+                 <input type="number" value={newAsset.currentValue || ''} onChange={e => setNewAsset({...newAsset, currentValue: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" placeholder={currencySymbol} />
                </div>
                <div className="space-y-2">
                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12}/> Owner</label>
@@ -223,14 +227,14 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 flex flex-col justify-center">
           <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Total Assets</p>
-          <h4 className="text-3xl font-black text-emerald-900">₹{totalAssetsValue.toLocaleString()}</h4>
+          <h4 className="text-3xl font-black text-emerald-900">{formatCurrency(totalAssetsValue, currencyCountry)}</h4>
         </div>
         {ASSET_CLASSES.map(ac => {
           const val = state.assets.filter(a => a.category === ac.name).reduce((sum, a) => sum + a.currentValue, 0);
           return (
             <div key={ac.name} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col justify-center">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{ac.name}</p>
-              <h4 className="text-lg font-black text-slate-900">₹{val.toLocaleString()}</h4>
+              <h4 className="text-lg font-black text-slate-900">{formatCurrency(val, currencyCountry)}</h4>
             </div>
           );
         })}
@@ -263,7 +267,7 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
                 <div className="flex justify-between items-end">
                    <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase">Current Value</p>
-                      <p className="text-2xl font-black text-slate-900">₹{asset.currentValue.toLocaleString()}</p>
+                      <p className="text-2xl font-black text-slate-900">{formatCurrency(asset.currentValue, currencyCountry)}</p>
                    </div>
                    <div className="text-right">
                       <p className="text-[10px] font-black text-emerald-500 uppercase">Growth: {asset.growthRate}%</p>

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { View, FinanceState } from '../types';
 import { getJourneyProgress } from '../lib/journey';
+import { formatCurrency } from '../lib/currency';
 
 interface SidebarProps {
   currentView: View;
@@ -99,7 +100,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
         {/* Wealth Summary Block */}
         <div className="bg-white/[0.04] border border-white/10 rounded-3xl p-4 mb-10 shadow-2xl backdrop-blur-md">
            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">Household Net Worth</p>
-           <h4 className="text-base font-black text-white tracking-tight break-all">₹{netWorth.toLocaleString()}</h4>
+           <h4 className="text-base font-black text-white tracking-tight break-all">{formatCurrency(netWorth, state.profile.country)}</h4>
            <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
               <div className="flex -space-x-1.5">
                  {[...Array(3)].map((_, i) => (

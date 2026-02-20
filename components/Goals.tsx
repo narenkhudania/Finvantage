@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Goal, GoalType, FinanceState, RelativeDate, RelativeDateType, ResourceBucket, ExpenseItem } from '../types';
 import { parseNumber } from '../lib/validation';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 const GOAL_ICONS: Record<GoalType, any> = {
   'Retirement': Coffee,
@@ -210,6 +211,9 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
     );
   };
 
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
+
   return (
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000 pb-24">
       {notice && (
@@ -344,7 +348,7 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                      <div className="relative z-10 text-left">
                         <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.3em] mb-4">Capital Requirement (Today's Cost)</p>
                         <div className="flex items-center gap-6">
-                           <span className="text-4xl md:text-7xl font-black tracking-tighter text-teal-500">₹</span>
+                           <span className="text-4xl md:text-7xl font-black tracking-tighter text-teal-500">{currencySymbol}</span>
                            <input 
                               type="number" 
                               value={newGoal.targetAmountToday || ''} 
@@ -363,7 +367,7 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                         value={newGoal.currentAmount || ''} 
                         onChange={e => setNewGoal({...newGoal, currentAmount: parseFloat(e.target.value)})} 
                         className="w-full bg-slate-50 border border-slate-200 rounded-[2rem] px-8 py-6 text-2xl font-black outline-none focus:ring-8 focus:ring-emerald-600/5 shadow-inner" 
-                        placeholder="₹ 0" 
+                          placeholder={`${currencySymbol} 0`} 
                      />
                   </div>
 
@@ -417,15 +421,15 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                        </div>
                        <div className="text-right">
                           <p className="text-[10px] font-black text-teal-600 uppercase tracking-widest mb-1">FV Target</p>
-                          <h5 className="text-lg font-black text-teal-600">₹{Math.round(targetFV).toLocaleString()}</h5>
+                          <h5 className="text-lg font-black text-teal-600">{formatCurrency(Math.round(targetFV), currencyCountry)}</h5>
                        </div>
                     </div>
                     <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
                        <div className="h-full bg-teal-600 transition-all duration-1000 ease-out" style={{ width: `${progressPct}%` }} />
                     </div>
                     <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                       <span>Saved: ₹{goal.currentAmount.toLocaleString()}</span>
-                       <span>Today's Value: ₹{goal.targetAmountToday.toLocaleString()}</span>
+                       <span>Saved: {formatCurrency(goal.currentAmount, currencyCountry)}</span>
+                       <span>Today's Value: {formatCurrency(goal.targetAmountToday, currencyCountry)}</span>
                     </div>
                  </div>
 

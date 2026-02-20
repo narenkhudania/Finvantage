@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { getCurrencySymbol } from '../lib/currency';
 import { 
   TrendingUp, ShieldCheck, Zap, Target, ArrowRight, 
   CheckCircle2, Bot, Calculator, Lock, Wallet, 
@@ -15,6 +16,9 @@ interface LandingProps {
 }
 
 const Landing: React.FC<LandingProps> = ({ onStart }) => {
+  const currencySymbol = getCurrencySymbol();
+  const withCurrency = (text: string) => text.replaceAll('₹', currencySymbol);
+
   return (
     <div className="min-h-screen text-slate-900 overflow-x-hidden">
       {/* Premium Glass Header - Clean Version */}
@@ -166,15 +170,15 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
             {[
               {
                 title: "The First House Acquisition",
-                scenario: "Should I buy a ₹1.8Cr home in Year 5 or keep renting and invest the difference?",
-                result: "Renting wins by ₹85L in net worth over 20 years, unless property appreciation hits 9.2%.",
+                scenario: withCurrency("Should I buy a ₹1.8Cr home in Year 5 or keep renting and invest the difference?"),
+                result: withCurrency("Renting wins by ₹85L in net worth over 20 years, unless property appreciation hits 9.2%."),
                 icon: Home,
                 color: "teal"
               },
               {
                 title: "The Ivy League Pipeline",
                 scenario: "How much extra monthly SIP is needed to fund an Ivy League MBA in 2035 at 12% annual cost inflation?",
-                result: "Required: ₹1.4L additional surplus monthly from today to hit the ₹3.2Cr target.",
+                result: withCurrency("Required: ₹1.4L additional surplus monthly from today to hit the ₹3.2Cr target."),
                 icon: GraduationCap,
                 color: "emerald"
               },
@@ -187,8 +191,8 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
               },
               {
                 title: "The EV Upgrade Math",
-                scenario: "Buying a ₹25L EV today vs ₹15L Petrol car. factoring in fuel savings and initial capital loss.",
-                result: "Break-even at Year 4. EV adds ₹12k to monthly surplus after loan closure.",
+                scenario: withCurrency("Buying a ₹25L EV today vs ₹15L Petrol car. factoring in fuel savings and initial capital loss."),
+                result: withCurrency("Break-even at Year 4. EV adds ₹12k to monthly surplus after loan closure."),
                 icon: Car,
                 color: "teal"
               }
@@ -267,7 +271,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
                    <div className="bg-white/5 border border-white/10 p-12 rounded-[4rem] flex flex-col justify-center items-center gap-8 backdrop-blur-xl">
                       <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.4em]">Monthly Subscription</p>
                       <div className="space-y-2">
-                         <h4 className="text-7xl md:text-9xl font-black tracking-tighter leading-none italic">₹0</h4>
+                         <h4 className="text-7xl md:text-9xl font-black tracking-tighter leading-none italic">{formatCurrency(0)}</h4>
                          <p className="text-emerald-400 text-xs font-black uppercase tracking-widest">100% Free • Forever</p>
                       </div>
                       <div className="w-full pt-8 border-t border-white/5">

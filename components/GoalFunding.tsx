@@ -8,9 +8,12 @@ import {
   Zap, ArrowRight, DollarSign, ListOrdered, BarChartHorizontal
 } from 'lucide-react';
 import { FinanceState, Goal, RelativeDate } from '../types';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [activeTab, setActiveTab] = useState<'audit' | 'timeline'>('audit');
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
 
   const currentYear = new Date().getFullYear();
   const birthYear = state.profile.dob ? new Date(state.profile.dob).getFullYear() : currentYear - 30;
@@ -115,7 +118,7 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
             <div className={`bg-white/5 border border-white/10 p-8 md:p-10 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 md:gap-3 shadow-inner md:min-w-[320px] w-full`}>
                <p className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Net Annual Cash Flow</p>
                <h4 className={`text-3xl md:text-5xl font-black tracking-tighter ${auditData.netCashFlowPa >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                  ₹{Math.abs(auditData.netCashFlowPa).toLocaleString()}
+                  {formatCurrency(Math.abs(auditData.netCashFlowPa), currencyCountry)}
                </h4>
                <div className={`flex items-center gap-2 mt-1 md:mt-2 text-[9px] md:text-[10px] font-bold uppercase tracking-widest px-3 md:px-4 py-1 md:py-1.5 rounded-full border ${auditData.netCashFlowPa >= 0 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-rose-400 bg-rose-500/10 border-rose-500/20'}`}>
                   {auditData.netCashFlowPa >= 0 ? <TrendingUp size={12}/> : <TrendingDown size={12}/>}
@@ -139,13 +142,13 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                        <div className="p-2.5 md:p-3 bg-teal-50 text-teal-600 rounded-xl md:rounded-2xl"><Calculator size={20}/></div>
                        <h3 className="text-lg md:text-xl font-black text-slate-900">Incomes</h3>
                     </div>
-                    <p className="text-xs md:text-sm font-black text-slate-900">₹{auditData.totalInflowPa.toLocaleString()}</p>
+                    <p className="text-xs md:text-sm font-black text-slate-900">{formatCurrency(auditData.totalInflowPa, currencyCountry)}</p>
                  </div>
                  <div className="space-y-4">
                     {auditData.incomes.map((inc, i) => (
                        <div key={i} className="flex justify-between items-center py-1 md:py-2">
                           <span className="text-xs md:text-sm font-bold text-slate-500">{inc.label}</span>
-                          <span className="text-xs md:text-sm font-black text-slate-900">₹{inc.value.toLocaleString()}</span>
+                          <span className="text-xs md:text-sm font-black text-slate-900">{formatCurrency(inc.value, currencyCountry)}</span>
                        </div>
                     ))}
                  </div>
@@ -157,13 +160,13 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                        <div className="p-2.5 md:p-3 bg-rose-50 text-rose-500 rounded-xl md:rounded-2xl"><Activity size={20}/></div>
                        <h3 className="text-lg md:text-xl font-black text-slate-900">Expenses</h3>
                     </div>
-                    <p className="text-xs md:text-sm font-black text-rose-600">₹{auditData.totalExpensesPa.toLocaleString()}</p>
+                    <p className="text-xs md:text-sm font-black text-rose-600">{formatCurrency(auditData.totalExpensesPa, currencyCountry)}</p>
                  </div>
                  <div className="space-y-4">
                     {auditData.expenses.map((exp, i) => (
                        <div key={i} className="flex justify-between items-center py-1 md:py-2">
                           <span className="text-xs md:text-sm font-bold text-slate-500">{exp.label}</span>
-                          <span className="text-xs md:text-sm font-black text-slate-900">₹{exp.value.toLocaleString()}</span>
+                          <span className="text-xs md:text-sm font-black text-slate-900">{formatCurrency(exp.value, currencyCountry)}</span>
                        </div>
                     ))}
                  </div>
@@ -177,13 +180,13 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                        <div className="p-2.5 md:p-3 bg-teal-50 text-teal-600 rounded-xl md:rounded-2xl"><Landmark size={20}/></div>
                        <h3 className="text-lg md:text-xl font-black text-slate-900">Repayments</h3>
                     </div>
-                    <p className="text-xs md:text-sm font-black text-slate-900">₹{auditData.totalRepaymentsPa.toLocaleString()}</p>
+                    <p className="text-xs md:text-sm font-black text-slate-900">{formatCurrency(auditData.totalRepaymentsPa, currencyCountry)}</p>
                  </div>
                  <div className="space-y-4">
                     {auditData.repayments.map((rep, i) => (
                        <div key={i} className="flex justify-between items-center py-1 md:py-2">
                           <span className="text-[11px] md:text-sm font-bold text-slate-500 leading-tight flex-1 mr-4">{rep.label}</span>
-                          <span className="text-[11px] md:text-sm font-black text-slate-900 shrink-0">₹{rep.value.toLocaleString()}</span>
+                          <span className="text-[11px] md:text-sm font-black text-slate-900 shrink-0">{formatCurrency(rep.value, currencyCountry)}</span>
                        </div>
                     ))}
                  </div>
@@ -194,12 +197,12 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                  <h4 className="text-2xl md:text-3xl font-black tracking-tight flex items-center gap-3 relative z-10"><BarChartHorizontal className="text-teal-500" size={24}/> Audit Node</h4>
                  <div className="pt-4 space-y-4 relative z-10">
                     <p className="text-slate-400 text-sm md:text-base font-medium leading-relaxed">
-                       Net position: <span className={auditData.netCashFlowPa >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>₹{auditData.netCashFlowPa.toLocaleString()} p.a.</span>
+                       Net position: <span className={auditData.netCashFlowPa >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{formatCurrency(auditData.netCashFlowPa, currencyCountry)} p.a.</span>
                     </p>
                     {auditData.netCashFlowPa < 0 && (
                        <div className="p-4 md:p-6 bg-rose-500/10 border border-rose-500/20 rounded-[1.5rem] md:rounded-[2.5rem] flex items-start gap-3 md:gap-4">
                           <AlertCircle className="text-rose-500 shrink-0" size={18} md:size={20}/>
-                          <p className="text-[11px] md:text-xs font-bold text-rose-200 italic leading-relaxed">Strategy Alert: Deficit of ₹70k detected. Adjust Portfolio targets or living spend.</p>
+                          <p className="text-[11px] md:text-xs font-bold text-rose-200 italic leading-relaxed">Strategy Alert: Deficit of {formatCurrency(70000, currencyCountry)} detected. Adjust Portfolio targets or living spend.</p>
                        </div>
                     )}
                  </div>
@@ -218,8 +221,8 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                  <thead>
                     <tr className="bg-slate-50/50">
                        <th className="px-8 md:px-10 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest">Year (Age)</th>
-                       <th className="px-4 md:px-8 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-right">Inflow (₹)</th>
-                       <th className="px-4 md:px-8 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-right">Outflows (₹)</th>
+                       <th className="px-4 md:px-8 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-right">Inflow ({currencySymbol})</th>
+                       <th className="px-4 md:px-8 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-right">Outflows ({currencySymbol})</th>
                        <th className="px-8 md:px-10 py-6 md:py-8 text-[10px] md:text-[11px] font-black text-teal-600 uppercase tracking-widest text-right">Net Capacity</th>
                     </tr>
                  </thead>
@@ -232,10 +235,10 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                                 <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[8px] md:text-[9px] font-black uppercase tracking-tighter">Age {row.age}</span>
                              </div>
                           </td>
-                          <td className="px-4 md:px-8 py-4 md:py-6 text-right text-xs font-black text-slate-900">₹{Math.round(row.inflow).toLocaleString()}</td>
-                          <td className="px-4 md:px-8 py-4 md:py-6 text-right text-xs font-bold text-slate-500">₹{Math.round(row.living + row.savings + row.repayments).toLocaleString()}</td>
+                          <td className="px-4 md:px-8 py-4 md:py-6 text-right text-xs font-black text-slate-900">{formatCurrency(Math.round(row.inflow), currencyCountry)}</td>
+                          <td className="px-4 md:px-8 py-4 md:py-6 text-right text-xs font-bold text-slate-500">{formatCurrency(Math.round(row.living + row.savings + row.repayments), currencyCountry)}</td>
                           <td className={`px-8 md:px-10 py-4 md:py-6 text-right text-xs md:text-sm font-black ${row.surplus >= 0 ? 'text-emerald-500' : 'text-rose-600'}`}>
-                             {row.surplus >= 0 ? '+' : ''}₹{Math.round(row.surplus).toLocaleString()}
+                             {row.surplus >= 0 ? '+' : ''}{formatCurrency(Math.round(row.surplus), currencyCountry)}
                           </td>
                        </tr>
                     ))}

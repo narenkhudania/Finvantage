@@ -7,6 +7,7 @@ import {
   BarChartHorizontal, LayoutGrid, Search, MoreHorizontal
 } from 'lucide-react';
 import { FinanceState } from '../types';
+import { formatCurrency } from '../lib/currency';
 
 const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [activeView, setActiveView] = useState<'matrix' | 'ledger'>('matrix');
@@ -35,6 +36,8 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
 
   const unmappedCash = Math.max(0, breakdown.netCash);
 
+  const currencyCountry = state.profile.country;
+
   return (
     <div className="space-y-10 animate-in fade-in duration-1000 pb-24">
       {/* Dynamic Console Header */}
@@ -47,14 +50,14 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
             </div>
             <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Cash <br/><span className="text-teal-500">Matrix.</span></h2>
             <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
-              Auditing the distribution of <span className="text-white font-bold">₹{breakdown.income.toLocaleString()}</span> monthly inflow across strategic silos.
+              Auditing the distribution of <span className="text-white font-bold">{formatCurrency(breakdown.income, currencyCountry)}</span> monthly inflow across strategic silos.
             </p>
           </div>
           
           <div className="flex flex-col gap-4 w-full md:w-auto">
             <div className="bg-white/5 border border-white/10 p-10 rounded-[3rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner w-full md:min-w-[320px]">
                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global Inflow Node</p>
-               <h4 className="text-4xl md:text-5xl font-black text-white tracking-tighter">₹{breakdown.income.toLocaleString()}</h4>
+               <h4 className="text-4xl md:text-5xl font-black text-white tracking-tighter">{formatCurrency(breakdown.income, currencyCountry)}</h4>
                <div className="flex p-1 bg-white/5 rounded-2xl w-full mt-4">
                   <button onClick={() => setActiveView('matrix')} className={`flex-1 py-3 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'matrix' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}>Matrix</button>
                   <button onClick={() => setActiveView('ledger')} className={`flex-1 py-3 px-4 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${activeView === 'ledger' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}>Ledger</button>
@@ -88,7 +91,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                   <div className="space-y-6">
                     <div className="flex justify-between items-end">
                        <span className="text-[10px] font-black text-slate-500 uppercase">Monthly Flow</span>
-                       <span className="text-2xl font-black text-slate-900">₹{silo.val.toLocaleString()}</span>
+                       <span className="text-2xl font-black text-slate-900">{formatCurrency(silo.val, currencyCountry)}</span>
                     </div>
                     <div className="w-full h-3 bg-slate-50 rounded-full overflow-hidden border border-slate-100 shadow-inner p-0.5">
                        <div className={`h-full bg-${silo.color}-600 rounded-full transition-all duration-1000`} style={{ width: `${(silo.val / (breakdown.income || 1)) * 100}%` }} />
@@ -116,7 +119,7 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                 <div className="space-y-4">
                    <h4 className="text-3xl font-black tracking-tight flex items-center gap-3">Partition Leakage Audit</h4>
                    <p className="text-slate-400 text-lg font-medium max-w-xl leading-relaxed">
-                      Your current partition has <span className={`font-bold ${unmappedCash > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>₹{unmappedCash.toLocaleString()}</span> of unmapped monthly cashflow.
+                      Your current partition has <span className={`font-bold ${unmappedCash > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatCurrency(unmappedCash, currencyCountry)}</span> of unmapped monthly cashflow.
                    </p>
                 </div>
              </div>
@@ -168,9 +171,9 @@ const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                                 </div>
                              </div>
                           </td>
-                          <td className="px-6 py-6 text-sm font-bold text-slate-500 text-right">₹{row.budget.toLocaleString()}</td>
-                          <td className="px-6 py-6 text-sm font-bold text-slate-500 text-right">₹{row.actual.toLocaleString()}</td>
-                          <td className={`px-12 py-6 text-sm font-black text-right ${row.budget > 0 ? 'text-rose-500' : 'text-slate-900'}`}>₹{row.budget.toLocaleString()}</td>
+                          <td className="px-6 py-6 text-sm font-bold text-slate-500 text-right">{formatCurrency(row.budget, currencyCountry)}</td>
+                          <td className="px-6 py-6 text-sm font-bold text-slate-500 text-right">{formatCurrency(row.actual, currencyCountry)}</td>
+                          <td className={`px-12 py-6 text-sm font-black text-right ${row.budget > 0 ? 'text-rose-500' : 'text-slate-900'}`}>{formatCurrency(row.budget, currencyCountry)}</td>
                        </tr>
                     ))}
                  </tbody>

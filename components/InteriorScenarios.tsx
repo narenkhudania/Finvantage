@@ -5,20 +5,24 @@ import {
   Clock, Info, ChevronRight, Activity, TrendingUp
 } from 'lucide-react';
 import { FinanceState } from '../types';
+import { formatCurrency } from '../lib/currency';
 
 const InteriorScenarios: React.FC<{ state: FinanceState }> = ({ state }) => {
+  const currencyCountry = state.profile.country;
+  const money = (value: number) => formatCurrency(value, currencyCountry);
+
   const scenarios = [
     {
       title: "The First House Acquisition",
-      scenario: "Should I buy a ₹1.8Cr home in Year 5 or keep renting and invest the difference?",
-      result: "Renting wins by ₹85L in net worth over 20 years, unless property appreciation hits 9.2%.",
+      scenario: `Should I buy a ${money(18000000)} home in Year 5 or keep renting and invest the difference?`,
+      result: `Renting wins by ${money(8500000)} in net worth over 20 years, unless property appreciation hits 9.2%.`,
       icon: Home,
       color: "teal"
     },
     {
       title: "The Ivy League Pipeline",
       scenario: "How much extra monthly SIP is needed to fund an Ivy League MBA in 2035 at 12% annual cost inflation?",
-      result: "Required: ₹1.4L additional surplus monthly from today to hit the ₹3.2Cr target.",
+      result: `Required: ${money(140000)} additional surplus monthly from today to hit the ${money(32000000)} target.`,
       icon: GraduationCap,
       color: "emerald"
     },
@@ -31,8 +35,8 @@ const InteriorScenarios: React.FC<{ state: FinanceState }> = ({ state }) => {
     },
     {
       title: "The EV Upgrade Math",
-      scenario: "Buying a ₹25L EV today vs ₹15L Petrol car. factoring in fuel savings and initial capital loss.",
-      result: "Break-even at Year 4. EV adds ₹12k to monthly surplus after loan closure.",
+      scenario: `Buying a ${money(2500000)} EV today vs ${money(1500000)} Petrol car. factoring in fuel savings and initial capital loss.`,
+      result: `Break-even at Year 4. EV adds ${money(12000)} to monthly surplus after loan closure.`,
       icon: Car,
       color: "teal"
     }

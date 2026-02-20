@@ -10,6 +10,7 @@ import {
   Wallet, Landmark, PieChart, Zap, BarChart3, User
 } from 'lucide-react';
 import { FinanceState, DetailedIncome, Goal, RelativeDate } from '../types';
+import { formatCurrency } from '../lib/currency';
 
 interface CashflowProps {
   state: FinanceState;
@@ -116,6 +117,8 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
     };
   }, [state.profile]);
 
+  const currencyCountry = state.profile.country;
+
   return (
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-6 duration-1000 pb-24">
       
@@ -135,7 +138,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
              </div>
              <div className="text-left">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Peak Surplus Capacity</p>
-                <h4 className="text-4xl font-black text-white">₹{Math.max(...projectionData.map(d => d.surplus)).toLocaleString()}</h4>
+                <h4 className="text-4xl font-black text-white">{formatCurrency(Math.max(...projectionData.map(d => d.surplus)), currencyCountry)}</h4>
              </div>
           </div>
         </div>
@@ -160,12 +163,17 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                <BarChart data={projectionData.slice(0, 15)}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}} tickFormatter={(val) => `₹${val/100000}L`} />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}}
+                    tickFormatter={(val) => formatCurrency(val, currencyCountry, { notation: 'compact', maximumFractionDigits: 1 })}
+                  />
                   <Tooltip 
                      cursor={{fill: '#f8fafc'}}
                      contentStyle={{ borderRadius: '32px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.15)', padding: '24px', fontWeight: 'bold' }}
-                     formatter={(val: number) => `₹${val.toLocaleString()}`}
-                  />
+                     formatter={(val: number) => formatCurrency(val, currencyCountry)}
+                   />
                   <Bar dataKey="living" stackId="a" fill="#e2e8f0" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="debt" stackId="a" fill="#f43f5e" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="committed" stackId="a" fill="#0f766e" radius={[10, 10, 0, 0]} />
@@ -234,7 +242,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                      </linearGradient>
                   </defs>
                   <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 800}} />
-                  <Tooltip contentStyle={{ borderRadius: '24px', border: 'none', fontWeight: 'bold' }} formatter={(val: number) => `₹${val.toLocaleString()}`} />
+                  <Tooltip contentStyle={{ borderRadius: '24px', border: 'none', fontWeight: 'bold' }} formatter={(val: number) => formatCurrency(val, currencyCountry)} />
                   <Area type="monotone" dataKey="surplus" stroke="#10b981" strokeWidth={5} fillOpacity={1} fill="url(#colorSurplus)" />
                </AreaChart>
             </ResponsiveContainer>

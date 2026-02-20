@@ -299,7 +299,7 @@ const App: React.FC = () => {
       case 'assets':          return <Assets state={financeState} updateState={handleUpdateState} />;
       case 'debt':            return <Liabilities state={financeState} updateState={handleUpdateState} />;
       case 'risk-profile':    return <RiskProfile state={financeState} updateState={handleUpdateState} />;
-      case 'transactions':    return <Transactions transactions={financeState.transactions} onAddTransaction={(t) => setFinanceState(prev => ({...prev, transactions: [{...t, id: Math.random().toString()}, ...prev.transactions]}))} />;
+      case 'transactions':    return <Transactions transactions={financeState.transactions} onAddTransaction={(t) => setFinanceState(prev => ({...prev, transactions: [{...t, id: Math.random().toString()}, ...prev.transactions]}))} country={financeState.profile.country} />;
       case 'goals':           return <Goals state={financeState} updateState={handleUpdateState} />;
       case 'goal-summary':    return <GoalSummary state={financeState} />;
       case 'cashflow':        return <Cashflow state={financeState} />;

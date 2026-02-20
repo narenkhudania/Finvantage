@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { FinanceState, ExpenseItem } from '../types';
 import { parseNumber } from '../lib/validation';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 interface OutflowProfileProps {
   state: FinanceState;
@@ -59,6 +60,9 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
   const totalMonthlyDebt = state.loans.reduce((sum, l) => sum + l.emi, 0);
   const totalMonthlyOutflow = totalMonthlyExpenses + totalMonthlyDebt;
 
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
+
   return (
     <div className="space-y-8 md:space-y-12 animate-in fade-in duration-700 pb-24">
       {/* Header Strategy */}
@@ -74,7 +78,7 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
           
           <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner w-full md:min-w-[300px]">
              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Monthly Burn Rate</p>
-             <h4 className="text-4xl md:text-6xl font-black tracking-tighter text-teal-300">₹{totalMonthlyOutflow.toLocaleString()}</h4>
+             <h4 className="text-4xl md:text-6xl font-black tracking-tighter text-teal-300">{formatCurrency(totalMonthlyOutflow, currencyCountry)}</h4>
           </div>
         </div>
       </div>
@@ -109,7 +113,7 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
                           <div className="flex-1 min-w-0">
                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 truncate text-left">{cat.name}</p>
                              <div className="relative">
-                                <span className={`absolute left-0 top-1/2 -translate-y-1/2 font-black text-lg ${isEditing ? 'text-teal-600' : 'text-slate-300'}`}>₹</span>
+                                <span className={`absolute left-0 top-1/2 -translate-y-1/2 font-black text-lg ${isEditing ? 'text-teal-600' : 'text-slate-300'}`}>{currencySymbol}</span>
                                 <input 
                                    type="number" 
                                    value={expense?.amount || ''} 
@@ -145,7 +149,7 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
                           <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest truncate">{loan.type}</p>
                           <p className="text-sm font-black truncate">{loan.source}</p>
                        </div>
-                       <p className="text-xl font-black text-rose-400">₹{loan.emi.toLocaleString()}</p>
+                       <p className="text-xl font-black text-rose-400">{formatCurrency(loan.emi, currencyCountry)}</p>
                     </div>
                  ))}
                  {state.loans.length === 0 && (
@@ -158,7 +162,7 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
 
               <div className="pt-8 border-t border-white/5 relative z-10 flex justify-between items-center">
                  <p className="text-[10px] font-black uppercase text-slate-500">Global EMI Aggregation</p>
-                 <p className="text-2xl font-black text-rose-500">₹{totalMonthlyDebt.toLocaleString()}</p>
+                 <p className="text-2xl font-black text-rose-500">{formatCurrency(totalMonthlyDebt, currencyCountry)}</p>
               </div>
            </div>
 
@@ -168,7 +172,7 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
                  <div className="p-4 bg-teal-50 text-teal-600 rounded-2xl shadow-inner"><ShieldCheck size={28}/></div>
                  <div className="text-left">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Inflow Buffer</p>
-                    <h4 className="text-lg font-black text-slate-900">₹{((state.profile.income.salary || 0) - totalMonthlyOutflow).toLocaleString()} Surplus</h4>
+                    <h4 className="text-lg font-black text-slate-900">{formatCurrency((state.profile.income.salary || 0) - totalMonthlyOutflow, currencyCountry)} Surplus</h4>
                  </div>
               </div>
               <div className="space-y-4">

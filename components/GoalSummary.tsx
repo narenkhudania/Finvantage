@@ -7,6 +7,7 @@ import {
   PieChart, RefreshCw, Zap, Activity, ShieldCheck, Edit3
 } from 'lucide-react';
 import { FinanceState, Goal, RelativeDate, ResourceBucket } from '../types';
+import { formatCurrency } from '../lib/currency';
 
 const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [hoveredGoalId, setHoveredGoalId] = useState<string | null>(null);
@@ -60,6 +61,8 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
 
   const totalSumCorpus = goalsData.reduce((acc, g) => acc + g.sumCorpus, 0);
 
+  const currencyCountry = state.profile.country;
+
   return (
     <div className="space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Header Strategy Node */}
@@ -75,7 +78,7 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
           
           <div className="bg-white/5 border border-white/10 p-10 rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-3 shadow-inner">
              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Global Lifecycle Corpus (FV)</p>
-             <h4 className="text-4xl md:text-5xl font-black text-white tracking-tighter">₹{totalSumCorpus.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h4>
+             <h4 className="text-4xl md:text-5xl font-black text-white tracking-tighter">{formatCurrency(totalSumCorpus, currencyCountry, { maximumFractionDigits: 0 })}</h4>
           </div>
         </div>
       </div>
@@ -96,9 +99,9 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
                 </div>
                 <div className="space-y-3 text-left">
                    <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Inflation Burden</span><span className="text-rose-400">+{goal.inflationRate}% p.a.</span></div>
-                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Projected FV (Year {goal.startYear})</span><span className="text-teal-400">₹{Math.round(goal.corpusAtStart).toLocaleString()}</span></div>
-                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Global Sum Required</span><span className="text-teal-400">₹{Math.round(goal.sumCorpus).toLocaleString()}</span></div>
-                   <div className="flex justify-between text-xs font-bold border-t border-white/10 pt-4"><span className="opacity-70 uppercase tracking-widest">Funding Deficit</span><span className="text-emerald-400">₹{Math.max(0, Math.round(goal.sumCorpus - goal.currentAmount)).toLocaleString()}</span></div>
+                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Projected FV (Year {goal.startYear})</span><span className="text-teal-400">{formatCurrency(Math.round(goal.corpusAtStart), currencyCountry)}</span></div>
+                   <div className="flex justify-between text-xs font-bold"><span className="opacity-70 uppercase tracking-widest">Global Sum Required</span><span className="text-teal-400">{formatCurrency(Math.round(goal.sumCorpus), currencyCountry)}</span></div>
+                   <div className="flex justify-between text-xs font-bold border-t border-white/10 pt-4"><span className="opacity-70 uppercase tracking-widest">Funding Deficit</span><span className="text-emerald-400">{formatCurrency(Math.max(0, Math.round(goal.sumCorpus - goal.currentAmount)), currencyCountry)}</span></div>
                 </div>
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-relaxed mt-4">Simulated with priority rank {goal.priority}. Cross-asset dependencies applied.</p>
              </div>
@@ -132,11 +135,11 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
                 <div className="grid grid-cols-2 gap-6">
                    <div className="space-y-1">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Saved to Date</p>
-                      <h4 className="text-2xl font-black text-slate-900">₹{goal.currentAmount.toLocaleString()}</h4>
+                      <h4 className="text-2xl font-black text-slate-900">{formatCurrency(goal.currentAmount, currencyCountry)}</h4>
                    </div>
                    <div className="space-y-1">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Future Target (FV)</p>
-                      <h4 className="text-2xl font-black text-teal-600">₹{Math.round(goal.sumCorpus).toLocaleString()}</h4>
+                      <h4 className="text-2xl font-black text-teal-600">{formatCurrency(Math.round(goal.sumCorpus), currencyCountry)}</h4>
                    </div>
                 </div>
              </div>

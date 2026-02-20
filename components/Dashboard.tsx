@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { FinanceState, DetailedIncome, View } from '../types';
 import { getJourneyProgress } from '../lib/journey';
+import { formatCurrency } from '../lib/currency';
 
 interface DashboardProps {
   state: FinanceState;
@@ -115,6 +116,8 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
     ];
   }, [state, totalAssets, totalLoans, savingsRate]);
 
+  const currencyCountry = state.profile.country;
+
   return (
     <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700 pb-24">
       
@@ -167,10 +170,10 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
       {/* Main Stats Node */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { label: 'Household Equity', value: `₹${netWorth.toLocaleString()}`, sub: 'Net Worth Node', icon: Landmark, color: 'teal' },
-          { label: 'Net Monthly Surplus', value: `₹${surplusValue.toLocaleString()}`, sub: `${Math.round(savingsRate)}% Savings Rate`, icon: Wallet, color: 'emerald' },
+          { label: 'Household Equity', value: formatCurrency(netWorth, currencyCountry), sub: 'Net Worth Node', icon: Landmark, color: 'teal' },
+          { label: 'Net Monthly Surplus', value: formatCurrency(surplusValue, currencyCountry), sub: `${Math.round(savingsRate)}% Savings Rate`, icon: Wallet, color: 'emerald' },
           { label: 'Debt Service Load', value: `${dtiRatio.toFixed(1)}%`, sub: 'Income-to-Debt Ratio', icon: CreditCard, color: dtiRatio > 40 ? 'rose' : 'slate' },
-          { label: 'Asset Capacity', value: `₹${totalAssets.toLocaleString()}`, sub: 'Total Capital Holdings', icon: TrendingUp, color: 'amber' }
+          { label: 'Asset Capacity', value: formatCurrency(totalAssets, currencyCountry), sub: 'Total Capital Holdings', icon: TrendingUp, color: 'amber' }
         ].map((stat, i) => (
           <div key={i} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm hover:shadow-xl transition-all group relative overflow-hidden">
             <div className={`w-12 h-12 mb-6 rounded-2xl flex items-center justify-center bg-${stat.color}-50 text-${stat.color}-600 group-hover:bg-${stat.color}-600 group-hover:text-white transition-all`}>
@@ -200,7 +203,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                  </div>
                  <div className="text-right">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">5-Year Target</p>
-                    <p className="text-2xl font-black text-emerald-400">₹{trajectoryData[trajectoryData.length-1].nw.toLocaleString()}</p>
+                    <p className="text-2xl font-black text-emerald-400">{formatCurrency(trajectoryData[trajectoryData.length-1].nw, currencyCountry)}</p>
                  </div>
               </div>
 
@@ -218,7 +221,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                        <YAxis hide />
                        <Tooltip 
                           contentStyle={{ backgroundColor: '#0f172a', borderRadius: '16px', border: '1px solid #1e293b', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', padding: '12px', fontWeight: 'bold' }}
-                          formatter={(val: number) => `₹${val.toLocaleString()}`}
+                          formatter={(val: number) => formatCurrency(val, currencyCountry)}
                        />
                        <Area type="monotone" dataKey="nw" stroke="#0f766e" strokeWidth={4} fillOpacity={1} fill="url(#nwGradient)" />
                     </AreaChart>
@@ -282,7 +285,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                            <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{item.name}</span>
                         </div>
-                        <span className="text-sm font-black text-slate-900">₹{item.value.toLocaleString()}</span>
+                        <span className="text-sm font-black text-slate-900">{formatCurrency(item.value, currencyCountry)}</span>
                      </div>
                   )) : (
                      <p className="text-xs text-slate-400 italic">No assets registered to display mix.</p>
@@ -308,7 +311,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                   <AlertCircle size={20} className="text-amber-500 shrink-0 mt-1"/>
                   <div>
                     <h4 className="text-sm font-black text-slate-900">Asset Drift Detected</h4>
-                    <p className="text-xs font-medium text-slate-600 mt-1">Your Equity allocation has drifted 8.2% above your target Moderate risk profile. Suggested: Liquidate ₹14.2L and migrate to Debt Core.</p>
+                    <p className="text-xs font-medium text-slate-600 mt-1">Your Equity allocation has drifted 8.2% above your target Moderate risk profile. Suggested: Liquidate {formatCurrency(1420000, currencyCountry)} and migrate to Debt Core.</p>
                   </div>
                </div>
                <div className="p-6 bg-emerald-50 border border-emerald-100 rounded-[2.5rem] flex items-start gap-4">

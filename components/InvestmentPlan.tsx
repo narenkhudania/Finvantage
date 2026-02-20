@@ -9,6 +9,7 @@ import {
   ArrowRight, ArrowDownRight, RefreshCw, ListChecks
 } from 'lucide-react';
 import { ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
+import { formatCurrency } from '../lib/currency';
 
 const ASSET_ICONS: Record<string, any> = {
   'Liquid': Landmark,
@@ -114,6 +115,8 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
     return recs;
   }, [state.riskProfile, totalAssets]);
 
+  const currencyCountry = state.profile.country;
+
   return (
     <div className="space-y-6 md:space-y-12 animate-in fade-in duration-1000 pb-24">
       {/* Strategic Header */}
@@ -152,7 +155,7 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
             </div>
             <div className="bg-white px-6 py-4 rounded-3xl border border-slate-200">
                 <p className="text-[7px] md:text-[9px] font-black text-slate-400 uppercase">AUM Value</p>
-                <p className="text-sm md:text-lg font-black text-slate-900">₹{totalAssets.toLocaleString()}</p>
+                <p className="text-sm md:text-lg font-black text-slate-900">{formatCurrency(totalAssets, currencyCountry)}</p>
             </div>
           </div>
           <div className="overflow-x-auto no-scrollbar">
@@ -174,7 +177,7 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                              <span className="text-sm font-black text-slate-900">{row.category}</span>
                           </div>
                       </td>
-                      <td className="px-4 md:px-8 py-4 md:py-8 text-right text-sm font-black text-slate-900">₹{row.value.toLocaleString()}</td>
+                      <td className="px-4 md:px-8 py-4 md:py-8 text-right text-sm font-black text-slate-900">{formatCurrency(row.value, currencyCountry)}</td>
                       <td className="px-4 md:px-8 py-4 md:py-8 text-center text-sm font-black text-slate-900">{row.allocation.toFixed(1)}%</td>
                       <td className="px-6 md:px-12 py-4 md:py-8 text-right text-sm font-black text-teal-600">{row.growthRate.toFixed(1)}%</td>
                     </tr>

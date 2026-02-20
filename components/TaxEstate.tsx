@@ -6,6 +6,7 @@ import {
   TrendingUp, Info, ArrowUpRight, DollarSign, Wallet, Landmark,
   ArrowDownRight, CheckCircle2, RefreshCw, BarChart3, PieChart, Zap
 } from 'lucide-react';
+import { formatCurrency } from '../lib/currency';
 
 const TaxEstate: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [activeTab, setActiveTab] = useState<'calculator' | 'estate'>('calculator');
@@ -41,6 +42,8 @@ const TaxEstate: React.FC<{ state: FinanceState }> = ({ state }) => {
     return { grossIncome, old: { netIncome: oldNetIncome, tax: totalOldTax }, new: { netIncome: newNetIncome, tax: totalNewTax }, winner: totalNewTax > totalOldTax ? 'Old Regime' : 'New Regime', diff: Math.abs(totalNewTax - totalOldTax) };
   }, []);
 
+  const currencyCountry = state.profile.country;
+
   return (
     <div className="space-y-8 md:space-y-10 animate-in fade-in duration-700 pb-24">
       {/* Header */}
@@ -57,7 +60,7 @@ const TaxEstate: React.FC<{ state: FinanceState }> = ({ state }) => {
              <p className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Optimized Choice</p>
              <h4 className="text-3xl md:text-4xl font-black text-white text-center">{taxComparison.winner}</h4>
              <div className="flex items-center gap-2 mt-1 md:mt-2 text-[9px] md:text-[10px] font-bold text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-3 md:px-4 py-1 md:py-1.5 rounded-full border border-emerald-500/20">
-                Saves ₹{Math.round(taxComparison.diff).toLocaleString()}
+                Saves {formatCurrency(Math.round(taxComparison.diff), currencyCountry)}
              </div>
           </div>
         </div>
@@ -78,11 +81,11 @@ const TaxEstate: React.FC<{ state: FinanceState }> = ({ state }) => {
              <div key={i} className={`bg-white p-8 md:p-12 rounded-[2.5rem] md:rounded-[4.5rem] border-2 md:border-4 transition-all ${r.winner ? 'border-teal-600 shadow-xl' : 'border-slate-100 opacity-90'}`}>
                 <h3 className="text-2xl md:text-3xl font-black text-slate-900 mb-6 md:mb-10">{r.name}</h3>
                 <div className="space-y-4 border-y border-slate-50 py-6 md:py-8">
-                   <div className="flex justify-between text-xs md:text-sm font-bold"><span className="text-slate-400 uppercase text-[9px] md:text-[10px]">Net Income</span><span className="text-slate-900">₹{Math.round(r.data.netIncome).toLocaleString()}</span></div>
+                   <div className="flex justify-between text-xs md:text-sm font-bold"><span className="text-slate-400 uppercase text-[9px] md:text-[10px]">Net Income</span><span className="text-slate-900">{formatCurrency(Math.round(r.data.netIncome), currencyCountry)}</span></div>
                 </div>
                 <div className="pt-6 md:pt-8">
                    <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase mb-1">Effective Tax</p>
-                   <h4 className={`text-3xl md:text-5xl font-black ${r.winner ? 'text-teal-600' : 'text-slate-900'}`}>₹{Math.round(r.data.tax).toLocaleString()}</h4>
+                   <h4 className={`text-3xl md:text-5xl font-black ${r.winner ? 'text-teal-600' : 'text-slate-900'}`}>{formatCurrency(Math.round(r.data.tax), currencyCountry)}</h4>
                 </div>
              </div>
            ))}

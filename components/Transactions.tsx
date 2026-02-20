@@ -3,13 +3,15 @@ import React, { useState } from 'react';
 import { Plus, Search, Filter, Download } from 'lucide-react';
 import { Transaction, TransactionType } from '../types';
 import { isFutureDate, isValidDate, parseNumber } from '../lib/validation';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 
 interface TransactionsProps {
   transactions: Transaction[];
   onAddTransaction: (t: Omit<Transaction, 'id'>) => void;
+  country?: string;
 }
 
-const Transactions: React.FC<TransactionsProps> = ({ transactions, onAddTransaction }) => {
+const Transactions: React.FC<TransactionsProps> = ({ transactions, onAddTransaction, country }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [newTx, setNewTx] = useState({
@@ -19,6 +21,8 @@ const Transactions: React.FC<TransactionsProps> = ({ transactions, onAddTransact
     type: 'expense' as TransactionType,
     date: new Date().toISOString().split('T')[0]
   });
+
+  const currencySymbol = getCurrencySymbol(country);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,7 +126,7 @@ const Transactions: React.FC<TransactionsProps> = ({ transactions, onAddTransact
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Amount ($)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Amount ({currencySymbol})</label>
                 <input 
                   required
                   type="number" 
@@ -208,7 +212,7 @@ const Transactions: React.FC<TransactionsProps> = ({ transactions, onAddTransact
                   </span>
                 </td>
                 <td className={`px-6 py-4 text-sm font-bold text-right ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                  {t.type === 'income' ? '+' : '-'}${Math.abs(t.amount).toFixed(2)}
+                  {t.type === 'income' ? '+' : '-'}{formatCurrency(Math.abs(t.amount), country, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
               </tr>
             ))}

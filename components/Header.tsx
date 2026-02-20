@@ -34,15 +34,15 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
   const { completionPct, nextStep } = useMemo(() => getJourneyProgress(state), [state]);
 
   return (
-    <header className="h-20 md:h-24 bg-white/75 backdrop-blur-xl border-b border-white/60 shadow-sm sticky top-0 z-[50] px-6 md:px-12 flex items-center justify-between">
-      <div className="flex items-center gap-6">
+    <header className="min-h-[80px] md:h-24 bg-white/75 backdrop-blur-xl border-b border-white/60 shadow-sm sticky top-0 z-[50] px-4 sm:px-6 md:px-12 py-3 md:py-0 flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-0">
+      <div className="flex items-start gap-3 md:gap-4 w-full md:w-auto">
         <button 
           onClick={onMenuClick}
           className="lg:hidden p-2.5 bg-slate-50 hover:bg-teal-50 hover:text-teal-600 rounded-xl transition-all"
         >
           <Menu size={20} />
         </button>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight leading-none font-display">
             {title.replace('-', ' ')}
           </h1>
@@ -51,25 +51,43 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Journey Active</p>
           </div>
           {completionPct < 100 && (
-            <div className="hidden md:flex items-center gap-3 mt-3">
-              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Journey {completionPct}%</span>
-              <div className="w-28 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full bg-teal-600 transition-all" style={{ width: `${completionPct}%` }} />
+            <>
+              <div className="hidden md:flex items-center gap-3 mt-3">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Journey {completionPct}%</span>
+                <div className="w-28 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-teal-600 transition-all" style={{ width: `${completionPct}%` }} />
+                </div>
+                {nextStep && (
+                  <button
+                    onClick={() => setView(nextStep.view)}
+                    className="text-[9px] font-black uppercase tracking-widest text-teal-600 hover:text-teal-700 transition-colors"
+                  >
+                    Next: {nextStep.label}
+                  </button>
+                )}
               </div>
-              {nextStep && (
-                <button
-                  onClick={() => setView(nextStep.view)}
-                  className="text-[9px] font-black uppercase tracking-widest text-teal-600 hover:text-teal-700 transition-colors"
-                >
-                  Next: {nextStep.label}
-                </button>
-              )}
-            </div>
+              <div className="md:hidden mt-3 w-full rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  <span>Journey {completionPct}%</span>
+                  {nextStep && (
+                    <button
+                      onClick={() => setView(nextStep.view)}
+                      className="text-[10px] font-black uppercase tracking-widest text-teal-600"
+                    >
+                      Next: {nextStep.label}
+                    </button>
+                  )}
+                </div>
+                <div className="mt-2 w-full h-2 bg-white rounded-full overflow-hidden border border-slate-100">
+                  <div className="h-full bg-teal-600 transition-all" style={{ width: `${completionPct}%` }} />
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>
 
-      <div className="flex items-center gap-4 md:gap-6">
+      <div className="flex items-center gap-4 md:gap-6 w-full md:w-auto justify-end">
         <button 
           onClick={() => setView('notifications')}
           className="p-3 bg-slate-50 text-slate-400 hover:bg-teal-50 hover:text-teal-600 rounded-2xl relative transition-all group"
