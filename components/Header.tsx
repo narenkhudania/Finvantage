@@ -33,6 +33,14 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
   const unreadCount = state.notifications?.filter(n => !n.read).length || 0;
   const { completionPct, nextStep } = useMemo(() => getJourneyProgress(state), [state]);
   const hideJourney = title === 'dashboard';
+  const commandDetailViews = new Set<View>([
+    'risk-profile',
+    'insurance',
+    'tax-estate',
+    'action-plan',
+    'monthly-savings',
+  ]);
+  const showBack = commandDetailViews.has(title as View);
 
   return (
     <header className="min-h-[80px] md:h-24 bg-white/75 backdrop-blur-xl border-b border-white/60 shadow-sm sticky top-0 z-[50] px-4 sm:px-6 md:px-12 py-3 md:py-0 flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-0">
@@ -47,6 +55,14 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
           <h1 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight leading-none font-display">
             {title.replace('-', ' ')}
           </h1>
+          {showBack && (
+            <button
+              onClick={() => setView('dashboard')}
+              className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 hover:text-white transition"
+            >
+              <ArrowRight size={12} className="rotate-180" /> Back to Command Center
+            </button>
+          )}
           {!hideJourney && (
             <div className="flex items-center gap-1.5 mt-1.5">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />

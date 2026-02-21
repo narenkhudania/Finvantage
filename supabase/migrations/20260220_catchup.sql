@@ -25,6 +25,15 @@ alter table public.loans
   add column if not exists start_year integer,
   add column if not exists lump_sum_repayments jsonb default '[]'::jsonb;
 
+-- Goals (expanded fields)
+alter table public.goals
+  add column if not exists loan_details jsonb,
+  add column if not exists start_goal_amount numeric,
+  add column if not exists desired_retirement_age integer,
+  add column if not exists expected_monthly_expenses_after_retirement numeric,
+  add column if not exists retirement_handling text,
+  add column if not exists detailed_breakdown jsonb;
+
 -- Report Snapshots (Command Center)
 create table if not exists public.report_snapshots (
   user_id uuid primary key references auth.users(id) on delete cascade,

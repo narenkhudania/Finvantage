@@ -511,7 +511,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
 
       </div>
 
-      <CommandReport snapshot={reportSnapshot} />
+      <CommandReport snapshot={reportSnapshot} onOpen={setView} />
     </div>
   );
 };

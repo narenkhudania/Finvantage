@@ -20,16 +20,17 @@ import {
   Landmark,
   LineChart,
 } from 'lucide-react';
-import type { ReportSnapshot } from '../types';
+import type { ReportSnapshot, View } from '../types';
 import { formatCurrency } from '../lib/currency';
 
 interface CommandReportProps {
   snapshot: ReportSnapshot;
+  onOpen: (view: View) => void;
 }
 
 const COLORS = ['#0f766e', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#84cc16'];
 
-const CommandReport: React.FC<CommandReportProps> = ({ snapshot }) => {
+const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
   const currencyCountry = snapshot.currency;
 
   const introProgress = [
@@ -297,6 +298,35 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot }) => {
               </BarChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Command Center</p>
+            <h4 className="text-xl font-black text-slate-900">Deep Dive Modules</h4>
+          </div>
+          <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Open Details</div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[
+            { label: 'Risk Identity', view: 'risk-profile', desc: 'Allocation fit and risk scoring.' },
+            { label: 'Shield Configuration', view: 'insurance', desc: 'Insurance gap & coverage logic.' },
+            { label: 'Tax & Compliance', view: 'tax-estate', desc: 'Tax regime checks and estate flags.' },
+            { label: 'Action Strategy', view: 'action-plan', desc: 'Priority actions and alerts.' },
+            { label: 'Budget Matrix', view: 'monthly-savings', desc: 'Monthly partitioning and control.' },
+          ].map((item) => (
+            <button
+              key={item.label}
+              onClick={() => onOpen(item.view as View)}
+              className="text-left p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-slate-900 hover:text-white transition"
+            >
+              <p className="text-xs font-black uppercase tracking-widest">{item.label}</p>
+              <p className="text-xs mt-2 opacity-70">{item.desc}</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] mt-4">Open</p>
+            </button>
+          ))}
         </div>
       </div>
     </div>

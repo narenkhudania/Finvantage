@@ -346,11 +346,6 @@ const App: React.FC = () => {
           <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'dashboard' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
             <LayoutDashboard size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Dash</span>
           </button>
-          {gateUnlocked && (
-            <button onClick={() => setView('action-plan')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'action-plan' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
-              <ListChecks size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Plan</span>
-            </button>
-          )}
           <button onClick={() => setView('notifications')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'notifications' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
             <Bell size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Alerts</span>
           </button>

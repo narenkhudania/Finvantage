@@ -39,8 +39,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
       label: 'Main Ops',
       items: [
         { id: 'dashboard', label: 'Command Center', icon: LayoutDashboard },
-        { id: 'action-plan', label: 'Action Strategy', icon: ListChecks },
-        { id: 'monthly-savings', label: 'Budget Matrix', icon: CalendarRange },
       ]
     },
     {
@@ -61,14 +59,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
         { id: 'investment-plan', label: 'Portfolio Map', icon: Wallet },
       ]
     },
-    {
-      label: 'Security',
-      items: [
-        { id: 'risk-profile', label: 'Risk Identity', icon: BrainCircuit },
-        { id: 'insurance', label: 'Shield Configuration', icon: ShieldCheck },
-        { id: 'tax-estate', label: 'Tax & Compliance', icon: Shield },
-      ]
-    }
   ];
 
   const visibleGroups = navGroups
