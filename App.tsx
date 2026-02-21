@@ -58,9 +58,28 @@ const INITIAL_STATE: FinanceState = {
   insuranceAnalysis: {
     inflation: 6,
     investmentRate: 11.5,
-    replacementYears: 20,
-    immediateNeeds: 1000000,
+    immediateAnnualValue: 1000000,
+    immediateYears: 1,
+    incomeAnnualValue: 0,
+    incomeYears: 20,
     financialAssetDiscount: 50,
+    existingInsurance: 0,
+    liabilityCovers: {},
+    goalCovers: {},
+    assetCovers: { financial: 50, personal: 0, inheritance: 100 },
+    inheritanceValue: 0,
+  },
+  discountSettings: {
+    useBuckets: false,
+    defaultDiscountRate: 10.15,
+    useBucketInflation: false,
+    defaultInflationRate: 6,
+    buckets: [
+      { id: 'bucket-short', name: 'Short-Term', startType: 'Offset', startOffset: 0, endType: 'Offset', endOffset: 3, discountRate: 8, inflationRate: 6 },
+      { id: 'bucket-medium', name: 'Medium-Term', startType: 'Offset', startOffset: 4, endType: 'Offset', endOffset: 5, discountRate: 9, inflationRate: 6 },
+      { id: 'bucket-long', name: 'Long-Term', startType: 'Offset', startOffset: 6, endType: 'Retirement', endOffset: 0, discountRate: 10.15, inflationRate: 6 },
+      { id: 'bucket-post', name: 'Post-Retirement', startType: 'Retirement', startOffset: 0, endType: 'Infinity', discountRate: 11.5, inflationRate: 6 },
+    ],
   },
   goals: [],
   estate: { hasWill: false, nominationsUpdated: false },
@@ -95,7 +114,20 @@ const normalizeState = (raw: Partial<FinanceState> | null | undefined): FinanceS
     assets: Array.isArray(raw?.assets) ? raw!.assets : base.assets,
     loans: Array.isArray(raw?.loans) ? raw!.loans : base.loans,
     insurance: Array.isArray(raw?.insurance) ? raw!.insurance : base.insurance,
-    insuranceAnalysis: { ...base.insuranceAnalysis, ...(raw?.insuranceAnalysis || {}) },
+    insuranceAnalysis: {
+      ...base.insuranceAnalysis,
+      ...(raw?.insuranceAnalysis || {}),
+      liabilityCovers: (raw?.insuranceAnalysis as any)?.liabilityCovers ?? base.insuranceAnalysis.liabilityCovers,
+      goalCovers: (raw?.insuranceAnalysis as any)?.goalCovers ?? base.insuranceAnalysis.goalCovers,
+      assetCovers: (raw?.insuranceAnalysis as any)?.assetCovers ?? base.insuranceAnalysis.assetCovers,
+    },
+    discountSettings: {
+      ...base.discountSettings,
+      ...(raw?.discountSettings || {}),
+      buckets: Array.isArray((raw?.discountSettings as any)?.buckets)
+        ? (raw?.discountSettings as any).buckets
+        : base.discountSettings.buckets,
+    },
     goals: Array.isArray(raw?.goals) ? raw!.goals : base.goals,
     transactions: Array.isArray(raw?.transactions) ? raw!.transactions : base.transactions,
     notifications: Array.isArray(raw?.notifications) ? raw!.notifications : base.notifications,
@@ -132,6 +164,7 @@ const SyncPill: React.FC<{ status: SaveStatus }> = ({ status }) => {
 const App: React.FC = () => {
   const [view, setView]                   = useState<View>('dashboard');
   const [showAuth, setShowAuth]           = useState(false);
+  const [resumeProfile, setResumeProfile] = useState<FinanceState['profile'] | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRestoring, setIsRestoring]     = useState(true);
   const [saveStatus, setSaveStatus]       = useState<SaveStatus>('idle');
@@ -162,6 +195,12 @@ const App: React.FC = () => {
             const normalized = normalizeState(loaded);
             setFinanceState(normalized);
             localStorage.setItem(LOCAL_KEY, JSON.stringify(normalized));
+            if (!normalized.isRegistered) {
+              setShowAuth(true);
+              setResumeProfile(normalized.profile);
+            } else {
+              setResumeProfile(null);
+            }
           }
         } else {
           if (financeState.isRegistered) {
@@ -183,6 +222,7 @@ const App: React.FC = () => {
         localStorage.removeItem(LOCAL_KEY);
         setFinanceState({ ...INITIAL_STATE });
         setShowAuth(false);
+        setResumeProfile(null);
       }
     });
 
@@ -289,8 +329,18 @@ const App: React.FC = () => {
   if (!financeState.isRegistered && showAuth) {
     return (
       <Onboarding
-        onComplete={(data) => setFinanceState(prev => ({ ...prev, ...data, isRegistered: true }))}
-        onBackToLanding={() => setShowAuth(false)}
+        onComplete={(data) => {
+          setFinanceState(prev => ({ ...prev, ...data, isRegistered: true }));
+          setShowAuth(false);
+          setResumeProfile(null);
+          setView('dashboard');
+        }}
+        onBackToLanding={() => {
+          setShowAuth(false);
+          setResumeProfile(null);
+        }}
+        initialAuthStep={resumeProfile ? 'onboarding' : undefined}
+        resumeProfile={resumeProfile ?? undefined}
       />
     );
   }

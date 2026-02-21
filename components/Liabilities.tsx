@@ -11,7 +11,7 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid, Cell } from 'recharts';
 import { parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
-import { buildAmortizationSchedule, calculateEmi, inferTenureMonths } from '../lib/loanMath';
+import { buildAmortizationSchedule, buildYearlyAmortization, calculateEmi, inferTenureMonths } from '../lib/loanMath';
 
 const LOAN_TYPES: { type: LoanType, icon: any }[] = [
   { type: 'Home Loan', icon: Home },
@@ -27,7 +27,7 @@ const SOURCE_TYPES: LoanSourceType[] = ['Bank', 'NBFC', 'Friends & Family'];
 const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
-  const [lumpSumAmount, setLumpSumAmount] = useState<string>('');
+  const [lumpSumInputs, setLumpSumInputs] = useState<Record<string, { year: string; amount: string }>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [formWarning, setFormWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -133,32 +133,68 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     updateState({ loans: state.loans.filter(l => l.id !== id) });
   };
 
+  const getLumpSumInput = (loanId: string) => {
+    return lumpSumInputs[loanId] ?? { year: String(new Date().getFullYear()), amount: '' };
+  };
+
+  const updateLumpSumInput = (loanId: string, field: 'year' | 'amount', value: string) => {
+    setLumpSumInputs(prev => {
+      const current = prev[loanId] ?? { year: String(new Date().getFullYear()), amount: '' };
+      return { ...prev, [loanId]: { ...current, [field]: value } };
+    });
+  };
+
   const addLumpSum = (loanId: string) => {
-    const amount = parseFloat(lumpSumAmount);
-    if (isNaN(amount) || amount <= 0) return;
+    const input = getLumpSumInput(loanId);
+    const amount = parseNumber(input.amount, 0);
+    const year = parseNumber(input.year, 0);
+    const loan = state.loans.find(l => l.id === loanId);
+
+    if (!loan || amount <= 0 || year <= 0) {
+      setNotice('Enter a valid year and amount for the additional payment.');
+      setTimeout(() => setNotice(null), 3500);
+      return;
+    }
+    const minYear = loan.startYear ?? new Date().getFullYear();
+    if (year < minYear) {
+      setNotice(`Additional payment year must be >= ${minYear}.`);
+      setTimeout(() => setNotice(null), 3500);
+      return;
+    }
 
     updateState({
       loans: state.loans.map(l => {
         if (l.id === loanId) {
-          const newOutstanding = Math.max(0, l.outstandingAmount - amount);
           return {
             ...l,
-            outstandingAmount: newOutstanding,
-            lumpSumRepayments: [...(l.lumpSumRepayments || []), { year: new Date().getFullYear(), amount }]
+            lumpSumRepayments: [...(l.lumpSumRepayments || []), { year, amount }]
           };
         }
         return l;
       })
     });
-    setLumpSumAmount('');
+    updateLumpSumInput(loanId, 'amount', '');
+  };
+
+  const removeLumpSum = (loanId: string, index: number) => {
+    updateState({
+      loans: state.loans.map(l => {
+        if (l.id === loanId) {
+          const updated = [...(l.lumpSumRepayments || [])];
+          updated.splice(index, 1);
+          return { ...l, lumpSumRepayments: updated };
+        }
+        return l;
+      })
+    });
   };
 
   const totalOutstanding = state.loans.reduce((sum, l) => sum + l.outstandingAmount, 0);
   const totalEMI = state.loans.reduce((sum, l) => sum + l.emi, 0);
 
   // Amortization Calculator with Lump Sum Projection
-  const calculateProjections = (loan: Loan, simulateExtra: number = 0) => {
-    const projection = buildAmortizationSchedule(loan, { extraPayment: simulateExtra });
+  const calculateProjections = (loan: Loan) => {
+    const projection = buildAmortizationSchedule(loan);
     const schedule = projection.schedule.slice(0, 12).map((row, i) => ({
       month: `Mo ${i + 1}`,
       interest: row.interest,
@@ -173,6 +209,81 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
       emi: projection.emi,
       basis: projection.basis,
     };
+  };
+
+  const exportYearlyCsv = (loan: Loan, yearlySchedule: Array<{ yearIndex: number; openingBalance: number; interest: number; emi: number; principal: number; extraPayment: number; closingBalance: number }>) => {
+    const rows = [
+      ['Year', 'Opening Balance', 'Interest', 'EMI', 'Principal', 'Additional Payments', 'Closing Balance'],
+      ...yearlySchedule.map(row => ([
+        `Year ${row.yearIndex}`,
+        row.openingBalance,
+        row.interest,
+        row.emi,
+        row.principal,
+        row.extraPayment,
+        row.closingBalance,
+      ]))
+    ];
+    const csv = rows.map(r => r.join(',')).join('\\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${loan.type.replace(/\\s+/g, '-').toLowerCase()}-amortization.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const exportYearlyPdf = (loan: Loan, yearlySchedule: Array<{ yearIndex: number; openingBalance: number; interest: number; emi: number; principal: number; extraPayment: number; closingBalance: number }>) => {
+    const popup = window.open('', '_blank', 'width=900,height=700');
+    if (!popup) return;
+    const rowsHtml = yearlySchedule.map(row => `
+      <tr>
+        <td>Year ${row.yearIndex}</td>
+        <td>${formatCurrency(row.openingBalance, currencyCountry)}</td>
+        <td>${formatCurrency(row.interest, currencyCountry)}</td>
+        <td>${formatCurrency(row.emi, currencyCountry)}</td>
+        <td>${formatCurrency(row.principal, currencyCountry)}</td>
+        <td>${row.extraPayment ? formatCurrency(row.extraPayment, currencyCountry) : '—'}</td>
+        <td>${formatCurrency(row.closingBalance, currencyCountry)}</td>
+      </tr>
+    `).join('');
+    popup.document.write(`
+      <html>
+        <head>
+          <title>${loan.type} Amortization Schedule</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; }
+            h1 { font-size: 20px; margin-bottom: 16px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #e2e8f0; padding: 8px; text-align: right; }
+            th:first-child, td:first-child { text-align: left; }
+            th { background: #f8fafc; }
+          </style>
+        </head>
+        <body>
+          <h1>${loan.type} · Yearly Amortization</h1>
+          <table>
+            <thead>
+              <tr>
+                <th>Year</th>
+                <th>Opening</th>
+                <th>Interest</th>
+                <th>EMI</th>
+                <th>Principal</th>
+                <th>Additional</th>
+                <th>Closing</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
   };
 
   // Consolidation suggestions
@@ -391,12 +502,10 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           const isExpanded = expandedLoanId === loan.id;
           
           const currentProj = calculateProjections(loan);
-          const simulatedExtra = parseFloat(lumpSumAmount) || 0;
-          const simulatedProj = calculateProjections(loan, simulatedExtra);
           
           const { schedule, totalInterest, monthsRemaining, fullSchedule, emi: calculatedEmi, basis } = currentProj;
-          const interestSaved = Math.max(0, currentProj.totalInterest - simulatedProj.totalInterest);
-          const tenureSaved = Math.max(0, currentProj.monthsRemaining - simulatedProj.monthsRemaining);
+          const yearlySchedule = buildYearlyAmortization(fullSchedule);
+          const totalExtras = (loan.lumpSumRepayments || []).reduce((sum, ls) => sum + (ls.amount || 0), 0);
 
           const payoffProgress = Math.min(100, Math.round(((loan.sanctionedAmount - loan.outstandingAmount) / (loan.sanctionedAmount || 1)) * 100));
           const monthlyRate = loan.interestRate / 12 / 100;
@@ -456,33 +565,61 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                 <div className="bg-slate-50 p-10 border-t border-slate-200 animate-in slide-in-from-top-4">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
                      <div className="space-y-8">
-                        {/* Simulation Module */}
+                        {/* Additional Payments */}
                         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6 text-left">
-                           <h5 className="text-sm font-black text-slate-900 flex items-center gap-2 uppercase tracking-widest"><Zap size={16} className="text-amber-500"/> Lump-sum Simulator</h5>
-                           <p className="text-[11px] text-slate-500 font-medium leading-relaxed">Make an extra payment to see how it slashes your tenure and total interest.</p>
-                           <div className="space-y-4">
-                              <input 
-                                 type="number" 
-                                 value={lumpSumAmount} 
-                                 onChange={e => setLumpSumAmount(e.target.value)} 
-                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-black text-lg outline-none focus:border-teal-600" 
-                                 placeholder={`Amount ${currencySymbol}`}
-                                 onClick={e => e.stopPropagation()}
-                              />
-                              <button 
-                                 onClick={(e) => { e.stopPropagation(); addLumpSum(loan.id); }}
-                                 className="w-full py-4 bg-teal-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-700 transition-all flex items-center justify-center gap-2"
+                           <h5 className="text-sm font-black text-slate-900 flex items-center gap-2 uppercase tracking-widest"><Zap size={16} className="text-amber-500"/> Additional Payments</h5>
+                           <p className="text-[11px] text-slate-500 font-medium leading-relaxed">Add optional lump-sum payments by year. These are applied directly to principal.</p>
+                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                              <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Year</label>
+                                <input
+                                  type="number"
+                                  value={getLumpSumInput(loan.id).year}
+                                  onChange={e => updateLumpSumInput(loan.id, 'year', e.target.value)}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-black outline-none focus:border-teal-600"
+                                  onClick={e => e.stopPropagation()}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Amount</label>
+                                <input
+                                  type="number"
+                                  value={getLumpSumInput(loan.id).amount}
+                                  onChange={e => updateLumpSumInput(loan.id, 'amount', e.target.value)}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-black outline-none focus:border-teal-600"
+                                  placeholder={`Amount ${currencySymbol}`}
+                                  onClick={e => e.stopPropagation()}
+                                />
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); addLumpSum(loan.id); }}
+                                className="w-full py-4 bg-teal-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-700 transition-all flex items-center justify-center gap-2"
                               >
-                                 Record Payment <ArrowDownToLine size={14}/>
+                                Add Payment <ArrowDownToLine size={14}/>
                               </button>
                            </div>
 
-                           {simulatedExtra > 0 && (
-                             <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 animate-in zoom-in-95">
-                               <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-2"><Lightbulb size={12}/> Projected Savings</p>
-                               <div className="space-y-1">
-                                 <div className="flex justify-between text-xs font-bold text-slate-600"><span>Interest Saved:</span><span className="text-emerald-700">{formatCurrency(Math.round(interestSaved), currencyCountry)}</span></div>
-                                 <div className="flex justify-between text-xs font-bold text-slate-600"><span>Tenure Saved:</span><span className="text-emerald-700">-{tenureSaved} Months</span></div>
+                           {loan.lumpSumRepayments && loan.lumpSumRepayments.length > 0 && (
+                             <div className="space-y-3">
+                               <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                 <span>Scheduled</span>
+                                 <span className="text-emerald-600">Total {formatCurrency(Math.round(totalExtras), currencyCountry)}</span>
+                               </div>
+                               <div className="space-y-2">
+                                 {[...loan.lumpSumRepayments].sort((a, b) => a.year - b.year).map((ls, idx) => (
+                                   <div key={`${ls.year}-${idx}`} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                                     <div className="text-[10px] font-black text-slate-600">Year {ls.year}</div>
+                                     <div className="flex items-center gap-3">
+                                       <span className="text-xs font-black text-slate-900">{formatCurrency(ls.amount, currencyCountry)}</span>
+                                       <button
+                                         onClick={(e) => { e.stopPropagation(); removeLumpSum(loan.id, idx); }}
+                                         className="text-[9px] font-black text-rose-500 uppercase tracking-widest"
+                                       >
+                                         Remove
+                                       </button>
+                                     </div>
+                                   </div>
+                                 ))}
                                </div>
                              </div>
                            )}
@@ -531,6 +668,56 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
                                   <Bar dataKey="principal" stackId="a" fill="#34d399" radius={[4, 4, 0, 0]} />
                                 </BarChart>
                               </ResponsiveContainer>
+                           </div>
+                        </div>
+
+                        {/* Yearly Amortization Table */}
+                        <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
+                           <div className="px-8 py-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                              <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Yearly Amortization Schedule</h5>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[9px] font-black text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full uppercase">Annual View</span>
+                                <button
+                                  onClick={() => exportYearlyCsv(loan, yearlySchedule)}
+                                  className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest bg-slate-100 text-slate-600 rounded-full hover:bg-slate-200 transition"
+                                >
+                                  Export CSV
+                                </button>
+                                <button
+                                  onClick={() => exportYearlyPdf(loan, yearlySchedule)}
+                                  className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest bg-slate-900 text-white rounded-full hover:bg-slate-800 transition"
+                                >
+                                  Export PDF
+                                </button>
+                              </div>
+                           </div>
+                           <div className="overflow-x-auto max-h-[320px] no-scrollbar">
+                              <table className="w-full text-left min-w-[760px]">
+                                 <thead className="bg-slate-50 sticky top-0 z-10">
+                                    <tr>
+                                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase">Year</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Opening</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Interest</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">EMI</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Principal</th>
+                                       <th className="px-4 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Additional</th>
+                                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase text-right">Closing</th>
+                                    </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-slate-50">
+                                    {yearlySchedule.map((row) => (
+                                       <tr key={row.year} className="hover:bg-slate-50 transition-colors">
+                                          <td className="px-6 py-4 text-[10px] font-black text-slate-600">Year {row.yearIndex}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-slate-600 text-right">{formatCurrency(row.openingBalance, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-rose-500 text-right">{formatCurrency(row.interest, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-slate-600 text-right">{formatCurrency(row.emi, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-emerald-500 text-right">{formatCurrency(row.principal, currencyCountry)}</td>
+                                          <td className="px-4 py-4 text-[10px] font-bold text-slate-500 text-right">{row.extraPayment ? formatCurrency(row.extraPayment, currencyCountry) : '—'}</td>
+                                          <td className="px-6 py-4 text-[10px] font-black text-slate-900 text-right">{formatCurrency(row.closingBalance, currencyCountry)}</td>
+                                       </tr>
+                                    ))}
+                                 </tbody>
+                              </table>
                            </div>
                         </div>
 

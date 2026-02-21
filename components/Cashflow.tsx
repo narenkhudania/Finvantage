@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { FinanceState, DetailedIncome, Goal, RelativeDate } from '../types';
 import { formatCurrency } from '../lib/currency';
-import { annualizeAmount, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption } from '../lib/financeMath';
+import { annualizeAmount, buildBucketDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
 import { inferTenureMonths } from '../lib/loanMath';
 
 interface CashflowProps {
@@ -64,9 +64,24 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
     const baseLiving = state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0) || state.profile.monthlyExpenses;
     const baseDebt = state.loans.reduce((sum, l) => sum + l.emi, 0);
     const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
+    const discountSettings = state.discountSettings;
+    const retirementYear = state.profile.dob
+      ? new Date(state.profile.dob).getFullYear() + state.profile.retirementAge
+      : currentYear + 30;
 
     const endYear = getLifeExpectancyYear(state.profile.dob, state.profile.lifeExpectancy) ?? (currentYear + 35);
     const projectionYears = Math.max(1, endYear - currentYear);
+    const discountFallback = discountSettings?.defaultDiscountRate ?? assumedReturn;
+    const discountFactors = buildBucketDiscountFactors(currentYear, endYear, retirementYear, discountSettings, discountFallback);
+    const defaultInflation = discountSettings?.defaultInflationRate ?? 6;
+    const applyInflation = (base: number, fromYear: number, toYear: number, fallbackRate: number) => {
+      if (toYear <= fromYear) return base;
+      if (!discountSettings?.useBucketInflation) {
+        const years = Math.max(0, toYear - fromYear);
+        return base * Math.pow(1 + fallbackRate / 100, years);
+      }
+      return inflateByBuckets(base, fromYear, toYear, currentYear, retirementYear, discountSettings, fallbackRate);
+    };
 
     for (let i = 0; i <= projectionYears; i++) {
       const year = currentYear + i;
@@ -76,9 +91,8 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
         ? (state.cashflows || []).reduce((sum, flow) => {
             if (flow.flowType && flow.flowType !== 'Income') return sum;
             if (year < flow.startYear || year > flow.endYear) return sum;
-            const yearsFromStart = Math.max(0, year - flow.startYear);
             const baseAnnual = annualizeAmount(flow.amount, flow.frequency);
-            const adjusted = baseAnnual * Math.pow(1 + (flow.growthRate || 0) / 100, yearsFromStart);
+            const adjusted = applyInflation(baseAnnual, flow.startYear, year, flow.growthRate ?? defaultInflation);
             if (flow.frequency === 'One time') {
               return sum + (year === flow.startYear ? adjusted : 0);
             }
@@ -89,9 +103,8 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
       const expenseFromFlows = (state.cashflows || []).reduce((sum, flow) => {
         if (flow.flowType !== 'Expense') return sum;
         if (year < flow.startYear || year > flow.endYear) return sum;
-        const yearsFromStart = Math.max(0, year - flow.startYear);
         const baseAnnual = annualizeAmount(flow.amount, flow.frequency);
-        const adjusted = baseAnnual * Math.pow(1 + (flow.growthRate || 0) / 100, yearsFromStart);
+        const adjusted = applyInflation(baseAnnual, flow.startYear, year, flow.growthRate ?? defaultInflation);
         if (flow.frequency === 'One time') {
           return sum + (year === flow.startYear ? adjusted : 0);
         }
@@ -104,15 +117,15 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
             const startYear = e.startYear ?? currentYear;
             const endYearForExpense = e.endYear ?? endYear;
             if (year < startYear || year > endYearForExpense) return sum;
-            const yearsFromStart = Math.max(0, year - startYear);
             const baseAnnual = annualizeAmount(e.amount, frequency);
-            const adjusted = baseAnnual * Math.pow(1 + (e.inflationRate || 0) / 100, yearsFromStart);
+            const inflationRate = Number.isFinite(e.inflationRate as number) ? (e.inflationRate as number) : defaultInflation;
+            const adjusted = applyInflation(baseAnnual, startYear, year, inflationRate);
             if (frequency === 'One time') {
               return sum + (year === startYear ? adjusted : 0);
             }
             return sum + adjusted;
           }, 0) + expenseFromFlows
-        : (baseLiving * 12 * Math.pow(1.06, i)) + expenseFromFlows;
+        : applyInflation(baseLiving * 12, currentYear, year, defaultInflation) + expenseFromFlows;
 
       const yearlyDebt = state.loans.reduce((sum, loan) => {
         const start = loan.startYear ?? currentYear;
@@ -156,12 +169,17 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
       });
 
       const goalRequirement = activeGoals.reduce((sum, g) => {
-        const inflationAdjustedGoal = g.startGoalAmount
-          ? g.startGoalAmount * Math.pow(1 + (g.inflationRate / 100), Math.max(0, year - resolveYear(g.startDate)))
-          : g.targetAmountToday * Math.pow(1 + (g.inflationRate / 100), i);
+        const sDate = resolveYear(g.startDate);
+        const eDate = resolveYear(g.endDate);
+        const inflationFallback = discountSettings?.defaultInflationRate ?? g.inflationRate;
+        const startAmount = discountSettings?.useBucketInflation
+          ? inflateByBuckets(g.targetAmountToday, currentYear, sDate, currentYear, retirementYear, discountSettings, inflationFallback)
+          : g.targetAmountToday * Math.pow(1 + (g.inflationRate / 100), Math.max(0, sDate - currentYear));
+        const inflationAdjustedGoal = discountSettings?.useBucketInflation
+          ? inflateByBuckets(startAmount, sDate, year, currentYear, retirementYear, discountSettings, inflationFallback)
+          : startAmount * Math.pow(1 + (g.inflationRate / 100), Math.max(0, year - sDate));
         if (g.isRecurring) {
-          const sDate = resolveYear(g.startDate);
-          const interval = getGoalIntervalYears(g.frequency);
+          const interval = getGoalIntervalYears(g.frequency, g.frequencyIntervalYears);
           if (interval > 1) {
             return sum + ((year - sDate) % interval === 0 ? inflationAdjustedGoal : 0);
           }
@@ -169,9 +187,8 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
             return sum + (inflationAdjustedGoal * 12);
           }
           return sum + inflationAdjustedGoal;
-        } else {
-          return year === resolveYear(g.endDate) ? sum + inflationAdjustedGoal : sum;
         }
+        return year === eDate ? sum + inflationAdjustedGoal : sum;
       }, 0);
 
       const totalExpenses = yearlyLiving + yearlyDebt;
@@ -180,6 +197,13 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
       const netAfterGoals = yearlyInflow - totalOutflow;
       const savingsRatio = yearlyInflow > 0 ? (netSurplus / yearlyInflow) * 100 : 0;
       const debtServicingRatio = yearlyInflow > 0 ? (yearlyDebt / yearlyInflow) * 100 : 0;
+
+      const discountFactor = discountFactors[year] || 1;
+      const pvInflow = yearlyInflow / discountFactor;
+      const pvExpenses = totalExpenses / discountFactor;
+      const pvCommitted = yearlyCommitted / discountFactor;
+      const pvSurplus = netAfterGoals / discountFactor;
+      const pvNetSurplus = netSurplus / discountFactor;
 
       cumulativeSurplus += netSurplus;
       corpus = (corpus * (1 + assumedReturn / 100)) + netAfterGoals;
@@ -194,6 +218,11 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
         totalOutflow: Math.round(totalOutflow),
         surplus: Math.round(netAfterGoals),
         netSurplus: Math.round(netSurplus),
+        pvInflow: Math.round(pvInflow),
+        pvExpenses: Math.round(pvExpenses),
+        pvCommitted: Math.round(pvCommitted),
+        pvSurplus: Math.round(pvSurplus),
+        pvNetSurplus: Math.round(pvNetSurplus),
         cumulative: Math.round(cumulativeSurplus),
         savingsRatio: Number(savingsRatio.toFixed(2)),
         debtServicingRatio: Number(debtServicingRatio.toFixed(2)),
@@ -260,16 +289,19 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Annual Inflow</p>
             <h4 className="text-2xl font-black text-slate-900">{formatCurrency(currentSnapshot.inflow, currencyCountry)}</h4>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-2">PV {formatCurrency(currentSnapshot.pvInflow, currencyCountry)}</p>
           </div>
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Annual Expenses</p>
             <h4 className="text-2xl font-black text-rose-600">{formatCurrency(currentSnapshot.living + currentSnapshot.debt, currencyCountry)}</h4>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-2">PV {formatCurrency(currentSnapshot.pvExpenses, currencyCountry)}</p>
           </div>
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Net Surplus (Pre-Goals)</p>
             <h4 className={`text-2xl font-black ${currentSnapshot.netSurplus >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
               {formatCurrency(currentSnapshot.netSurplus, currencyCountry)}
             </h4>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-2">PV {formatCurrency(currentSnapshot.pvNetSurplus, currencyCountry)}</p>
           </div>
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Debt Servicing Ratio</p>
@@ -378,6 +410,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                   <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 800}} />
                   <Tooltip contentStyle={{ borderRadius: '24px', border: 'none', fontWeight: 'bold' }} formatter={(val: number) => formatCurrency(val, currencyCountry)} />
                   <Area type="monotone" dataKey="surplus" stroke="#10b981" strokeWidth={5} fillOpacity={1} fill="url(#colorSurplus)" />
+                  <Area type="monotone" dataKey="pvSurplus" stroke="#0f766e" strokeWidth={3} fillOpacity={0} strokeDasharray="6 6" />
                </AreaChart>
             </ResponsiveContainer>
          </div>

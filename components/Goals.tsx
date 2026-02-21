@@ -18,6 +18,10 @@ const GOAL_ICONS: Record<GoalType, any> = {
   'Child Education': GraduationCap,
   'Child Marriage': Heart,
   'Vacation': Plane,
+  'Vacation - Domestic': Plane,
+  'Vacation - International': Plane,
+  'Asset Purchase': Home,
+  'Asset': Home,
   'Car': Car,
   'Land / Home': Home,
   'Commercial': Building,
@@ -31,6 +35,41 @@ const GOAL_ICONS: Record<GoalType, any> = {
   'Others': Target
 };
 
+const RETIREMENT_EXPENSE_CATEGORIES = [
+  'Food & Grocery',
+  'House Rent / Maintenance / Repair',
+  'Conveyance, Fuel & Maintenance',
+  'Medicines / Doctor / Healthcare',
+  'Electricity / Water / Labour / AMCs',
+  'Mobile / Telephone / Internet',
+  'Household Expenses',
+  'Clothes & Accessories',
+  'Shopping, Gifts, Whitegoods, Gadgets',
+  'Dining / Movies / Sports',
+  'Personal Care / Others',
+  'Travel & Annual Vacations',
+  'Lifestyle Expenses',
+  "Children's Schooling/College Expenses",
+  'Contribution to Parents, Siblings etc',
+  'Dependent Expenses',
+  'Life Insurance (Term)',
+  'Mediclaim/PA/CI',
+  'Motor Insurance',
+  'Pure Insurance Premiums',
+  'Home Loan EMIs',
+  'Vehicle Loan EMIs',
+  'Personal Loan EMIs',
+  'Loan Servicing',
+  'Net Outflows',
+  'Savings (Inflows-Outflows)',
+  'PPF',
+  'Recurring Deposits (RDs)',
+  'Insurance Premiums (Investments)',
+  'Mutual Fund SIPs',
+  'Regular Monthly Investments',
+  'Surplus (Savings-Investments)',
+];
+
 const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [step, setStep] = useState(1);
@@ -41,6 +80,10 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
   
   const currentYear = new Date().getFullYear();
   const birthYear = state.profile.dob ? new Date(state.profile.dob).getFullYear() : currentYear - 30;
+  const currentLivingMonthly = useMemo(() => {
+    const total = state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0);
+    return total > 0 ? total : state.profile.monthlyExpenses;
+  }, [state.detailedExpenses, state.profile.monthlyExpenses]);
 
   const resolveYear = (rel: RelativeDate): number => {
     switch (rel.type) {
@@ -57,17 +100,31 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
     description: '',
     priority: state.goals.length + 1,
     resourceBuckets: ['Equity & MF', 'Cashflow Surplus'],
-    isRecurring: false,
+    isRecurring: true,
     frequency: 'Yearly',
-    startDate: { type: 'Age', value: 60 },
-    endDate: { type: 'Age', value: 60 },
+    frequencyIntervalYears: undefined,
+    startDate: { type: 'Retirement', value: 0 },
+    endDate: { type: 'LifeExpectancy', value: 0 },
     targetAmountToday: 0,
     inflationRate: 6,
     currentAmount: 0,
     loan: { enabled: false },
+    retirementHandling: 'CurrentExpenses',
   };
 
   const [newGoal, setNewGoal] = useState<Partial<Goal>>(initialNewGoal);
+
+  const isRetirementGoal = newGoal.type === 'Retirement';
+  const retirementMode = newGoal.retirementHandling ?? 'CurrentExpenses';
+  const retirementRows = newGoal.detailedBreakdown ?? [];
+  const retirementMonthlyFromDetails = retirementRows.reduce((sum, row) => sum + parseNumber(row.amount || 0, 0), 0);
+  const retirementMonthlyEstimate = parseNumber(newGoal.expectedMonthlyExpensesAfterRetirement || 0, 0);
+  const retirementMonthlyTarget = retirementMode === 'CurrentExpenses'
+    ? currentLivingMonthly
+    : retirementMode === 'Detailed'
+      ? retirementMonthlyFromDetails
+      : retirementMonthlyEstimate;
+  const retirementAnnualTarget = retirementMonthlyTarget * 12;
 
   const handleOpenAdd = () => {
     setEditingId(null);
@@ -78,9 +135,39 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
 
   const handleEdit = (goal: Goal) => {
     setEditingId(goal.id);
-    setNewGoal({ ...goal, loan: goal.loan ?? { enabled: false } });
+    setNewGoal({
+      ...goal,
+      isRecurring: goal.type === 'Retirement' ? true : goal.isRecurring,
+      loan: goal.loan ?? { enabled: false },
+    });
     setStep(1);
     setShowAdd(true);
+  };
+
+  const addRetirementRow = () => {
+    const nextRows = [
+      ...(newGoal.detailedBreakdown || []),
+      {
+        category: '',
+        amount: 0,
+        inflationRate: newGoal.inflationRate ?? 6,
+        tenure: 0,
+        frequency: 'Monthly',
+      } as ExpenseItem,
+    ];
+    setNewGoal(prev => ({ ...prev, detailedBreakdown: nextRows }));
+  };
+
+  const updateRetirementRow = (index: number, patch: Partial<ExpenseItem>) => {
+    const rows = [...(newGoal.detailedBreakdown || [])];
+    rows[index] = { ...rows[index], ...patch };
+    setNewGoal(prev => ({ ...prev, detailedBreakdown: rows }));
+  };
+
+  const removeRetirementRow = (index: number) => {
+    const rows = [...(newGoal.detailedBreakdown || [])];
+    rows.splice(index, 1);
+    setNewGoal(prev => ({ ...prev, detailedBreakdown: rows }));
   };
 
   const computeEmi = (principal: number, annualRate: number, years: number) => {
@@ -103,11 +190,11 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
     const startDate = newGoal.startDate;
     const endDate = newGoal.endDate;
 
-    if (description.length < 2) {
-      setFormError('Description is required.');
+    if (description.length < 2 && newGoal.type === 'Others') {
+      setFormError('Description is required for custom goals.');
       return;
     }
-    if (targetAmount <= 0) {
+    if (newGoal.type !== 'Retirement' && targetAmount <= 0) {
       setFormError('Target amount must be greater than 0.');
       return;
     }
@@ -123,15 +210,31 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
       setFormError('Start and end dates are required.');
       return;
     }
+    if ((startDate.type === 'Retirement' || startDate.type === 'LifeExpectancy') && (startDate.value < -5 || startDate.value > 5)) {
+      setFormError('Retirement/Life Expectancy offsets must be between -5 and +5 years.');
+      return;
+    }
+    if ((endDate.type === 'Retirement' || endDate.type === 'LifeExpectancy') && (endDate.value < -5 || endDate.value > 5)) {
+      setFormError('Retirement/Life Expectancy offsets must be between -5 and +5 years.');
+      return;
+    }
     const startYear = resolveYear(startDate);
     const endYear = resolveYear(endDate);
     if (startYear > endYear) {
       setFormError('Start date must be before end date.');
       return;
     }
-    if (newGoal.isRecurring && !newGoal.frequency) {
+    const isRecurring = newGoal.type === 'Retirement' ? true : Boolean(newGoal.isRecurring);
+    if (isRecurring && !newGoal.frequency) {
       setFormError('Frequency is required for recurring goals.');
       return;
+    }
+    if (isRecurring && (newGoal.frequency === 'Every 2–15 Years' || newGoal.frequency === 'Every 2-15 Years')) {
+      const intervalYears = parseNumber(newGoal.frequencyIntervalYears ?? 0, 0);
+      if (intervalYears < 2 || intervalYears > 15) {
+        setFormError('Recurring interval must be between 2 and 15 years.');
+        return;
+      }
     }
     if (resourceBuckets.length === 0) {
       setFormError('Select at least one resource bucket.');
@@ -143,8 +246,57 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
       setTimeout(() => setNotice(null), 4000);
     }
 
+    let effectiveTargetAmount = targetAmount;
+    let expectedMonthlyExpensesAfterRetirement = newGoal.expectedMonthlyExpensesAfterRetirement;
+    let retirementHandling = newGoal.retirementHandling;
+    let detailedBreakdown = newGoal.detailedBreakdown;
+    let frequencyIntervalYears = newGoal.frequencyIntervalYears;
+
+    if (newGoal.type === 'Retirement') {
+      if (!retirementHandling) retirementHandling = 'CurrentExpenses';
+      if (retirementHandling === 'CurrentExpenses') {
+        if (currentLivingMonthly <= 0) {
+          setFormError('Current living expenses are required for retirement.');
+          return;
+        }
+        expectedMonthlyExpensesAfterRetirement = currentLivingMonthly;
+        effectiveTargetAmount = currentLivingMonthly * 12;
+      }
+      if (retirementHandling === 'Estimate') {
+        const estimate = parseNumber(expectedMonthlyExpensesAfterRetirement || 0, 0);
+        if (estimate <= 0) {
+          setFormError('Estimated monthly retirement expense is required.');
+          return;
+        }
+        expectedMonthlyExpensesAfterRetirement = estimate;
+        effectiveTargetAmount = estimate * 12;
+      }
+      if (retirementHandling === 'Detailed') {
+        const rows = (detailedBreakdown || []).filter(r => parseNumber(r.amount || 0, 0) > 0);
+        if (rows.length === 0) {
+          setFormError('Add at least one detailed retirement expense.');
+          return;
+        }
+        const monthlyTotal = rows.reduce((sum, r) => sum + parseNumber(r.amount || 0, 0), 0);
+        expectedMonthlyExpensesAfterRetirement = monthlyTotal;
+        effectiveTargetAmount = monthlyTotal * 12;
+      }
+    }
+
+    if (isRecurring) {
+      if (newGoal.frequency === 'Once in 10 years') {
+        frequencyIntervalYears = 10;
+      } else if (newGoal.frequency?.toLowerCase().includes('every')) {
+        frequencyIntervalYears = frequencyIntervalYears;
+      } else {
+        frequencyIntervalYears = undefined;
+      }
+    } else {
+      frequencyIntervalYears = undefined;
+    }
+
     const yearsToStart = Math.max(0, startYear - currentYear);
-    const startGoalAmount = targetAmount * Math.pow(1 + (inflationRate / 100), yearsToStart);
+    const startGoalAmount = effectiveTargetAmount * Math.pow(1 + (inflationRate / 100), yearsToStart);
 
     const mapGoalLoanType = (goalType: GoalType): LoanType => {
       if (goalType === 'Car') return 'Car Loan';
@@ -215,12 +367,18 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
 
     const sanitizedGoal = {
       ...newGoal,
-      description,
-      targetAmountToday: targetAmount,
+      description: description.length > 0 ? description : (newGoal.type || 'Goal'),
+      isRecurring,
+      frequency: newGoal.frequency ?? (isRecurring ? 'Yearly' : undefined),
+      targetAmountToday: Math.round(effectiveTargetAmount),
       startGoalAmount: Math.round(startGoalAmount),
       currentAmount: Math.max(0, currentAmount),
       inflationRate,
       loan,
+      expectedMonthlyExpensesAfterRetirement,
+      retirementHandling,
+      detailedBreakdown,
+      frequencyIntervalYears,
     } as Goal;
 
     if (editingId) {
@@ -249,6 +407,12 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
     
     // Preset offsets for +/- 5 years requirement
     const presets = [-5, -2, 0, 2, 5];
+    const clampOffset = (val: number, type: RelativeDateType) => {
+      if (type === 'Retirement' || type === 'LifeExpectancy') {
+        return Math.max(-5, Math.min(5, val));
+      }
+      return val;
+    };
 
     return (
       <div className="space-y-4 p-6 bg-slate-50 border border-slate-200 rounded-[2rem] hover:border-teal-300 transition-all shadow-sm">
@@ -259,7 +423,7 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
               <button 
                 key={t} 
                 type="button" 
-                onClick={() => onChange({ ...value, type: t })} 
+                onClick={() => onChange({ ...value, type: t, value: clampOffset(value.value, t) })} 
                 className={`flex-1 min-w-[80px] py-2.5 text-[9px] font-black uppercase tracking-tight rounded-xl transition-all ${value.type === t ? 'bg-white text-teal-600 shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 {t}
@@ -286,7 +450,10 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
              <input 
                type="number" 
                value={value.value} 
-               onChange={(e) => onChange({ ...value, value: parseInt(e.target.value) || 0 })} 
+               onChange={(e) => {
+                 const nextVal = parseInt(e.target.value) || 0;
+                 onChange({ ...value, value: clampOffset(nextVal, value.type) });
+               }} 
                className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 text-2xl font-black outline-none focus:ring-4 focus:ring-teal-600/5 focus:border-teal-600 shadow-sm" 
                placeholder="n" 
              />
@@ -357,7 +524,26 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                      <div className="space-y-4 text-left">
                         <label className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2"><LayoutGrid size={18} className="text-teal-600"/> Goal Topology</label>
-                        <select value={newGoal.type} onChange={e => setNewGoal({...newGoal, type: e.target.value as GoalType})} className="w-full bg-white border border-slate-200 rounded-[2rem] px-8 py-6 text-xl font-black outline-none focus:ring-8 focus:ring-teal-600/5 focus:border-teal-600 shadow-sm">
+                        <select
+                          value={newGoal.type}
+                          onChange={e => {
+                            const nextType = e.target.value as GoalType;
+                            if (nextType === 'Retirement') {
+                              setNewGoal(prev => ({
+                                ...prev,
+                                type: nextType,
+                                isRecurring: true,
+                                frequency: 'Yearly',
+                                startDate: { type: 'Retirement', value: 0 },
+                                endDate: { type: 'LifeExpectancy', value: 0 },
+                                retirementHandling: prev.retirementHandling ?? 'CurrentExpenses',
+                              }));
+                              return;
+                            }
+                            setNewGoal(prev => ({ ...prev, type: nextType }));
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-[2rem] px-8 py-6 text-xl font-black outline-none focus:ring-8 focus:ring-teal-600/5 focus:border-teal-600 shadow-sm"
+                        >
                            {Object.keys(GOAL_ICONS).map(type => <option key={type}>{type}</option>)}
                         </select>
                      </div>
@@ -381,26 +567,61 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                            <h4 className="text-xl font-black text-slate-900 italic">Is this a Recurring Milestone?</h4>
                            <p className="text-xs font-medium text-slate-400">Mark true for recurring life events like annual vacations or vehicle upgrades.</p>
                         </div>
-                        <button onClick={() => setNewGoal({...newGoal, isRecurring: !newGoal.isRecurring})} className={`w-20 h-10 rounded-full transition-all relative ${newGoal.isRecurring ? 'bg-teal-600' : 'bg-slate-200'}`}>
+                        <button
+                          onClick={() => !isRetirementGoal && setNewGoal({...newGoal, isRecurring: !newGoal.isRecurring})}
+                          className={`w-20 h-10 rounded-full transition-all relative ${newGoal.isRecurring ? 'bg-teal-600' : 'bg-slate-200'} ${isRetirementGoal ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
                            <div className={`absolute top-1 w-8 h-8 rounded-full bg-white transition-all shadow-md ${newGoal.isRecurring ? 'left-11' : 'left-1'}`} />
                         </button>
                      </div>
                      {newGoal.isRecurring && (
-                        <div className="space-y-4 animate-in slide-in-from-top-4 text-left">
-                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Milestone Frequency Strategy</label>
-                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                              {['Monthly', 'Yearly', 'Every 2-5 Years', 'Every 2-15 Years', 'Once in 10 years'].map(f => (
-                                <button
-                                  key={f}
-                                  type="button"
-                                  onClick={() => setNewGoal({...newGoal, frequency: f as any})}
-                                  className={`py-4 rounded-2xl text-[10px] font-black uppercase tracking-tight border transition-all ${newGoal.frequency === f ? 'bg-teal-600 text-white border-teal-600 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-teal-200'}`}
-                                >
-                                  {f}
-                                </button>
-                              ))}
-                           </div>
-                        </div>
+                        isRetirementGoal ? (
+                          <div className="p-4 bg-slate-50 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 border border-slate-100">
+                            Retirement expenses are modeled annually by default.
+                          </div>
+                        ) : (
+                          <div className="space-y-4 animate-in slide-in-from-top-4 text-left">
+                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Milestone Frequency Strategy</label>
+                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {['Monthly', 'Yearly', 'Every 2–15 Years', 'Once in 10 years'].map(f => (
+                                  <button
+                                    key={f}
+                                    type="button"
+                                    onClick={() => {
+                                      const next: Partial<Goal> = { ...newGoal, frequency: f as any };
+                                      if (f === 'Once in 10 years') {
+                                        next.frequencyIntervalYears = 10;
+                                      } else if (f === 'Every 2–15 Years' || f === 'Every 2-15 Years') {
+                                        next.frequencyIntervalYears = newGoal.frequencyIntervalYears ?? 5;
+                                      } else {
+                                        next.frequencyIntervalYears = undefined;
+                                      }
+                                      setNewGoal(next);
+                                    }}
+                                    className={`py-4 rounded-2xl text-[10px] font-black uppercase tracking-tight border transition-all ${newGoal.frequency === f ? 'bg-teal-600 text-white border-teal-600 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-teal-200'}`}
+                                  >
+                                    {f}
+                                  </button>
+                                ))}
+                             </div>
+                             {(newGoal.frequency === 'Every 2–15 Years' || newGoal.frequency === 'Every 2-15 Years') && (
+                               <div className="mt-4">
+                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Interval (Years)</label>
+                                 <div className="flex items-center gap-3">
+                                   <input
+                                     type="number"
+                                     min={2}
+                                     max={15}
+                                     value={newGoal.frequencyIntervalYears ?? ''}
+                                     onChange={e => setNewGoal(prev => ({ ...prev, frequencyIntervalYears: parseInt(e.target.value) || 0 }))}
+                                     className="w-32 bg-white border border-slate-200 rounded-2xl px-4 py-3 font-black outline-none"
+                                   />
+                                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">2 to 15 years</span>
+                                 </div>
+                               </div>
+                             )}
+                          </div>
+                        )
                      )}
                   </div>
                   
@@ -431,22 +652,182 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
 
              {step === 3 && (
                <div className="space-y-12 animate-in fade-in duration-500">
-                  <div className="surface-dark p-16 rounded-[4rem] text-white space-y-10 relative overflow-hidden shadow-2xl">
-                     <div className="absolute top-0 right-0 w-96 h-96 bg-teal-600/10 blur-[150px] rounded-full translate-x-1/2 -translate-y-1/2" />
-                     <div className="relative z-10 text-left">
-                        <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.3em] mb-4">Capital Requirement (Today's Cost)</p>
-                        <div className="flex items-center gap-6">
-                           <span className="text-4xl md:text-7xl font-black tracking-tighter text-teal-500">{currencySymbol}</span>
-                           <input 
-                              type="number" 
-                              value={newGoal.targetAmountToday || ''} 
-                              onChange={e => setNewGoal({...newGoal, targetAmountToday: parseFloat(e.target.value)})} 
-                              className="w-full bg-transparent text-4xl md:text-7xl font-black outline-none focus:text-teal-400 placeholder:text-white/10" 
-                              placeholder="0.00"
-                           />
+                  {isRetirementGoal && (
+                    <div className="space-y-6 p-10 bg-white rounded-[3.5rem] border border-slate-200 shadow-sm text-left">
+                      <div className="flex items-center justify-between gap-6">
+                        <div>
+                          <p className="text-[12px] font-black text-slate-900 uppercase tracking-widest">Use Current Living Expenses for Retirement?</p>
+                          <p className="text-xs font-medium text-slate-400">Toggle off to provide an estimate or a detailed breakdown.</p>
                         </div>
-                     </div>
-                  </div>
+                        <button
+                          type="button"
+                          onClick={() => setNewGoal(prev => ({
+                            ...prev,
+                            retirementHandling: retirementMode === 'CurrentExpenses' ? 'Estimate' : 'CurrentExpenses'
+                          }))}
+                          className={`w-20 h-10 rounded-full transition-all relative ${retirementMode === 'CurrentExpenses' ? 'bg-teal-600' : 'bg-slate-200'}`}
+                        >
+                          <div className={`absolute top-1 w-8 h-8 rounded-full bg-white transition-all shadow-md ${retirementMode === 'CurrentExpenses' ? 'left-11' : 'left-1'}`} />
+                        </button>
+                      </div>
+
+                      {retirementMode === 'CurrentExpenses' && (
+                        <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                          <div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Monthly Living</p>
+                            <p className="text-xl font-black text-slate-900">{formatCurrency(currentLivingMonthly, currencyCountry)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Annual Retirement Need (Today)</p>
+                            <p className="text-xl font-black text-emerald-600">{formatCurrency(Math.round(currentLivingMonthly * 12), currencyCountry)}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {retirementMode !== 'CurrentExpenses' && (
+                        <div className="space-y-6">
+                          <div className="grid grid-cols-2 gap-3">
+                            {['Estimate', 'Detailed'].map(mode => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setNewGoal(prev => ({ ...prev, retirementHandling: mode as any }))}
+                                className={`py-4 rounded-2xl text-[10px] font-black uppercase tracking-tight border transition-all ${retirementMode === mode ? 'bg-teal-600 text-white border-teal-600 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-teal-200'}`}
+                              >
+                                {mode === 'Estimate' ? 'Set Estimate' : 'Detailed Breakdown'}
+                              </button>
+                            ))}
+                          </div>
+
+                          {retirementMode === 'Estimate' && (
+                            <div className="space-y-3">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Estimated Monthly Expense (Today)</label>
+                              <input
+                                type="number"
+                                value={newGoal.expectedMonthlyExpensesAfterRetirement ?? ''}
+                                onChange={e => setNewGoal(prev => ({ ...prev, expectedMonthlyExpensesAfterRetirement: parseFloat(e.target.value) }))}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-black outline-none"
+                                placeholder={`${currencySymbol} 0`}
+                              />
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Annual: {formatCurrency(Math.round(retirementAnnualTarget), currencyCountry)}</p>
+                            </div>
+                          )}
+
+                          {retirementMode === 'Detailed' && (
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Detailed Expense Breakup</p>
+                                  <p className="text-xs font-medium text-slate-400">Add multiple expense lines with optional date range.</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={addRetirementRow}
+                                  className="px-4 py-2 rounded-xl bg-teal-600 text-white text-[10px] font-black uppercase tracking-widest"
+                                >
+                                  + Add Expense
+                                </button>
+                              </div>
+                              {retirementRows.length === 0 ? (
+                                <div className="p-4 bg-slate-50 rounded-2xl text-[10px] font-bold text-slate-400">No expense lines added yet.</div>
+                              ) : (
+                                retirementRows.map((row, index) => (
+                                  <div key={`retirement-row-${index}`} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                    <div className="md:col-span-2 space-y-1">
+                                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</label>
+                                      <input
+                                        list="retirement-categories"
+                                        value={row.category}
+                                        onChange={e => updateRetirementRow(index, { category: e.target.value })}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold outline-none"
+                                        placeholder="Select or type"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Monthly Amount</label>
+                                      <input
+                                        type="number"
+                                        value={row.amount ?? ''}
+                                        onChange={e => updateRetirementRow(index, { amount: parseFloat(e.target.value) })}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold outline-none"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Start Year</label>
+                                      <input
+                                        type="number"
+                                        value={row.startYear ?? ''}
+                                        onChange={e => updateRetirementRow(index, { startYear: parseInt(e.target.value) || undefined })}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-3 font-bold outline-none"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">End Year</label>
+                                      <div className="flex gap-2 items-center">
+                                        <input
+                                          type="number"
+                                          value={row.endYear ?? ''}
+                                          onChange={e => updateRetirementRow(index, { endYear: parseInt(e.target.value) || undefined })}
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-3 font-bold outline-none"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => removeRetirementRow(index)}
+                                          className="p-3 bg-rose-50 text-rose-500 rounded-xl"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                              <datalist id="retirement-categories">
+                                {RETIREMENT_EXPENSE_CATEGORIES.map(cat => (
+                                  <option key={cat} value={cat} />
+                                ))}
+                              </datalist>
+                              <div className="p-4 bg-white border border-slate-200 rounded-2xl flex items-center justify-between text-[10px] font-black uppercase tracking-widest">
+                                <span className="text-slate-400">Monthly Total</span>
+                                <span className="text-slate-900">{formatCurrency(Math.round(retirementMonthlyFromDetails), currencyCountry)}</span>
+                                <span className="text-slate-400">Annual</span>
+                                <span className="text-emerald-600">{formatCurrency(Math.round(retirementAnnualTarget), currencyCountry)}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {isRetirementGoal ? (
+                    <div className="surface-dark p-16 rounded-[4rem] text-white space-y-10 relative overflow-hidden shadow-2xl">
+                      <div className="absolute top-0 right-0 w-96 h-96 bg-teal-600/10 blur-[150px] rounded-full translate-x-1/2 -translate-y-1/2" />
+                      <div className="relative z-10 text-left space-y-2">
+                        <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.3em]">Annual Retirement Requirement (Today)</p>
+                        <div className="text-4xl md:text-7xl font-black text-teal-500">
+                          {formatCurrency(Math.round(retirementAnnualTarget || 0), currencyCountry)}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="surface-dark p-16 rounded-[4rem] text-white space-y-10 relative overflow-hidden shadow-2xl">
+                       <div className="absolute top-0 right-0 w-96 h-96 bg-teal-600/10 blur-[150px] rounded-full translate-x-1/2 -translate-y-1/2" />
+                       <div className="relative z-10 text-left">
+                          <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.3em] mb-4">Capital Requirement (Today's Cost)</p>
+                          <div className="flex items-center gap-6">
+                             <span className="text-4xl md:text-7xl font-black tracking-tighter text-teal-500">{currencySymbol}</span>
+                             <input 
+                                type="number" 
+                                value={newGoal.targetAmountToday || ''} 
+                                onChange={e => setNewGoal({...newGoal, targetAmountToday: parseFloat(e.target.value)})} 
+                                className="w-full bg-transparent text-4xl md:text-7xl font-black outline-none focus:text-teal-400 placeholder:text-white/10" 
+                                placeholder="0.00"
+                             />
+                          </div>
+                       </div>
+                    </div>
+                  )}
 
                   <div className="space-y-6 p-10 bg-white rounded-[3.5rem] border border-slate-200 shadow-sm text-left">
                      <label className="text-[12px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2"><Wallet size={18} className="text-emerald-500"/> Current Funded Amount</label>

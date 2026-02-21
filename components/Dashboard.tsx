@@ -20,6 +20,8 @@ import { getRiskReturnAssumption } from '../lib/financeMath';
 import { formatCurrency } from '../lib/currency';
 import { buildReportSnapshot } from '../lib/report';
 import CommandReport from './CommandReport';
+import Cashflow from './Cashflow';
+import InvestmentPlan from './InvestmentPlan';
 
 interface DashboardProps {
   state: FinanceState;
@@ -229,6 +231,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
 
   const completionPct = journey.completionPct;
   const isFullyInitialized = completionPct === 100;
+  const gateUnlocked = isFullyInitialized;
 
   const wellnessData = useMemo(() => {
     const riskScore = state.riskProfile?.score || 20;
@@ -512,6 +515,42 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
       </div>
 
       <CommandReport snapshot={reportSnapshot} onOpen={setView} />
+
+      {gateUnlocked && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Wealth Radar</p>
+              <h3 className="text-2xl font-black text-slate-900">Cashflow + Projection Grid</h3>
+            </div>
+            <button
+              onClick={() => setView('cashflow')}
+              className="px-4 py-2 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition"
+            >
+              Open Full View
+            </button>
+          </div>
+          <Cashflow state={state} />
+        </div>
+      )}
+
+      {gateUnlocked && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Portfolio Map</p>
+              <h3 className="text-2xl font-black text-slate-900">Current vs Recommended Allocation</h3>
+            </div>
+            <button
+              onClick={() => setView('investment-plan')}
+              className="px-4 py-2 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition"
+            >
+              Open Full View
+            </button>
+          </div>
+          <InvestmentPlan state={state} />
+        </div>
+      )}
     </div>
   );
 };

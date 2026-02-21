@@ -21,6 +21,7 @@ import type {
   Notification,
   RiskProfile,
   InsuranceAnalysisConfig,
+  DiscountSettings,
 } from '../types';
 import { buildReportSnapshot } from '../lib/report';
 
@@ -132,6 +133,7 @@ function rowToGoal(row: Record<string, any>): Goal {
     resourceBuckets: row.resource_buckets         ?? [],
     isRecurring:     Boolean(row.is_recurring),
     frequency:       row.frequency ?? undefined,
+    frequencyIntervalYears: row.frequency_interval_years != null ? Number(row.frequency_interval_years) : undefined,
     startDate:       { type: row.start_date_type, value: Number(row.start_date_value) },
     endDate:         { type: row.end_date_type,   value: Number(row.end_date_value)   },
     targetAmountToday:   Number(row.target_amount_today ?? 0),
@@ -258,9 +260,28 @@ function rowToInsuranceAnalysis(row: Record<string, any>): InsuranceAnalysisConf
   return {
     inflation: Number(row.inflation ?? 0),
     investmentRate: Number(row.investment_rate ?? 0),
-    replacementYears: Number(row.replacement_years ?? 0),
-    immediateNeeds: Number(row.immediate_needs ?? 0),
+    immediateAnnualValue: Number(row.immediate_needs ?? 0),
+    immediateYears: Number(row.immediate_years ?? 1),
+    incomeAnnualValue: Number(row.income_annual_value ?? 0),
+    incomeYears: Number(row.replacement_years ?? 0),
     financialAssetDiscount: Number(row.financial_asset_discount ?? 0),
+    existingInsurance: Number(row.existing_insurance ?? 0),
+    liabilityCovers: row.liability_covers && typeof row.liability_covers === 'object' ? row.liability_covers : {},
+    goalCovers: row.goal_covers && typeof row.goal_covers === 'object' ? row.goal_covers : {},
+    assetCovers: row.asset_covers && typeof row.asset_covers === 'object'
+      ? row.asset_covers
+      : { financial: 50, personal: 0, inheritance: 100 },
+    inheritanceValue: Number(row.inheritance_value ?? 0),
+  };
+}
+
+function rowToDiscountSettings(row: Record<string, any>): DiscountSettings {
+  return {
+    useBuckets: Boolean(row.use_buckets),
+    defaultDiscountRate: Number(row.default_discount_rate ?? 0),
+    useBucketInflation: Boolean(row.use_bucket_inflation),
+    defaultInflationRate: Number(row.default_inflation_rate ?? 0),
+    buckets: Array.isArray(row.buckets) ? row.buckets : [],
   };
 }
 
@@ -278,7 +299,7 @@ export async function loadFinanceData(
     profileRes, familyRes, incomeRes,
     expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
     insuranceRes, transactionsRes, notificationsRes,
-    riskProfileRes, estateRes, insuranceAnalysisRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes, discountSettingsRes,
   ] = await Promise.all([
     supabase
       .from('profiles')
@@ -299,6 +320,7 @@ export async function loadFinanceData(
     supabase.from('risk_profiles').select('*').eq('user_id', user.id).maybeSingle(),
     supabase.from('estate_flags').select('*').eq('user_id', user.id).maybeSingle(),
     supabase.from('insurance_analysis_config').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('discount_settings').select('*').eq('user_id', user.id).maybeSingle(),
   ]);
 
   if (profileRes.error || !profileRes.data) {
@@ -324,9 +346,11 @@ export async function loadFinanceData(
     return incRow ? { ...member, income: rowToIncome(incRow) } : member;
   });
 
+  const onboardingDone = Boolean(p.onboarding_done);
+
   return {
     ...fallback,
-    isRegistered: true,
+    isRegistered: onboardingDone,
     profile: {
       firstName:      (p.first_name      as string) || fallback.profile.firstName,
       lastName:       (p.last_name       as string) || fallback.profile.lastName,
@@ -355,6 +379,9 @@ export async function loadFinanceData(
     insuranceAnalysis: insuranceAnalysisRes.data
       ? rowToInsuranceAnalysis(insuranceAnalysisRes.data)
       : fallback.insuranceAnalysis,
+    discountSettings: discountSettingsRes.data
+      ? rowToDiscountSettings(discountSettingsRes.data)
+      : fallback.discountSettings,
     transactions:     (transactionsRes.data ?? []).map(rowToTransaction),
     notifications:    (notificationsRes.data ?? []).map(rowToNotification),
     riskProfile:      riskProfileRes.data ? rowToRiskProfile(riskProfileRes.data) : fallback.riskProfile,
@@ -410,7 +437,7 @@ export async function saveFinanceData(
   const [
     expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
     insuranceRes, transactionsRes, notificationsRes,
-    riskProfileRes, estateRes, insuranceAnalysisRes, reportSnapshotRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes, discountSettingsRes, reportSnapshotRes,
   ] = await Promise.allSettled([
     saveExpenses(uid, state.detailedExpenses),
     saveCashflows(uid, state.cashflows),
@@ -424,6 +451,7 @@ export async function saveFinanceData(
     saveRiskProfile(uid, state.riskProfile),
     saveEstateFlags(uid, state.estate),
     saveInsuranceAnalysis(uid, state.insuranceAnalysis),
+    saveDiscountSettings(uid, state.discountSettings),
     saveReportSnapshot(uid, state),
   ]);
 
@@ -436,11 +464,11 @@ export async function saveFinanceData(
   if (transactionsRes.status === 'fulfilled' && transactionsRes.value) dbUpdates.transactions = transactionsRes.value;
   if (notificationsRes.status === 'fulfilled' && notificationsRes.value) dbUpdates.notifications = notificationsRes.value;
 
-  ['expenses','cashflows','investmentCommitments','assets','loans','goals','insurances','transactions','notifications','riskProfile','estateFlags','insuranceAnalysis','reportSnapshot'].forEach((label, i) => {
+  ['expenses','cashflows','investmentCommitments','assets','loans','goals','insurances','transactions','notifications','riskProfile','estateFlags','insuranceAnalysis','discountSettings','reportSnapshot'].forEach((label, i) => {
     const r = [
       expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
       insuranceRes, transactionsRes, notificationsRes,
-      riskProfileRes, estateRes, insuranceAnalysisRes, reportSnapshotRes,
+      riskProfileRes, estateRes, insuranceAnalysisRes, discountSettingsRes, reportSnapshotRes,
     ][i];
     if (r.status === 'rejected')
       console.error(`[dbService] ${label} save failed:`, (r as PromiseRejectedResult).reason);
@@ -449,7 +477,7 @@ export async function saveFinanceData(
   const failures = [
     expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
     insuranceRes, transactionsRes, notificationsRes,
-    riskProfileRes, estateRes, insuranceAnalysisRes, reportSnapshotRes,
+    riskProfileRes, estateRes, insuranceAnalysisRes, discountSettingsRes, reportSnapshotRes,
   ].filter(r => r.status === 'rejected').length;
 
   if (failures > 0) {
@@ -819,6 +847,7 @@ async function saveGoals(
     resource_buckets: g.resourceBuckets,
     is_recurring:     g.isRecurring,
     frequency:        g.frequency ?? null,
+    frequency_interval_years: g.frequencyIntervalYears ?? null,
     start_date_type:  g.startDate.type,
     start_date_value: g.startDate.value,
     end_date_type:    g.endDate.type,
@@ -1072,9 +1101,34 @@ async function saveInsuranceAnalysis(
       user_id: uid,
       inflation: config.inflation,
       investment_rate: config.investmentRate,
-      replacement_years: config.replacementYears,
-      immediate_needs: config.immediateNeeds,
+      replacement_years: config.incomeYears,
+      immediate_needs: config.immediateAnnualValue,
+      immediate_years: config.immediateYears,
+      income_annual_value: config.incomeAnnualValue,
       financial_asset_discount: config.financialAssetDiscount,
+      existing_insurance: config.existingInsurance,
+      liability_covers: config.liabilityCovers,
+      goal_covers: config.goalCovers,
+      asset_covers: config.assetCovers,
+      inheritance_value: config.inheritanceValue,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+async function saveDiscountSettings(
+  uid: string,
+  settings: DiscountSettings,
+): Promise<void> {
+  const { error } = await supabase
+    .from('discount_settings')
+    .upsert({
+      user_id: uid,
+      use_buckets: settings.useBuckets,
+      default_discount_rate: settings.defaultDiscountRate,
+      use_bucket_inflation: settings.useBucketInflation,
+      default_inflation_rate: settings.defaultInflationRate,
+      buckets: settings.buckets,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
   if (error) throw error;

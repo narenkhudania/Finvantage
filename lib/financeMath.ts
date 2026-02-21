@@ -1,4 +1,4 @@
-import type { CashflowFrequency, InvestmentFrequency, RelativeDate, RiskLevel } from '../types';
+import type { CashflowFrequency, DiscountBucket, DiscountSettings, InvestmentFrequency, RelativeDate, RiskLevel } from '../types';
 import { isValidDate } from './validation';
 
 export const currentYear = () => new Date().getFullYear();
@@ -75,11 +75,16 @@ export const getRiskReturnAssumption = (risk?: RiskLevel) => {
   }
 };
 
-export const getGoalIntervalYears = (frequency?: string) => {
+export const getGoalIntervalYears = (frequency?: string, intervalOverride?: number) => {
+  const normalized = frequency ?? '';
+  if (/every/i.test(normalized) && Number.isFinite(intervalOverride ?? NaN)) {
+    const rounded = Math.round(intervalOverride as number);
+    if (rounded >= 2) return rounded;
+  }
   if (frequency === 'Once in 10 years') return 10;
   if (frequency === 'Every 2-5 Years') return 3;
   if (frequency === 'Every 5-10 Years') return 7;
-  if (frequency === 'Every 2-15 Years') return 8;
+  if (frequency === 'Every 2-15 Years' || frequency === 'Every 2–15 Years') return 8;
   return 1;
 };
 
@@ -112,4 +117,85 @@ export const buildDiscountFactors = (
     rollingFactor *= (1 + rate / 100);
   }
   return factors;
+};
+
+export const resolveBucketRange = (
+  bucket: DiscountBucket,
+  retirementOffset: number,
+) => {
+  const start = bucket.startType === 'Retirement'
+    ? retirementOffset + bucket.startOffset
+    : bucket.startOffset;
+  let end = Infinity;
+  if (bucket.endType === 'Offset') {
+    end = bucket.endOffset ?? start;
+  }
+  if (bucket.endType === 'Retirement') {
+    end = retirementOffset + (bucket.endOffset ?? 0);
+  }
+  return { start, end };
+};
+
+export const getBucketRateForOffset = (
+  offset: number,
+  retirementOffset: number,
+  settings: DiscountSettings | undefined,
+  fallbackRate: number,
+  rateKey: 'discountRate' | 'inflationRate',
+) => {
+  if (!settings || (!settings.useBuckets && rateKey === 'discountRate')) {
+    return fallbackRate;
+  }
+  if (!settings.useBucketInflation && rateKey === 'inflationRate') {
+    return fallbackRate;
+  }
+  const buckets = settings.buckets || [];
+  const normalizedOffset = Math.max(0, offset);
+  for (const bucket of buckets) {
+    const { start, end } = resolveBucketRange(bucket, retirementOffset);
+    if (normalizedOffset >= start && normalizedOffset <= end) {
+      const rate = bucket[rateKey];
+      return Number.isFinite(rate as number) ? (rate as number) : fallbackRate;
+    }
+  }
+  return fallbackRate;
+};
+
+export const buildBucketDiscountFactors = (
+  currentYearValue: number,
+  endYear: number,
+  retirementYear: number,
+  settings: DiscountSettings | undefined,
+  fallbackRate: number,
+) => {
+  const factors: Record<number, number> = {};
+  let rollingFactor = 1;
+  const retirementOffset = retirementYear - currentYearValue;
+  for (let year = currentYearValue; year <= endYear; year++) {
+    factors[year] = rollingFactor;
+    const offset = year - currentYearValue;
+    const rate = getBucketRateForOffset(offset, retirementOffset, settings, fallbackRate, 'discountRate');
+    rollingFactor *= (1 + rate / 100);
+  }
+  return factors;
+};
+
+export const inflateByBuckets = (
+  base: number,
+  fromYear: number,
+  toYear: number,
+  currentYearValue: number,
+  retirementYear: number,
+  settings: DiscountSettings | undefined,
+  fallbackRate: number,
+) => {
+  if (toYear <= fromYear) return base;
+  let value = base;
+  const retirementOffset = retirementYear - currentYearValue;
+  for (let year = fromYear; year < toYear; year++) {
+    const offset = year - currentYearValue;
+    const rate = getBucketRateForOffset(offset, retirementOffset, settings, fallbackRate, 'inflationRate');
+    value *= (1 + rate / 100);
+  }
+  return value;
 };

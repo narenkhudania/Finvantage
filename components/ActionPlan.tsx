@@ -60,24 +60,43 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
     const analysis = state.insuranceAnalysis ?? {
       inflation: 6,
       investmentRate: 11.5,
-      replacementYears: 20,
-      immediateNeeds: 1000000,
+      immediateAnnualValue: 1000000,
+      immediateYears: 1,
+      incomeAnnualValue: 0,
+      incomeYears: 20,
       financialAssetDiscount: 50,
+      existingInsurance: 0,
+      liabilityCovers: {},
+      goalCovers: {},
+      assetCovers: { financial: 50, personal: 0, inheritance: 100 },
+      inheritanceValue: 0,
     };
-    const realRate = ((1 + analysis.investmentRate / 100) / (1 + analysis.inflation / 100)) - 1;
+    const pvAnnuity = (annual: number, years: number, rate: number) => {
+      if (years <= 0) return 0;
+      const r = rate / 100;
+      if (r === 0) return annual * years;
+      return annual * ((1 - Math.pow(1 + r, -years)) / r);
+    };
     const annualExpenses = monthlyExpenses * 12;
-    const pvFactor = realRate > 0
-      ? (1 - Math.pow(1 + realRate, -analysis.replacementYears)) / realRate
-      : analysis.replacementYears;
-    const expenseReplacement = annualExpenses * pvFactor;
+    const incomeAnnual = analysis.incomeAnnualValue || annualExpenses;
+    const immediatePV = pvAnnuity(analysis.immediateAnnualValue, analysis.immediateYears, analysis.investmentRate);
+    const incomePV = pvAnnuity(incomeAnnual, analysis.incomeYears, analysis.investmentRate);
     const totalDebt = state.loans.reduce((sum, loan) => sum + (loan.outstandingAmount || 0), 0);
-    const goalRequirements = state.goals.reduce((sum, goal) => sum + (goal.targetAmountToday || 0) * (goal.type === 'Retirement' ? 0.6 : 1), 0);
-    const totalExistingInsurance = state.insurance
+    const goalRequirements = state.goals.reduce((sum, goal) => sum + (goal.targetAmountToday || 0), 0);
+    const totalExistingInsurance = analysis.existingInsurance || state.insurance
       .filter(policy => policy.category === 'Life Insurance')
       .reduce((sum, policy) => sum + (policy.sumAssured || 0), 0);
-    const usableAssets = liquidAssets * (analysis.financialAssetDiscount / 100);
-    const totalRequirement = analysis.immediateNeeds + expenseReplacement + totalDebt + goalRequirements;
-    const totalAvailable = totalExistingInsurance + usableAssets;
+    const financialAssets = state.assets
+      .filter(asset => ['Liquid', 'Equity', 'Debt', 'Gold/Silver'].includes(asset.category))
+      .reduce((sum, asset) => sum + (asset.currentValue || 0), 0);
+    const personalAssets = state.assets
+      .filter(asset => ['Real Estate', 'Personal', 'Vehicle'].includes(asset.category))
+      .reduce((sum, asset) => sum + (asset.currentValue || 0), 0);
+    const coveredAssets = (financialAssets * ((analysis.assetCovers?.financial ?? analysis.financialAssetDiscount) / 100))
+      + (personalAssets * ((analysis.assetCovers?.personal ?? 0) / 100))
+      + ((analysis.inheritanceValue || 0) * ((analysis.assetCovers?.inheritance ?? 100) / 100));
+    const totalRequirement = immediatePV + incomePV + totalDebt + goalRequirements;
+    const totalAvailable = totalExistingInsurance + coveredAssets;
     const insuranceGap = Math.max(0, totalRequirement - totalAvailable);
 
     return {

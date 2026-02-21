@@ -39,6 +39,8 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
     'tax-estate',
     'action-plan',
     'monthly-savings',
+    'cashflow',
+    'investment-plan',
   ]);
   const showBack = commandDetailViews.has(title as View);
 

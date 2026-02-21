@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { 
   TrendingUp, TrendingDown, Target, Landmark, 
   ArrowUpRight, ArrowDownRight, Calendar, Calculator,
@@ -8,14 +8,34 @@ import {
   Zap, ArrowRight, DollarSign, ListOrdered, BarChartHorizontal
 } from 'lucide-react';
 import { FinanceState, Goal, RelativeDate, Asset } from '../types';
-import { formatCurrency, getCurrencySymbol } from '../lib/currency';
-import { annualizeAmount, buildDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getReturnRateForYear, getRiskReturnAssumption } from '../lib/financeMath';
+import { formatCurrency } from '../lib/currency';
+import { annualizeAmount, getGoalIntervalYears, getLifeExpectancyYear, getReturnRateForYear, getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
 import { inferTenureMonths } from '../lib/loanMath';
 
 const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
+  const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
+  const BUCKETS = [
+    { key: 'savings', label: 'Cash / Savings' },
+    { key: 'directEquity', label: 'Direct Equity' },
+    { key: 'mutualFunds', label: 'Mutual Funds' },
+    { key: 'gold', label: 'Gold / Silver' },
+    { key: 'realEstate', label: 'Property / Alt' },
+    { key: 'netSavings', label: 'Corpus' },
+  ] as const;
+
+  type BucketKey = typeof BUCKETS[number]['key'];
+
   const [activeTab, setActiveTab] = useState<'audit' | 'timeline'>('audit');
+  const [overrideEnabled, setOverrideEnabled] = useState(false);
+  const [overrideValue, setOverrideValue] = useState<number>(assumedReturn);
+  const [liquidationOrder, setLiquidationOrder] = useState<BucketKey[]>([
+    'savings',
+    'gold',
+    'realEstate',
+    'mutualFunds',
+    'directEquity',
+  ]);
   const currencyCountry = state.profile.country;
-  const currencySymbol = getCurrencySymbol(currencyCountry);
 
   const currentYear = new Date().getFullYear();
   const birthYear = state.profile.dob ? new Date(state.profile.dob).getFullYear() : currentYear - 30;
@@ -30,17 +50,6 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
     }
   };
 
-  const BUCKETS = [
-    { key: 'directEquity', label: 'Direct Equity' },
-    { key: 'savings', label: 'Savings A/C' },
-    { key: 'mutualFunds', label: 'Mutual Funds' },
-    { key: 'epf', label: 'EPF/GPF/DSOP' },
-    { key: 'nps', label: 'NPS-Employer' },
-    { key: 'netSavings', label: 'Net Savings' },
-  ] as const;
-
-  type BucketKey = typeof BUCKETS[number]['key'];
-
   const mapAssetToBucket = (asset: Asset): BucketKey | null => {
     const sub = asset.subCategory.toLowerCase();
     if (asset.category === 'Equity') {
@@ -48,35 +57,43 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
       return 'directEquity';
     }
     if (asset.category === 'Debt') {
-      if (sub.includes('epf') || sub.includes('gpf') || sub.includes('dsop')) return 'epf';
-      if (sub.includes('nps')) return 'nps';
+      if (sub.includes('epf') || sub.includes('gpf') || sub.includes('dsop')) return null;
+      if (sub.includes('nps')) return null;
       return 'savings';
     }
     if (asset.category === 'Liquid') return 'savings';
+    if (asset.category === 'Gold/Silver') return 'gold';
+    if (asset.category === 'Real Estate') return 'realEstate';
     return null;
   };
 
-  const mapCommitmentToBucket = (label: string): BucketKey => {
+  const mapCommitmentToBucket = (label: string): BucketKey | null => {
     const l = label.toLowerCase();
-    if (l.includes('nps')) return 'nps';
-    if (l.includes('epf') || l.includes('gpf') || l.includes('dsop')) return 'epf';
+    if (l.includes('nps')) return null;
+    if (l.includes('epf') || l.includes('gpf') || l.includes('dsop')) return null;
     if (l.includes('mutual') || l.includes('mf')) return 'mutualFunds';
     if (l.includes('equity')) return 'directEquity';
     return 'savings';
   };
 
 
-  const getGoalAmountForYear = (goal: Goal, year: number) => {
+  const getGoalAmountForYear = (goal: Goal, year: number, retirementYearValue: number) => {
     const s = resolveYear(goal.startDate);
     const e = resolveYear(goal.endDate);
     if (year < s || year > e) return 0;
     const yearsFromStart = Math.max(0, year - s);
-    const baseAmount = goal.startGoalAmount ?? goal.targetAmountToday;
-    const inflated = baseAmount * Math.pow(1 + (goal.inflationRate / 100), yearsFromStart);
+    const discountSettings = state.discountSettings;
+    const inflationFallback = discountSettings?.defaultInflationRate ?? goal.inflationRate;
+    const startAmount = discountSettings?.useBucketInflation
+      ? inflateByBuckets(goal.targetAmountToday, currentYear, s, currentYear, retirementYearValue, discountSettings, inflationFallback)
+      : (goal.startGoalAmount ?? goal.targetAmountToday);
+    const inflated = discountSettings?.useBucketInflation
+      ? inflateByBuckets(startAmount, s, year, currentYear, retirementYearValue, discountSettings, inflationFallback)
+      : startAmount * Math.pow(1 + (goal.inflationRate / 100), yearsFromStart);
     if (!goal.isRecurring) {
       return year === e ? inflated : 0;
     }
-    const interval = getGoalIntervalYears(goal.frequency);
+    const interval = getGoalIntervalYears(goal.frequency, goal.frequencyIntervalYears);
     if (interval > 1) {
       return (year - s) % interval === 0 ? inflated : 0;
     }
@@ -91,7 +108,25 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
     return state.goals.slice().sort((a, b) => a.priority - b.priority);
   }, [state.goals]);
 
-  const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
+  const effectiveReturn = overrideEnabled ? overrideValue : assumedReturn;
+
+  useEffect(() => {
+    if (!overrideEnabled) {
+      setOverrideValue(assumedReturn);
+    }
+  }, [assumedReturn, overrideEnabled]);
+
+  const moveLiquidation = (index: number, direction: -1 | 1) => {
+    setLiquidationOrder(prev => {
+      const next = [...prev];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return prev;
+      const temp = next[index];
+      next[index] = next[target];
+      next[target] = temp;
+      return next;
+    });
+  };
   const retirementYear = state.profile.dob ? (new Date(state.profile.dob).getFullYear() + state.profile.retirementAge) : (currentYear + 30);
 
   const fundingTimeline = useMemo(() => {
@@ -99,21 +134,7 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
     const endYear = getLifeExpectancyYear(state.profile.dob, state.profile.lifeExpectancy) ?? (currentYear + 35);
 
     const assets = state.assets || [];
-    const openingBalances: Record<BucketKey, number> = {
-      directEquity: 0,
-      savings: 0,
-      mutualFunds: 0,
-      epf: 0,
-      nps: 0,
-      netSavings: 0,
-    };
-
-    assets.forEach(a => {
-      const bucket = mapAssetToBucket(a);
-      if (!bucket) return;
-      openingBalances[bucket] += a.currentValue;
-    });
-
+    const sellableAssets = assets.filter(a => a.availableForGoals);
     const commitments = state.investmentCommitments || [];
     const hasCashflows = (state.cashflows || []).length > 0;
 
@@ -137,23 +158,97 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
     const incomeGrowthRate = totalIncomeForGrowth > 0 ? (weightedGrowth / totalIncomeForGrowth) / 100 : 0;
 
     const baseMonthlyExpenses = state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0) || state.profile.monthlyExpenses;
+    const discountSettings = state.discountSettings;
+    const defaultInflation = discountSettings?.defaultInflationRate ?? 6;
+    const applyInflation = (base: number, fromYear: number, toYear: number, fallbackRate: number) => {
+      if (toYear <= fromYear) return base;
+      if (!discountSettings?.useBucketInflation) {
+        const years = Math.max(0, toYear - fromYear);
+        return base * Math.pow(1 + fallbackRate / 100, years);
+      }
+      return inflateByBuckets(base, fromYear, toYear, currentYear, retirementYear, discountSettings, fallbackRate);
+    };
+
+    const defaultBucketReturns: Record<BucketKey, number> = {
+      savings: 3,
+      directEquity: 15,
+      mutualFunds: 13,
+      gold: 7,
+      realEstate: 5,
+      netSavings: effectiveReturn,
+    };
+
+    const futureAdds: Record<number, Record<BucketKey, number>> = {};
+    const bucketReturnBasis: Record<BucketKey, { value: number; weighted: number }> = {
+      savings: { value: 0, weighted: 0 },
+      directEquity: { value: 0, weighted: 0 },
+      mutualFunds: { value: 0, weighted: 0 },
+      gold: { value: 0, weighted: 0 },
+      realEstate: { value: 0, weighted: 0 },
+      netSavings: { value: 0, weighted: 0 },
+    };
+
+    sellableAssets.forEach(asset => {
+      const bucket = mapAssetToBucket(asset);
+      if (!bucket) return;
+      const availableYear = asset.availableFrom ?? currentYear;
+      const targetYear = Math.max(availableYear, startYear);
+      const yearsToAdd = Math.max(0, targetYear - currentYear);
+      const growthRate = asset.growthRate ?? defaultBucketReturns[bucket];
+      const valueAtAdd = asset.currentValue * Math.pow(1 + (growthRate / 100), yearsToAdd);
+      if (!futureAdds[targetYear]) {
+        futureAdds[targetYear] = {
+          savings: 0,
+          directEquity: 0,
+          mutualFunds: 0,
+          gold: 0,
+          realEstate: 0,
+          netSavings: 0,
+        };
+      }
+      futureAdds[targetYear][bucket] += valueAtAdd;
+      bucketReturnBasis[bucket].value += asset.currentValue;
+      bucketReturnBasis[bucket].weighted += asset.currentValue * growthRate;
+    });
+
+    const bucketReturnRates: Record<BucketKey, number> = { ...defaultBucketReturns };
+    BUCKETS.forEach(bucket => {
+      if (bucket.key === 'netSavings') return;
+      const basis = bucketReturnBasis[bucket.key];
+      if (basis.value > 0) {
+        bucketReturnRates[bucket.key] = basis.weighted / basis.value;
+      }
+    });
 
     const timeline: any[] = [];
-    let balances = { ...openingBalances };
-
-    const discountFactors = buildDiscountFactors(currentYear, endYear, retirementYear, assumedReturn);
+    let balances: Record<BucketKey, number> = {
+      savings: 0,
+      directEquity: 0,
+      mutualFunds: 0,
+      gold: 0,
+      realEstate: 0,
+      netSavings: 0,
+    };
 
     for (let year = startYear; year <= endYear; year++) {
       const yearIndex = year - startYear;
       const growthFactor = Math.pow(1 + incomeGrowthRate, yearIndex);
 
+      if (futureAdds[year]) {
+        BUCKETS.forEach(bucket => {
+          balances[bucket.key] += futureAdds[year][bucket.key] || 0;
+        });
+      }
+
+      const opening = { ...balances };
+      const openingTotal = BUCKETS.reduce((sum, b) => sum + opening[b.key], 0);
+
       const inflow = hasCashflows
         ? (state.cashflows || []).reduce((sum, flow) => {
             if (flow.flowType && flow.flowType !== 'Income') return sum;
             if (year < flow.startYear || year > flow.endYear) return sum;
-            const yearsFromStart = Math.max(0, year - flow.startYear);
             const baseAnnual = annualizeAmount(flow.amount, flow.frequency);
-            const adjusted = baseAnnual * Math.pow(1 + (flow.growthRate || 0) / 100, yearsFromStart);
+            const adjusted = applyInflation(baseAnnual, flow.startYear, year, flow.growthRate ?? defaultInflation);
             if (flow.frequency === 'One time') {
               return sum + (year === flow.startYear ? adjusted : 0);
             }
@@ -164,9 +259,8 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
       const expenseFromFlows = (state.cashflows || []).reduce((sum, flow) => {
         if (flow.flowType !== 'Expense') return sum;
         if (year < flow.startYear || year > flow.endYear) return sum;
-        const yearsFromStart = Math.max(0, year - flow.startYear);
         const baseAnnual = annualizeAmount(flow.amount, flow.frequency);
-        const adjusted = baseAnnual * Math.pow(1 + (flow.growthRate || 0) / 100, yearsFromStart);
+        const adjusted = applyInflation(baseAnnual, flow.startYear, year, flow.growthRate ?? defaultInflation);
         if (flow.frequency === 'One time') {
           return sum + (year === flow.startYear ? adjusted : 0);
         }
@@ -179,15 +273,15 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
             const sYear = e.startYear ?? startYear;
             const eYear = e.endYear ?? endYear;
             if (year < sYear || year > eYear) return sum;
-            const yearsFromStart = Math.max(0, year - sYear);
             const baseAnnual = annualizeAmount(e.amount, frequency);
-            const adjusted = baseAnnual * Math.pow(1 + (e.inflationRate || 0) / 100, yearsFromStart);
+            const inflationRate = Number.isFinite(e.inflationRate as number) ? (e.inflationRate as number) : defaultInflation;
+            const adjusted = applyInflation(baseAnnual, sYear, year, inflationRate);
             if (frequency === 'One time') {
               return sum + (year === sYear ? adjusted : 0);
             }
             return sum + adjusted;
           }, 0) + expenseFromFlows
-        : (baseMonthlyExpenses * 12 * Math.pow(1.06, yearIndex)) + expenseFromFlows;
+        : applyInflation(baseMonthlyExpenses * 12, currentYear, year, defaultInflation) + expenseFromFlows;
 
       const debtTotal = state.loans.reduce((sum, loan) => {
         const start = loan.startYear ?? startYear;
@@ -199,11 +293,11 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
       }, 0);
 
       const contributions: Record<BucketKey, number> = {
-        directEquity: 0,
         savings: 0,
+        directEquity: 0,
         mutualFunds: 0,
-        epf: 0,
-        nps: 0,
+        gold: 0,
+        realEstate: 0,
         netSavings: 0,
       };
 
@@ -213,7 +307,7 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
         const baseAnnual = annualizeAmount(c.amount, c.frequency);
         const adjusted = baseAnnual * Math.pow(1 + (c.stepUp || 0) / 100, yearsFromStart);
         const bucket = mapCommitmentToBucket(c.label);
-        contributions[bucket] += adjusted;
+        if (bucket) contributions[bucket] += adjusted;
       });
 
       assets.forEach(a => {
@@ -230,74 +324,114 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
 
       const committedTotal = BUCKETS.filter(b => b.key !== 'netSavings')
         .reduce((sum, b) => sum + contributions[b.key], 0);
-      const netSurplus = inflow - expenseTotal - debtTotal - committedTotal;
-      contributions.netSavings = netSurplus;
-      const contributionTotal = Object.values(contributions).reduce((sum, v) => sum + v, 0);
-
-      const opening = { ...balances };
-      const openingTotal = BUCKETS.filter(b => b.key !== 'netSavings')
-        .reduce((sum, b) => sum + opening[b.key], 0);
+      const netAvailable = inflow - expenseTotal - debtTotal - committedTotal + opening.netSavings;
 
       const goalMap: Record<string, number> = {};
       const goalNominalMap: Record<string, number> = {};
       orderedGoals.forEach(goal => {
-        const nominal = getGoalAmountForYear(goal, year);
-        const factor = discountFactors[year] || 1;
+        const nominal = getGoalAmountForYear(goal, year, retirementYear);
         goalNominalMap[goal.id] = nominal;
-        goalMap[goal.id] = nominal > 0 ? (nominal / factor) : 0;
+        goalMap[goal.id] = nominal;
       });
       const goalTotal = Object.values(goalMap).reduce((sum, v) => sum + v, 0);
 
       const withdrawals: Record<BucketKey, number> = {
-        directEquity: 0,
         savings: 0,
+        directEquity: 0,
         mutualFunds: 0,
-        epf: 0,
-        nps: 0,
+        gold: 0,
+        realEstate: 0,
         netSavings: 0,
       };
 
-      if (openingTotal > 0) {
-        BUCKETS.forEach(b => {
-          const weight = opening[b.key] / openingTotal;
-          withdrawals[b.key] = goalTotal * weight;
-        });
-      } else {
-        withdrawals.netSavings = goalTotal;
-      }
+      const assetPool = BUCKETS.filter(b => b.key !== 'netSavings')
+        .reduce((sum, b) => sum + balances[b.key], 0);
+      const fundable = Math.max(0, assetPool + netAvailable);
+      const goalFundedTotal = Math.min(goalTotal, fundable);
+      const assetNeeded = Math.max(0, goalTotal - netAvailable);
+      let remainingShortfall = Math.min(assetNeeded, assetPool);
+      const liquidationSequence = liquidationOrder
+        .map(key => BUCKETS.find(b => b.key === key))
+        .filter(Boolean) as typeof BUCKETS[number][];
+
+      const fallbackSequence = BUCKETS.filter(b => b.key !== 'netSavings')
+        .slice()
+        .sort((a, b) => (bucketReturnRates[a.key] ?? 0) - (bucketReturnRates[b.key] ?? 0));
+
+      (liquidationSequence.length > 0 ? liquidationSequence : fallbackSequence).forEach(bucket => {
+        if (remainingShortfall <= 0) return;
+        const available = balances[bucket.key];
+        const used = Math.min(available, remainingShortfall);
+        if (used > 0) {
+          balances[bucket.key] -= used;
+          withdrawals[bucket.key] = used;
+          remainingShortfall -= used;
+        }
+      });
 
       const withdrawalTotal = Object.values(withdrawals).reduce((sum, v) => sum + v, 0);
-      const fundingRatio = goalTotal > 0 ? Math.min(1, Math.max(0, withdrawalTotal / goalTotal)) : 1;
 
       const goalAchievements: Record<string, number> = {};
+      const goalFundingSplit: Record<string, { cash: number; assets: number }> = {};
+      let remainingToFund = fundable;
+      let cashRemaining = Math.max(0, netAvailable);
+      let assetRemaining = Math.max(0, assetNeeded - remainingShortfall);
       orderedGoals.forEach(goal => {
-        goalAchievements[goal.id] = goalMap[goal.id] > 0 ? (fundingRatio * 100) : 0;
+        const required = goalMap[goal.id] || 0;
+        if (required <= 0) {
+          goalAchievements[goal.id] = 0;
+          goalFundingSplit[goal.id] = { cash: 0, assets: 0 };
+          return;
+        }
+        const funded = Math.min(remainingToFund, required);
+        remainingToFund -= funded;
+
+        const cashUsed = Math.min(cashRemaining, required);
+        cashRemaining -= cashUsed;
+        const assetNeededForGoal = Math.max(0, required - cashUsed);
+        const assetUsed = Math.min(assetRemaining, assetNeededForGoal);
+        assetRemaining -= assetUsed;
+
+        goalFundingSplit[goal.id] = { cash: cashUsed, assets: assetUsed };
+        goalAchievements[goal.id] = required > 0 ? ((cashUsed + assetUsed) / required) * 100 : 0;
       });
 
       const returns: Record<BucketKey, number> = {
-        directEquity: 0,
         savings: 0,
+        directEquity: 0,
         mutualFunds: 0,
-        epf: 0,
-        nps: 0,
+        gold: 0,
+        realEstate: 0,
         netSavings: 0,
       };
       const closing: Record<BucketKey, number> = {
-        directEquity: 0,
         savings: 0,
+        directEquity: 0,
         mutualFunds: 0,
-        epf: 0,
-        nps: 0,
+        gold: 0,
+        realEstate: 0,
         netSavings: 0,
       };
 
-      const returnRate = getReturnRateForYear(year, currentYear, retirementYear, assumedReturn);
+      const newCorpus = Math.max(0, netAvailable - goalTotal);
+      balances.netSavings = newCorpus;
+      contributions.netSavings = newCorpus;
+
       BUCKETS.forEach(b => {
-        const baseValue = opening[b.key] + contributions[b.key] - withdrawals[b.key];
-        const growth = baseValue * (returnRate / 100);
+        if (b.key === 'netSavings') return;
+        balances[b.key] += contributions[b.key];
+      });
+
+      const returnRate = getReturnRateForYear(year, currentYear, retirementYear, effectiveReturn);
+      BUCKETS.forEach(b => {
+        const rate = b.key === 'netSavings' ? returnRate : (bucketReturnRates[b.key] ?? returnRate);
+        const baseValue = balances[b.key];
+        const growth = baseValue * (rate / 100);
         returns[b.key] = growth;
         closing[b.key] = baseValue + growth;
       });
+
+      balances = { ...closing };
 
       const returnTotal = Object.values(returns).reduce((sum, v) => sum + v, 0);
       const closingTotal = Object.values(closing).reduce((sum, v) => sum + v, 0);
@@ -308,7 +442,7 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
         opening,
         openingTotal,
         contributions,
-        contributionTotal,
+        contributionTotal: Object.values(contributions).reduce((sum, v) => sum + v, 0),
         goals: goalMap,
         goalsNominal: goalNominalMap,
         goalTotal,
@@ -318,15 +452,16 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
         returnTotal,
         closing,
         closingTotal,
-        achievementPct: fundingRatio * 100,
+        netAvailable,
+        assetNeeded,
+        goalFundingSplit,
+        achievementPct: goalTotal > 0 ? (goalFundedTotal / goalTotal) * 100 : 100,
         goalAchievements,
       });
-
-      balances = { ...closing };
     }
 
     return timeline;
-  }, [state, currentYear, orderedGoals, assumedReturn, resolveYear, birthYear]);
+  }, [state, currentYear, orderedGoals, effectiveReturn, resolveYear, birthYear, liquidationOrder, overrideEnabled, overrideValue]);
 
   const auditData = useMemo(() => {
     const s = state.profile.income;
@@ -488,8 +623,78 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
            <div className="p-8 md:p-12 border-b border-slate-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <h3 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Timeline Projections</h3>
               <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
-                <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Return: Variable by year</p>
+                <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Return Target: {effectiveReturn.toFixed(2)}%</p>
               </div>
+           </div>
+
+           <div className="px-8 md:px-12 pb-8 border-b border-slate-50 grid grid-cols-1 lg:grid-cols-2 gap-8">
+             <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4">
+               <div className="flex items-center justify-between">
+                 <div>
+                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Planner Return Target</p>
+                   <p className="text-xs text-slate-400 font-medium">Override risk profile for corpus growth.</p>
+                 </div>
+                 <button
+                   type="button"
+                   onClick={() => setOverrideEnabled(prev => !prev)}
+                   className={`w-16 h-9 rounded-full transition-all relative ${overrideEnabled ? 'bg-teal-600' : 'bg-slate-200'}`}
+                 >
+                   <div className={`absolute top-1 w-7 h-7 rounded-full bg-white transition-all shadow-md ${overrideEnabled ? 'left-8' : 'left-1'}`} />
+                 </button>
+               </div>
+               <div className="flex items-center gap-4">
+                 <input
+                   type="number"
+                   min={0}
+                   max={30}
+                   step={0.1}
+                   value={overrideValue}
+                   disabled={!overrideEnabled}
+                   onChange={e => setOverrideValue(Number.isFinite(parseFloat(e.target.value)) ? parseFloat(e.target.value) : assumedReturn)}
+                   className={`w-28 px-3 py-2 rounded-xl border text-sm font-black outline-none ${overrideEnabled ? 'bg-white border-slate-200 text-slate-900' : 'bg-slate-100 border-slate-100 text-slate-400'}`}
+                 />
+                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest">%</span>
+                 {!overrideEnabled && (
+                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Using Risk Profile</span>
+                 )}
+               </div>
+             </div>
+
+             <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4">
+               <div className="flex items-center justify-between">
+                 <div>
+                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Liquidation Priority</p>
+                   <p className="text-xs text-slate-400 font-medium">Order of asset sales when goals fall short.</p>
+                 </div>
+               </div>
+               <div className="space-y-2">
+                 {liquidationOrder.map((key, index) => {
+                   const bucket = BUCKETS.find(b => b.key === key);
+                   if (!bucket) return null;
+                   return (
+                     <div key={`liq-${key}`} className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-3 py-2">
+                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">{bucket.label}</span>
+                       <div className="flex items-center gap-2">
+                         <button
+                           type="button"
+                           onClick={() => moveLiquidation(index, -1)}
+                           className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 hover:text-teal-600"
+                         >
+                           ↑
+                         </button>
+                         <button
+                           type="button"
+                           onClick={() => moveLiquidation(index, 1)}
+                           className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 text-slate-500 hover:text-teal-600"
+                         >
+                           ↓
+                         </button>
+                       </div>
+                     </div>
+                   );
+                 })}
+               </div>
+             </div>
            </div>
            
            <div className="overflow-x-auto no-scrollbar">
@@ -499,7 +704,7 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                        <th rowSpan={2} className="px-6 md:px-8 py-5 md:py-7 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest">Year (Age)</th>
                        <th colSpan={BUCKETS.length + 1} className="px-3 py-4 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Opening Balances</th>
                        <th colSpan={BUCKETS.length + 1} className="px-3 py-4 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Committed Investments</th>
-                       <th colSpan={Math.max(orderedGoals.length, 1) + 1} className="px-3 py-4 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Goals (Discounted)</th>
+                       <th colSpan={Math.max(orderedGoals.length, 1) + 1} className="px-3 py-4 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Goals (Nominal)</th>
                        <th colSpan={BUCKETS.length + 1} className="px-3 py-4 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Withdrawals</th>
                        <th colSpan={BUCKETS.length + 1} className="px-3 py-4 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Returns</th>
                        <th colSpan={BUCKETS.length + 1} className="px-3 py-4 text-[10px] md:text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Closing Balances</th>
@@ -571,13 +776,23 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
                           {orderedGoals.length > 0 ? orderedGoals.map(goal => {
                             const value = row.goals[goal.id] || 0;
                             const nominal = row.goalsNominal?.[goal.id] || 0;
+                            const split = row.goalFundingSplit?.[goal.id];
                             return (
                               <td
                                 key={`goalv-${row.year}-${goal.id}`}
                                 title={nominal > 0 ? `Nominal: ${formatCurrency(Math.round(nominal), currencyCountry)}` : undefined}
                                 className="px-3 py-4 md:py-6 text-right text-[11px] font-bold text-slate-700"
                               >
-                                {value > 0 ? formatCurrency(Math.round(value), currencyCountry) : '—'}
+                                {value > 0 ? (
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span className="font-black">{formatCurrency(Math.round(value), currencyCountry)}</span>
+                                    {split && (split.cash > 0 || split.assets > 0) && (
+                                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                                        C {formatCurrency(Math.round(split.cash), currencyCountry)} · A {formatCurrency(Math.round(split.assets), currencyCountry)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : '—'}
                               </td>
                             );
                           }) : (

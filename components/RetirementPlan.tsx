@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { FinanceState, DetailedIncome } from '../types';
 import { formatCurrency } from '../lib/currency';
-import { getRiskReturnAssumption } from '../lib/financeMath';
+import { getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   BarChart, Bar, Legend, Cell 
@@ -27,16 +27,24 @@ const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
     const yearlySavings = (householdIncome - householdExpenses) * 12;
     const currentYear = new Date().getFullYear();
     const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
+    const discountSettings = state.discountSettings;
+    const retirementYear = state.profile.dob
+      ? new Date(state.profile.dob).getFullYear() + state.profile.retirementAge
+      : currentYear + 30;
+    const inflationFallback = discountSettings?.defaultInflationRate ?? 5;
     const data = [];
 
     for (let i = 0; i <= 20; i++) {
       const year = currentYear + i;
       currentWealth = (currentWealth * (1 + assumedReturn / 100)) + yearlySavings;
+      const inflationFactor = discountSettings?.useBucketInflation
+        ? inflateByBuckets(1, currentYear, year, currentYear, retirementYear, discountSettings, inflationFallback)
+        : Math.pow(1 + inflationFallback / 100, i);
       
       data.push({
         year: year.toString(),
         totalWealth: Math.round(currentWealth),
-        inflationAdjusted: Math.round(currentWealth / Math.pow(1.05, i)), // 5% inflation
+        inflationAdjusted: Math.round(currentWealth / (inflationFactor || 1)),
         savingsContribution: Math.round(yearlySavings * i)
       });
     }

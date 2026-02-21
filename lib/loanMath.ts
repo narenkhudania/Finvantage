@@ -38,10 +38,10 @@ export const buildAmortizationSchedule = (
   const emi = loan.emi > 0 ? loan.emi : calculateEmi(loan.outstandingAmount, loan.interestRate, totalMonths);
   const startYear = loan.startYear ?? new Date().getFullYear();
 
-  const currentYear = new Date().getFullYear();
   const lumpSumMap = (loan.lumpSumRepayments || []).reduce((acc, ls) => {
-    if (ls.year <= currentYear) return acc;
-    acc[ls.year] = (acc[ls.year] || 0) + ls.amount;
+    if (!ls || typeof ls.year !== 'number') return acc;
+    if (ls.year < startYear) return acc;
+    acc[ls.year] = (acc[ls.year] || 0) + (ls.amount || 0);
     return acc;
   }, {} as Record<number, number>);
 
@@ -107,4 +107,53 @@ export const buildAmortizationSchedule = (
     emi,
     basis,
   };
+};
+
+export const buildYearlyAmortization = (
+  schedule: Array<{
+    year: number;
+    openingBalance: number;
+    interest: number;
+    emi: number;
+    principal: number;
+    extraPayment: number;
+    closingBalance: number;
+  }>
+) => {
+  const yearMap = new Map<number, {
+    year: number;
+    openingBalance: number;
+    interest: number;
+    emi: number;
+    principal: number;
+    extraPayment: number;
+    closingBalance: number;
+  }>();
+
+  schedule.forEach((row) => {
+    const existing = yearMap.get(row.year);
+    if (!existing) {
+      yearMap.set(row.year, {
+        year: row.year,
+        openingBalance: row.openingBalance,
+        interest: row.interest,
+        emi: row.emi,
+        principal: row.principal,
+        extraPayment: row.extraPayment,
+        closingBalance: row.closingBalance,
+      });
+      return;
+    }
+    existing.interest += row.interest;
+    existing.emi += row.emi;
+    existing.principal += row.principal;
+    existing.extraPayment += row.extraPayment;
+    existing.closingBalance = row.closingBalance;
+  });
+
+  const rows = Array.from(yearMap.values()).sort((a, b) => a.year - b.year);
+  return rows.map((row, index) => ({
+    yearIndex: index + 1,
+    ...row,
+  }));
 };

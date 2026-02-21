@@ -55,8 +55,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
       label: 'Future Missions',
       items: [
         { id: 'goals', label: 'Life Goals', icon: Target },
-        { id: 'cashflow', label: 'Wealth Radar', icon: BarChartHorizontal },
-        { id: 'investment-plan', label: 'Portfolio Map', icon: Wallet },
       ]
     },
   ];

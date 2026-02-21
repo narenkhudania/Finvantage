@@ -258,6 +258,7 @@ create table if not exists public.goals (
   resource_buckets text[] default '{}',
   is_recurring boolean default false,
   frequency text,
+  frequency_interval_years integer,
   start_date_type text not null,
   start_date_value integer not null,
   end_date_type text not null,
@@ -542,7 +543,29 @@ create table if not exists public.insurance_analysis_config (
   investment_rate numeric not null default 11.5,
   replacement_years integer not null default 20,
   immediate_needs numeric not null default 1000000,
+  immediate_years integer not null default 1,
+  income_annual_value numeric not null default 0,
   financial_asset_discount numeric not null default 50,
+  existing_insurance numeric not null default 0,
+  liability_covers jsonb not null default '{}'::jsonb,
+  goal_covers jsonb not null default '{}'::jsonb,
+  asset_covers jsonb not null default '{"financial":50,"personal":0,"inheritance":100}'::jsonb,
+  inheritance_value numeric not null default 0,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Discount Settings
+-- ─────────────────────────────────────────────────────────────
+
+create table if not exists public.discount_settings (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  use_buckets boolean default false,
+  default_discount_rate numeric not null default 10.15,
+  use_bucket_inflation boolean default false,
+  default_inflation_rate numeric not null default 6,
+  buckets jsonb not null default '[]'::jsonb,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -581,6 +604,7 @@ alter table public.notifications enable row level security;
 alter table public.risk_profiles enable row level security;
 alter table public.estate_flags enable row level security;
 alter table public.insurance_analysis_config enable row level security;
+alter table public.discount_settings enable row level security;
 alter table public.report_snapshots enable row level security;
 
 -- Insurances
@@ -683,6 +707,23 @@ for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 drop policy if exists insurance_analysis_delete on public.insurance_analysis_config;
 create policy insurance_analysis_delete on public.insurance_analysis_config
+for delete using (user_id = auth.uid());
+
+-- Discount Settings
+drop policy if exists discount_settings_select on public.discount_settings;
+create policy discount_settings_select on public.discount_settings
+for select using (user_id = auth.uid());
+
+drop policy if exists discount_settings_insert on public.discount_settings;
+create policy discount_settings_insert on public.discount_settings
+for insert with check (user_id = auth.uid());
+
+drop policy if exists discount_settings_update on public.discount_settings;
+create policy discount_settings_update on public.discount_settings
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+drop policy if exists discount_settings_delete on public.discount_settings;
+create policy discount_settings_delete on public.discount_settings
 for delete using (user_id = auth.uid());
 
 -- Report Snapshots

@@ -21,11 +21,37 @@ export type LoanSourceType = 'Bank' | 'NBFC' | 'Friends & Family';
 export type LoanType = 'Home Loan' | 'Personal Loan' | 'Credit Card EMI' | 'OD' | 'Car Loan' | 'Property Purchase' | 'Others';
 export type RiskLevel = 'Conservative' | 'Moderate' | 'Balanced' | 'Aggressive' | 'Very Aggressive';
 
+export type DiscountBucketStartType = 'Offset' | 'Retirement';
+export type DiscountBucketEndType = 'Offset' | 'Retirement' | 'Infinity';
+
+export interface DiscountBucket {
+  id: string;
+  name: string;
+  startType: DiscountBucketStartType;
+  startOffset: number;
+  endType: DiscountBucketEndType;
+  endOffset?: number;
+  discountRate?: number;
+  inflationRate?: number;
+}
+
+export interface DiscountSettings {
+  useBuckets: boolean;
+  defaultDiscountRate: number;
+  useBucketInflation: boolean;
+  defaultInflationRate: number;
+  buckets: DiscountBucket[];
+}
+
 export type GoalType = 
   | 'Retirement' 
   | 'Child Education' 
   | 'Child Marriage' 
   | 'Vacation' 
+  | 'Vacation - Domestic'
+  | 'Vacation - International'
+  | 'Asset Purchase'
+  | 'Asset'
   | 'Car' 
   | 'Land / Home' 
   | 'Commercial' 
@@ -143,7 +169,8 @@ export interface Goal {
   priority: number;
   resourceBuckets: ResourceBucket[];
   isRecurring: boolean;
-  frequency?: 'Monthly' | 'Yearly' | 'Every 2-5 Years' | 'Every 5-10 Years' | 'Every 2-15 Years' | 'Once in 10 years';
+  frequency?: 'Monthly' | 'Yearly' | 'Every 2-5 Years' | 'Every 5-10 Years' | 'Every 2-15 Years' | 'Every 2–15 Years' | 'Once in 10 years';
+  frequencyIntervalYears?: number;
   startDate: RelativeDate;
   endDate: RelativeDate;
   targetAmountToday: number;
@@ -160,9 +187,20 @@ export interface Goal {
 export interface InsuranceAnalysisConfig {
   inflation: number;
   investmentRate: number;
-  replacementYears: number;
-  immediateNeeds: number;
+  immediateAnnualValue: number;
+  immediateYears: number;
+  incomeAnnualValue: number;
+  incomeYears: number;
   financialAssetDiscount: number;
+  existingInsurance: number;
+  liabilityCovers: Record<string, number>;
+  goalCovers: Record<string, number>;
+  assetCovers: {
+    financial: number;
+    personal: number;
+    inheritance: number;
+  };
+  inheritanceValue: number;
 }
 
 export interface AllocationBreakdown {
@@ -236,6 +274,16 @@ export interface ReportSnapshot {
       year?: number;
       amount?: number;
     };
+    costSummary: {
+      corpusToday: number;
+      corpusAtStart: number;
+      totalSpent: number;
+    };
+    returnComparison: {
+      currentReturn: number;
+      recommendedReturn: number;
+      delta: number;
+    };
   };
   riskProfile: {
     score: number;
@@ -283,6 +331,7 @@ export interface FinanceState {
   insurance: Insurance[];
   insuranceAnalysis: InsuranceAnalysisConfig;
   goals: Goal[];
+  discountSettings: DiscountSettings;
   estate: {
     hasWill: boolean;
     nominationsUpdated: boolean;

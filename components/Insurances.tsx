@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { clampNumber, parseNumber } from '../lib/validation';
 import { formatCurrency } from '../lib/currency';
-import { buildDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption } from '../lib/financeMath';
+import { buildBucketDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
 
 const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
@@ -42,19 +42,30 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
     return state.family.find(f => f.id === id)?.name || 'Unknown';
   };
 
+  const pvAnnuity = (annual: number, years: number, rate: number) => {
+    if (years <= 0) return 0;
+    const r = rate / 100;
+    if (r === 0) return annual * years;
+    return annual * ((1 - Math.pow(1 + r, -years)) / r);
+  };
+
   const hlvData = useMemo(() => {
     const annualExpenses = (state.detailedExpenses.reduce((s, e) => s + e.amount, 0) || state.profile.monthlyExpenses) * 12;
-    const realRate = ((1 + analysisConfig.investmentRate / 100) / (1 + analysisConfig.inflation / 100)) - 1;
-    const pvFactor = realRate > 0
-      ? (1 - Math.pow(1 + realRate, -analysisConfig.replacementYears)) / realRate
-      : analysisConfig.replacementYears;
-    // Annuity due (expenses at period start)
-    const expenseReplacement = annualExpenses * pvFactor * (1 + realRate);
+    const investmentRate = analysisConfig.investmentRate;
+    const immediateAnnual = analysisConfig.immediateAnnualValue;
+    const immediateYears = analysisConfig.immediateYears;
+    const incomeAnnual = analysisConfig.incomeAnnualValue;
+    const incomeYears = analysisConfig.incomeYears;
+
+    const immediatePV = pvAnnuity(immediateAnnual, immediateYears, investmentRate);
+    const incomePV = pvAnnuity(incomeAnnual, incomeYears, investmentRate);
 
     const retirementYear = state.profile.dob
       ? new Date(state.profile.dob).getFullYear() + state.profile.retirementAge
       : new Date().getFullYear() + 30;
     const baseReturn = getRiskReturnAssumption(state.riskProfile?.level);
+    const discountSettings = state.discountSettings;
+    const discountFallback = discountSettings?.defaultDiscountRate ?? baseReturn;
 
     const resolveYear = (rel: any): number => {
       const birthYear = state.profile.dob ? new Date(state.profile.dob).getFullYear() : new Date().getFullYear() - 30;
@@ -73,34 +84,17 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
       maxGoalYear,
       getLifeExpectancyYear(state.profile.dob, state.profile.lifeExpectancy) ?? (new Date().getFullYear() + 35),
     );
-    const discountFactors = buildDiscountFactors(new Date().getFullYear(), endYear, retirementYear, baseReturn);
-
-    const goalCoverMap: Record<string, number> = {
-      'Retirement': 60,
-      'Vacation': 60,
-      'Car': 100,
-      'Child Education': 100,
-      'Child Marriage': 100,
-      'Others': 100,
-      'Land / Home': 0,
-      'Corpus for Start-up': 0,
-      'Commercial': 0,
-      'Home Renovation': 100,
-      'Holiday Home': 0,
-      'Charity / Philanthropy': 0,
-      'Child-birth Expenses': 100,
-      'Big Purchases': 100,
-      'Estate for Children': 100,
-    };
+    const discountFactors = buildBucketDiscountFactors(new Date().getFullYear(), endYear, retirementYear, discountSettings, discountFallback);
 
     const goals = state.goals.map(goal => {
       const sYear = resolveYear(goal.startDate);
       const eYear = resolveYear(goal.endDate);
-      const inflation = goal.inflationRate / 100;
+      const inflationFallback = discountSettings?.defaultInflationRate ?? goal.inflationRate;
       const yearsToStart = Math.max(0, sYear - new Date().getFullYear());
-      const startFV = goal.startGoalAmount ?? (goal.targetAmountToday * Math.pow(1 + inflation, yearsToStart));
+      const startFV = discountSettings?.useBucketInflation
+        ? inflateByBuckets(goal.targetAmountToday, new Date().getFullYear(), sYear, new Date().getFullYear(), retirementYear, discountSettings, inflationFallback)
+        : (goal.startGoalAmount ?? (goal.targetAmountToday * Math.pow(1 + (goal.inflationRate / 100), yearsToStart)));
 
-      let sumCorpus = 0;
       let currentCorpus = 0;
       for (let year = sYear; year <= eYear; year++) {
         let nominal = 0;
@@ -108,8 +102,10 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
           nominal = year === eYear ? startFV : 0;
         } else {
           const yearsFromStart = Math.max(0, year - sYear);
-          const baseAmount = startFV * Math.pow(1 + inflation, yearsFromStart);
-          const interval = getGoalIntervalYears(goal.frequency);
+          const baseAmount = discountSettings?.useBucketInflation
+            ? inflateByBuckets(startFV, sYear, year, new Date().getFullYear(), retirementYear, discountSettings, inflationFallback)
+            : startFV * Math.pow(1 + (goal.inflationRate / 100), yearsFromStart);
+          const interval = getGoalIntervalYears(goal.frequency, goal.frequencyIntervalYears);
           if (interval > 1 && ((year - sYear) % interval !== 0)) {
             nominal = 0;
           } else if (goal.frequency === 'Monthly') {
@@ -119,12 +115,11 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
           }
         }
         if (nominal <= 0) continue;
-        sumCorpus += nominal;
         const factor = discountFactors[year] || 1;
         currentCorpus += nominal / factor;
       }
 
-      const coverPct = goalCoverMap[goal.type] ?? 100;
+      const coverPct = analysisConfig.goalCovers?.[goal.id] ?? 100;
       const coveredValue = currentCorpus * (coverPct / 100);
 
       return {
@@ -132,68 +127,101 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
         type: goal.type,
         coverPct,
         currentCorpus,
-        sumCorpus,
         coveredValue,
       };
     });
 
-    const liabilities = state.loans.map(loan => ({
-      id: loan.id,
-      type: loan.type,
-      value: loan.outstandingAmount,
-      coverPct: 100,
-      coveredValue: loan.outstandingAmount,
-    }));
+    const liabilities = state.loans.map(loan => {
+      const coverPct = analysisConfig.liabilityCovers?.[loan.id] ?? 100;
+      return {
+        id: loan.id,
+        type: loan.type,
+        value: loan.outstandingAmount,
+        coverPct,
+        coveredValue: loan.outstandingAmount * (coverPct / 100),
+      };
+    });
 
     const debtRepayment = liabilities.reduce((sum, l) => sum + l.coveredValue, 0);
     const financialGoals = goals.reduce((sum, g) => sum + g.coveredValue, 0);
 
-    const financialAssets = state.assets.filter(a => ['Liquid', 'Equity', 'Debt'].includes(a.category)).reduce((sum, a) => sum + a.currentValue, 0);
+    const financialAssets = state.assets.filter(a => ['Liquid', 'Equity', 'Debt', 'Gold/Silver'].includes(a.category)).reduce((sum, a) => sum + a.currentValue, 0);
     const personalAssets = state.assets.filter(a => ['Real Estate', 'Personal', 'Vehicle'].includes(a.category)).reduce((sum, a) => sum + a.currentValue, 0);
-    const assetCoveragePct = analysisConfig.financialAssetDiscount;
-    const assetCovered = financialAssets * (assetCoveragePct / 100);
+    const inheritanceValue = analysisConfig.inheritanceValue || 0;
+    const assetCovers = analysisConfig.assetCovers || { financial: 50, personal: 0, inheritance: 100 };
+    const assetCovered = (financialAssets * (assetCovers.financial / 100))
+      + (personalAssets * (assetCovers.personal / 100))
+      + (inheritanceValue * (assetCovers.inheritance / 100));
 
-    const totalExistingInsurance = state.insurance
+    const policyInsuranceTotal = state.insurance
       .filter(p => p.category === 'Life Insurance')
       .reduce((sum, p) => sum + p.sumAssured, 0);
+    const totalExistingInsurance = analysisConfig.existingInsurance;
 
-    const totalRequirement = analysisConfig.immediateNeeds + expenseReplacement + debtRepayment + financialGoals;
+    const totalRequirement = immediatePV + incomePV + debtRepayment + financialGoals;
     const totalAvailable = assetCovered + totalExistingInsurance;
-    const gap = totalAvailable - totalRequirement;
+    const shortfall = Math.max(0, totalRequirement - totalAvailable);
+    const surplus = Math.max(0, totalAvailable - totalRequirement);
 
     return {
-      immediateNeeds: analysisConfig.immediateNeeds,
       annualExpenses,
-      expenseReplacement,
+      immediateAnnual,
+      immediateYears,
+      immediatePV,
+      incomeAnnual,
+      incomeYears,
+      incomePV,
       liabilities,
       debtRepayment,
       goals,
       financialGoals,
       financialAssets,
       personalAssets,
-      assetCoveragePct,
+      inheritanceValue,
+      assetCovers,
       assetCovered,
       totalExistingInsurance,
+      policyInsuranceTotal,
       totalRequirement,
       totalAvailable,
-      gap,
+      shortfall,
+      surplus,
       safetyScore: Math.min(100, Math.round((totalAvailable / (totalRequirement || 1)) * 100)),
     };
   }, [state, analysisConfig]);
 
-  const updateAnalysisConfig = (field: keyof typeof analysisConfig, value: number) => {
-    const sanitized = parseNumber(value, analysisConfig[field] as number);
-    let nextValue = sanitized;
-    if (field === 'inflation') nextValue = clampNumber(sanitized, 0, 15);
-    if (field === 'investmentRate') nextValue = clampNumber(sanitized, 0, 25);
-    if (field === 'replacementYears') nextValue = clampNumber(sanitized, 1, 60);
-    if (field === 'immediateNeeds') nextValue = Math.max(0, sanitized);
-    if (field === 'financialAssetDiscount') nextValue = clampNumber(sanitized, 0, 100);
-
+  const updateAnalysisConfig = (patch: Partial<typeof analysisConfig>) => {
     updateState({
       insuranceAnalysis: {
         ...analysisConfig,
-        [field]: nextValue,
+        ...patch,
+      },
+    });
+  };
+
+  const updateNumericField = (field: keyof typeof analysisConfig, value: number, min = 0, max?: number) => {
+    const sanitized = parseNumber(value, (analysisConfig as any)[field] as number);
+    let nextValue = Math.max(min, sanitized);
+    if (Number.isFinite(max as number)) nextValue = clampNumber(nextValue, min, max as number);
+    updateAnalysisConfig({ [field]: nextValue } as Partial<typeof analysisConfig>);
+  };
+
+  const updateCoverMap = (key: 'liabilityCovers' | 'goalCovers', id: string, value: number) => {
+    const sanitized = clampNumber(parseNumber(value, 100), 0, 100);
+    updateAnalysisConfig({
+      [key]: {
+        ...(analysisConfig as any)[key],
+        [id]: sanitized,
+      },
+    } as Partial<typeof analysisConfig>);
+  };
+
+  const updateAssetCover = (field: 'financial' | 'personal' | 'inheritance', value: number) => {
+    const sanitized = clampNumber(parseNumber(value, 0), 0, 100);
+    updateAnalysisConfig({
+      assetCovers: {
+        ...analysisConfig.assetCovers,
+        [field]: sanitized,
       },
     });
   };
@@ -218,7 +246,7 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
           
           <div className="bg-white/5 border border-white/10 p-8 md:p-10 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner w-full md:w-auto md:min-w-[280px]">
              <p className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Protection Status</p>
-             <h4 className={`text-4xl md:text-5xl font-black tracking-tighter ${hlvData.gap > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+             <h4 className={`text-4xl md:text-5xl font-black tracking-tighter ${hlvData.shortfall > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                {hlvData.safetyScore}%
              </h4>
           </div>
@@ -234,42 +262,71 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
       {activeTab === 'analysis' ? (
         <div className="space-y-8 animate-in slide-in-from-bottom-6 duration-700">
           <div className="bg-white p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] border border-slate-200 shadow-sm">
-            <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-8">Parameters</h3>
+            <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-8">Life Cover Inputs</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Inflation</label>
-                  <span className="text-lg md:text-xl font-black text-teal-600">{analysisConfig.inflation}%</span>
-                </div>
-                <input type="range" min="0" max="15" step="0.5" value={analysisConfig.inflation} onChange={e => updateAnalysisConfig('inflation', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-teal-600" />
+                <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Immediate Annual Value</label>
+                <input
+                  type="number"
+                  value={analysisConfig.immediateAnnualValue}
+                  onChange={e => updateNumericField('immediateAnnualValue', parseFloat(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-5 py-3 font-bold"
+                />
               </div>
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Investment Rate</label>
-                  <span className="text-lg md:text-xl font-black text-teal-600">{analysisConfig.investmentRate}%</span>
-                </div>
-                <input type="range" min="0" max="25" step="0.5" value={analysisConfig.investmentRate} onChange={e => updateAnalysisConfig('investmentRate', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-teal-600" />
+                <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Immediate Years</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={analysisConfig.immediateYears}
+                  onChange={e => updateNumericField('immediateYears', parseFloat(e.target.value), 1, 60)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-5 py-3 font-bold"
+                />
               </div>
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Replacement Years</label>
-                  <span className="text-lg md:text-xl font-black text-teal-600">{analysisConfig.replacementYears}</span>
-                </div>
-                <input type="range" min="1" max="60" step="1" value={analysisConfig.replacementYears} onChange={e => updateAnalysisConfig('replacementYears', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-teal-600" />
+                <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Income Annual Replacement</label>
+                <input
+                  type="number"
+                  value={analysisConfig.incomeAnnualValue}
+                  onChange={e => updateNumericField('incomeAnnualValue', parseFloat(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-5 py-3 font-bold"
+                />
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Current annual expenses: {formatCurrency(Math.round(hlvData.annualExpenses), currencyCountry)}</p>
               </div>
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Immediate Cash Needs</label>
-                  <span className="text-lg md:text-xl font-black text-teal-600">{formatCurrency(analysisConfig.immediateNeeds, currencyCountry)}</span>
-                </div>
-                <input type="number" value={analysisConfig.immediateNeeds} onChange={e => updateAnalysisConfig('immediateNeeds', parseFloat(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-5 py-3 font-bold" />
+                <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Income Replacement Years</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={analysisConfig.incomeYears}
+                  onChange={e => updateNumericField('incomeYears', parseFloat(e.target.value), 1, 60)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-5 py-3 font-bold"
+                />
               </div>
               <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Financial Asset Coverage</label>
-                  <span className="text-lg md:text-xl font-black text-teal-600">{analysisConfig.financialAssetDiscount}%</span>
-                </div>
-                <input type="range" min="0" max="100" step="5" value={analysisConfig.financialAssetDiscount} onChange={e => updateAnalysisConfig('financialAssetDiscount', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-teal-600" />
+                <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Investment Rate (%)</label>
+                <input
+                  type="number"
+                  value={analysisConfig.investmentRate}
+                  onChange={e => updateNumericField('investmentRate', parseFloat(e.target.value), 0, 25)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-5 py-3 font-bold"
+                />
+              </div>
+              <div className="space-y-3">
+                <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">Existing Insurance</label>
+                <input
+                  type="number"
+                  value={analysisConfig.existingInsurance}
+                  onChange={e => updateNumericField('existingInsurance', parseFloat(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-[1.5rem] px-5 py-3 font-bold"
+                />
+                <button
+                  type="button"
+                  onClick={() => updateAnalysisConfig({ existingInsurance: hlvData.policyInsuranceTotal })}
+                  className="text-[9px] font-black uppercase tracking-widest text-teal-600"
+                >
+                  Use policy total ({formatCurrency(Math.round(hlvData.policyInsuranceTotal), currencyCountry)})
+                </button>
               </div>
             </div>
           </div>
@@ -277,7 +334,7 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
           <div className="bg-white rounded-[2rem] md:rounded-[4rem] border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-8 border-b border-slate-100 bg-slate-50/60">
               <h3 className="text-lg md:text-xl font-black text-slate-900">Term Insurance Calculation</h3>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">Growth / Inflation: {analysisConfig.inflation}%</p>
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">Present Value of Cashflows</p>
             </div>
             <div className="p-6 md:p-10 overflow-x-auto">
               <table className="w-full min-w-[600px] text-left">
@@ -293,21 +350,21 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                 <tbody className="divide-y divide-slate-100">
                   <tr>
                     <td className="px-6 py-4 text-xs font-bold text-slate-700">Immediate Cash Needs</td>
-                    <td className="px-6 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(analysisConfig.immediateNeeds, currencyCountry)}</td>
-                    <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">1</td>
+                    <td className="px-6 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(analysisConfig.immediateAnnualValue, currencyCountry)}</td>
+                    <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{analysisConfig.immediateYears}</td>
                     <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{analysisConfig.investmentRate}%</td>
-                    <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(analysisConfig.immediateNeeds, currencyCountry)}</td>
+                    <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(hlvData.immediatePV), currencyCountry)}</td>
                   </tr>
                   <tr>
                     <td className="px-6 py-4 text-xs font-bold text-slate-700">Income/Expense Replacement</td>
-                    <td className="px-6 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(hlvData.annualExpenses, currencyCountry)}</td>
-                    <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{analysisConfig.replacementYears}</td>
+                    <td className="px-6 py-4 text-xs font-bold text-slate-700 text-right">{formatCurrency(hlvData.incomeAnnual, currencyCountry)}</td>
+                    <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{analysisConfig.incomeYears}</td>
                     <td className="px-4 py-4 text-xs font-bold text-slate-600 text-right">{analysisConfig.investmentRate}%</td>
-                    <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(hlvData.expenseReplacement), currencyCountry)}</td>
+                    <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(hlvData.incomePV), currencyCountry)}</td>
                   </tr>
                   <tr className="bg-slate-50/60">
                     <td className="px-6 py-4 text-xs font-black text-slate-500" colSpan={4}>Total</td>
-                    <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(hlvData.immediateNeeds + hlvData.expenseReplacement), currencyCountry)}</td>
+                    <td className="px-6 py-4 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(hlvData.immediatePV + hlvData.incomePV), currencyCountry)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -334,7 +391,16 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                       <tr key={loan.id}>
                         <td className="px-4 py-3 text-xs font-bold text-slate-700">{loan.type}</td>
                         <td className="px-4 py-3 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(loan.value), currencyCountry)}</td>
-                        <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">{loan.coverPct}%</td>
+                        <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={loan.coverPct}
+                            onChange={e => updateCoverMap('liabilityCovers', loan.id, parseFloat(e.target.value))}
+                            className="w-16 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-right font-bold"
+                          />
+                        </td>
                         <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(loan.coveredValue), currencyCountry)}</td>
                       </tr>
                     ))}
@@ -352,8 +418,8 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                 <h3 className="text-lg font-black text-slate-900">Requirements</h3>
               </div>
               <div className="p-6 space-y-3">
-                <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Immediate Cash Needs</span><span className="text-slate-900">{formatCurrency(hlvData.immediateNeeds, currencyCountry)}</span></div>
-                <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Income/Expense Replacement</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.expenseReplacement), currencyCountry)}</span></div>
+                <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Immediate Cash Needs (PV)</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.immediatePV), currencyCountry)}</span></div>
+                <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Income Replacement (PV)</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.incomePV), currencyCountry)}</span></div>
                 <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Debt Repayment</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.debtRepayment), currencyCountry)}</span></div>
                 <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Financial Goals</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.financialGoals), currencyCountry)}</span></div>
                 <div className="flex justify-between text-sm font-black border-t border-slate-100 pt-3"><span className="text-slate-600">Total Requirement</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.totalRequirement), currencyCountry)}</span></div>
@@ -380,7 +446,16 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                     <tr key={goal.id}>
                       <td className="px-4 py-3 text-xs font-bold text-slate-700">{goal.type}</td>
                       <td className="px-4 py-3 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(goal.currentCorpus), currencyCountry)}</td>
-                      <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">{goal.coverPct}%</td>
+                      <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={goal.coverPct}
+                          onChange={e => updateCoverMap('goalCovers', goal.id, parseFloat(e.target.value))}
+                          className="w-16 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-right font-bold"
+                        />
+                      </td>
                       <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(goal.coveredValue), currencyCountry)}</td>
                     </tr>
                   ))}
@@ -412,14 +487,60 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                     <tr>
                       <td className="px-4 py-3 text-xs font-bold text-slate-700">Financial Assets</td>
                       <td className="px-4 py-3 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(hlvData.financialAssets), currencyCountry)}</td>
-                      <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">{hlvData.assetCoveragePct}%</td>
-                      <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">{formatCurrency(Math.round(hlvData.assetCovered), currencyCountry)}</td>
+                      <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={hlvData.assetCovers.financial}
+                          onChange={e => updateAssetCover('financial', parseFloat(e.target.value))}
+                          className="w-16 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-right font-bold"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">
+                        {formatCurrency(Math.round(hlvData.financialAssets * (hlvData.assetCovers.financial / 100)), currencyCountry)}
+                      </td>
                     </tr>
                     <tr>
                       <td className="px-4 py-3 text-xs font-bold text-slate-700">Personal Assets</td>
                       <td className="px-4 py-3 text-xs font-bold text-slate-700 text-right">{formatCurrency(Math.round(hlvData.personalAssets), currencyCountry)}</td>
-                      <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">0%</td>
-                      <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">{formatCurrency(0, currencyCountry)}</td>
+                      <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={hlvData.assetCovers.personal}
+                          onChange={e => updateAssetCover('personal', parseFloat(e.target.value))}
+                          className="w-16 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-right font-bold"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">
+                        {formatCurrency(Math.round(hlvData.personalAssets * (hlvData.assetCovers.personal / 100)), currencyCountry)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-3 text-xs font-bold text-slate-700">Inheritance</td>
+                      <td className="px-4 py-3 text-xs font-bold text-slate-700 text-right">
+                        <input
+                          type="number"
+                          value={analysisConfig.inheritanceValue}
+                          onChange={e => updateNumericField('inheritanceValue', parseFloat(e.target.value))}
+                          className="w-28 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-right font-bold"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-xs font-bold text-slate-600 text-right">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={hlvData.assetCovers.inheritance}
+                          onChange={e => updateAssetCover('inheritance', parseFloat(e.target.value))}
+                          className="w-16 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1 text-right font-bold"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">
+                        {formatCurrency(Math.round(hlvData.inheritanceValue * (hlvData.assetCovers.inheritance / 100)), currencyCountry)}
+                      </td>
                     </tr>
                     <tr className="bg-slate-50/60">
                       <td className="px-4 py-3 text-xs font-black text-slate-500" colSpan={3}>Total</td>
@@ -435,11 +556,12 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                 <h3 className="text-lg font-black text-slate-900">Existing Insurance</h3>
               </div>
               <div className="p-6 space-y-3">
-                <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Term Insurance</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.totalExistingInsurance), currencyCountry)}</span></div>
-                <div className="flex justify-between text-sm font-black border-t border-slate-100 pt-3"><span className="text-slate-600">Total Cover</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.totalAvailable), currencyCountry)}</span></div>
-                <div className={`flex justify-between text-sm font-black ${hlvData.gap < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  <span>Surplus / Deficit</span>
-                  <span>{formatCurrency(Math.round(hlvData.gap), currencyCountry)}</span>
+                <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Existing Insurance</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.totalExistingInsurance), currencyCountry)}</span></div>
+                <div className="flex justify-between text-xs font-bold"><span className="text-slate-500">Covered Assets</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.assetCovered), currencyCountry)}</span></div>
+                <div className="flex justify-between text-sm font-black border-t border-slate-100 pt-3"><span className="text-slate-600">Total Available</span><span className="text-slate-900">{formatCurrency(Math.round(hlvData.totalAvailable), currencyCountry)}</span></div>
+                <div className={`flex justify-between text-sm font-black ${hlvData.shortfall > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  <span>{hlvData.shortfall > 0 ? 'Insurance Shortfall' : 'Insurance Surplus'}</span>
+                  <span>{formatCurrency(Math.round(hlvData.shortfall > 0 ? hlvData.shortfall : hlvData.surplus), currencyCountry)}</span>
                 </div>
               </div>
             </div>

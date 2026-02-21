@@ -27,10 +27,12 @@ import { lookupPostalCode } from '../services/locationService';
 interface OnboardingProps {
   onComplete: (data: Partial<FinanceState>) => void;
   onBackToLanding?: () => void;
+  initialAuthStep?: 'identifier' | 'login' | 'signup' | 'onboarding';
+  resumeProfile?: Partial<FinanceState['profile']>;
 }
 
-const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) => {
-  const [authStep, setAuthStep] = useState<'identifier' | 'login' | 'signup' | 'onboarding'>('identifier');
+const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, initialAuthStep, resumeProfile }) => {
+  const [authStep, setAuthStep] = useState<'identifier' | 'login' | 'signup' | 'onboarding'>(initialAuthStep ?? 'identifier');
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -44,19 +46,19 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
   const [loggedInFirstName, setLoggedInFirstName] = useState('');
 
   const [formData, setFormData] = useState({
-    identifier: '',
+    identifier: resumeProfile?.email || resumeProfile?.mobile || '',
     password: '',
     confirmPassword: '',
-    firstName: '',
-    lastName: '',
-    dob: '',
-    lifeExpectancy: 85,
-    retirementAge: 60,
-    pincode: '',
-    city: '',
-    state: '',
-    country: 'India',
-    incomeSource: 'salaried' as IncomeSource,
+    firstName: resumeProfile?.firstName || '',
+    lastName: resumeProfile?.lastName || '',
+    dob: resumeProfile?.dob || '',
+    lifeExpectancy: resumeProfile?.lifeExpectancy ?? 85,
+    retirementAge: resumeProfile?.retirementAge ?? 60,
+    pincode: resumeProfile?.pincode || '',
+    city: resumeProfile?.city || '',
+    state: resumeProfile?.state || '',
+    country: resumeProfile?.country || 'India',
+    incomeSource: (resumeProfile?.incomeSource as IncomeSource) || ('salaried' as IncomeSource),
   });
 
   const EMAIL_DOMAINS = [
@@ -74,6 +76,12 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
     { title: 'Location', icon: MapPin },
     { title: 'Intelligence', icon: BrainCircuit },
   ];
+
+  useEffect(() => {
+    if (initialAuthStep === 'onboarding' && resumeProfile?.firstName) {
+      setLoggedInFirstName(resumeProfile.firstName);
+    }
+  }, [initialAuthStep, resumeProfile]);
 
   // ── HANDLER 1: Check if identifier is registered ─────────────
   const handleProceedIdentifier = async () => {
@@ -142,6 +150,27 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding }) 
         identifier: email,
         password:   formData.password,
       });
+
+      if (!profile.onboarding_done) {
+        setLoggedInFirstName(profile.first_name);
+        setFormData(prev => ({
+          ...prev,
+          identifier: email,
+          firstName: profile.first_name || prev.firstName,
+          lastName: profile.last_name ?? prev.lastName,
+          dob: profile.dob ?? prev.dob,
+          lifeExpectancy: profile.life_expectancy ?? prev.lifeExpectancy,
+          retirementAge: profile.retirement_age ?? prev.retirementAge,
+          pincode: profile.pincode ?? prev.pincode,
+          city: profile.city ?? prev.city,
+          state: profile.state ?? prev.state,
+          country: profile.country ?? prev.country,
+          incomeSource: (profile.income_source as IncomeSource) ?? prev.incomeSource,
+        }));
+        setAuthStep('onboarding');
+        setOnboardingStep(profile.dob ? 1 : 0);
+        return;
+      }
 
       onComplete({
         isRegistered: true,

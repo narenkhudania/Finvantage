@@ -6,7 +6,7 @@ import type {
   Loan,
   AllocationBreakdown,
 } from '../types';
-import { currentYear, getRiskReturnAssumption, resolveRelativeYear } from './financeMath';
+import { currentYear, getRiskReturnAssumption, resolveRelativeYear, inflateByBuckets, getGoalIntervalYears } from './financeMath';
 import { getJourneyProgress } from './journey';
 
 const sum = (values: number[]) => values.reduce((acc, v) => acc + (Number.isFinite(v) ? v : 0), 0);
@@ -39,6 +39,10 @@ export const buildReportSnapshot = (state: FinanceState): ReportSnapshot => {
   const now = new Date();
   const asOf = now.toISOString();
   const journey = getJourneyProgress(state);
+  const nowYear = currentYear();
+  const retirementYear = state.profile.dob
+    ? new Date(state.profile.dob).getFullYear() + state.profile.retirementAge
+    : nowYear + 30;
 
   const totalAssets = sum(state.assets.map(a => a.currentValue));
   const totalLiabilities = sum(state.loans.map(l => l.outstandingAmount));
@@ -127,11 +131,77 @@ export const buildReportSnapshot = (state: FinanceState): ReportSnapshot => {
     .slice(0, 2)
     .map(l => l.type);
 
+  const discountSettings = state.discountSettings;
+  const inflateFromCurrent = (amount: number, fromYear: number, toYear: number, rate: number) => {
+    if (toYear <= fromYear) return amount;
+    if (!discountSettings?.useBucketInflation) {
+      const years = Math.max(0, toYear - fromYear);
+      return amount * Math.pow(1 + rate / 100, years);
+    }
+    return inflateByBuckets(amount, fromYear, toYear, nowYear, retirementYear, discountSettings, rate);
+  };
+
+  const goalCostSummary = state.goals.reduce((acc, goal) => {
+    const startYear = resolveRelativeYear(goal.startDate, state.profile.dob, state.profile.retirementAge, state.profile.lifeExpectancy);
+    const endYear = resolveRelativeYear(goal.endDate, state.profile.dob, state.profile.retirementAge, state.profile.lifeExpectancy);
+    const inflationRate = discountSettings?.defaultInflationRate ?? goal.inflationRate;
+    const corpusAtStart = inflateFromCurrent(goal.targetAmountToday, nowYear, startYear, inflationRate);
+    let corpusToday = 0;
+    if (!goal.isRecurring) {
+      corpusToday = inflateFromCurrent(goal.targetAmountToday, nowYear, endYear, inflationRate);
+    } else {
+      const interval = getGoalIntervalYears(goal.frequency, goal.frequencyIntervalYears);
+      for (let year = startYear; year <= endYear; year++) {
+        if (interval > 1 && (year - startYear) % interval !== 0) continue;
+        const baseAmount = inflateFromCurrent(goal.targetAmountToday, nowYear, year, inflationRate);
+        corpusToday += goal.frequency === 'Monthly' ? baseAmount * 12 : baseAmount;
+      }
+    }
+    acc.corpusToday += corpusToday;
+    acc.corpusAtStart += corpusAtStart;
+    acc.totalSpent += goal.currentAmount || 0;
+    return acc;
+  }, { corpusToday: 0, corpusAtStart: 0, totalSpent: 0 });
+
+  const categoryDefaultReturns: Record<string, number> = {
+    Equity: 15,
+    Debt: 8,
+    'Gold/Silver': 7,
+    Liquid: 3,
+    'Real Estate': 5,
+  };
+  const availableAssets = state.assets.filter(a => a.availableForGoals);
+  const assetPool = availableAssets.length > 0 ? availableAssets : state.assets;
+  const totalAssetValue = sum(assetPool.map(a => a.currentValue));
+  const currentAvailableReturn = totalAssetValue > 0
+    ? assetPool.reduce((sum, a) => {
+        const fallback = categoryDefaultReturns[a.category] ?? 0;
+        const rate = Number.isFinite(a.growthRate as number) ? (a.growthRate as number) : fallback;
+        return sum + (a.currentValue * rate);
+      }, 0) / totalAssetValue
+    : 0;
+
+  const fallbackRecommended = (() => {
+    const risk = state.riskProfile?.level || 'Balanced';
+    if (risk === 'Conservative') return { equity: 25, debt: 60, gold: 15, liquid: 0 };
+    if (risk === 'Moderate') return { equity: 40, debt: 45, gold: 10, liquid: 5 };
+    if (risk === 'Balanced') return { equity: 60, debt: 30, gold: 10, liquid: 0 };
+    if (risk === 'Aggressive') return { equity: 80, debt: 15, gold: 5, liquid: 0 };
+    if (risk === 'Very Aggressive') return { equity: 90, debt: 5, gold: 5, liquid: 0 };
+    return { equity: 60, debt: 30, gold: 10, liquid: 0 };
+  })();
+  const recommendedAllocation = state.riskProfile?.recommendedAllocation ?? fallbackRecommended;
+  const recommendedReturn = (
+    (recommendedAllocation.equity || 0) * categoryDefaultReturns.Equity +
+    (recommendedAllocation.debt || 0) * categoryDefaultReturns.Debt +
+    (recommendedAllocation.gold || 0) * categoryDefaultReturns['Gold/Silver'] +
+    (recommendedAllocation.liquid || 0) * categoryDefaultReturns.Liquid
+  ) / 100;
+
   const totalTargetToday = sum(state.goals.map(g => g.targetAmountToday));
   const totalCurrent = sum(state.goals.map(g => g.currentAmount));
   const fundedCount = state.goals.filter(g => g.targetAmountToday > 0 && g.currentAmount >= g.targetAmountToday).length;
 
-  const nowYear = currentYear();
   const nextGoal = state.goals
     .map(goal => ({
       goal,
@@ -142,7 +212,6 @@ export const buildReportSnapshot = (state: FinanceState): ReportSnapshot => {
 
   const reportReturn = getRiskReturnAssumption(state.riskProfile?.level);
   const currentAllocation = buildAllocationBreakdown(state.assets);
-  const recommendedAllocation = state.riskProfile?.recommendedAllocation ?? { equity: 0, debt: 0, gold: 0, liquid: 0 };
 
   return {
     generatedAt: asOf,
@@ -198,6 +267,16 @@ export const buildReportSnapshot = (state: FinanceState): ReportSnapshot => {
       fundedCount,
       totalTargetToday,
       totalCurrent,
+      costSummary: {
+        corpusToday: goalCostSummary.corpusToday,
+        corpusAtStart: goalCostSummary.corpusAtStart,
+        totalSpent: goalCostSummary.totalSpent,
+      },
+      returnComparison: {
+        currentReturn: currentAvailableReturn,
+        recommendedReturn,
+        delta: currentAvailableReturn - recommendedReturn,
+      },
       nextGoal: nextGoal ? {
         label: nextGoal.goal.description || nextGoal.goal.type,
         year: nextGoal.year,

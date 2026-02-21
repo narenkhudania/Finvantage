@@ -19,6 +19,7 @@ import {
   Banknote,
   Landmark,
   LineChart,
+  TrendingUp,
 } from 'lucide-react';
 import type { ReportSnapshot, View } from '../types';
 import { formatCurrency } from '../lib/currency';
@@ -68,6 +69,17 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
       ]
     : [{ name: 'No Goals', value: 1 }];
 
+  const goalCostData = [
+    { name: 'Today', value: snapshot.goals.costSummary.corpusToday },
+    { name: 'Start', value: snapshot.goals.costSummary.corpusAtStart },
+    { name: 'Spent', value: snapshot.goals.costSummary.totalSpent },
+  ];
+
+  const returnCompareData = [
+    { name: 'Current', value: snapshot.goals.returnComparison.currentReturn },
+    { name: 'Recommended', value: snapshot.goals.returnComparison.recommendedReturn },
+  ];
+
   const allocationData = [
     {
       name: 'Equity',
@@ -110,7 +122,10 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+        <button
+          onClick={() => onOpen('dashboard')}
+          className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm text-left hover:border-teal-400 hover:shadow-lg transition-all"
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2 bg-teal-50 text-teal-600 rounded-2xl"><Activity size={18} /></div>
             <div>
@@ -147,9 +162,12 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
               </div>
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+        <button
+          onClick={() => onOpen('dashboard')}
+          className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm text-left hover:border-emerald-400 hover:shadow-lg transition-all"
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2 bg-emerald-50 text-emerald-600 rounded-2xl"><Landmark size={18} /></div>
             <div>
@@ -168,9 +186,12 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+        <button
+          onClick={() => onOpen('risk-profile')}
+          className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm text-left hover:border-indigo-400 hover:shadow-lg transition-all"
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2 bg-indigo-50 text-indigo-600 rounded-2xl"><ShieldCheck size={18} /></div>
             <div>
@@ -190,11 +211,14 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+        <button
+          onClick={() => onOpen('assets')}
+          className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm text-left hover:border-amber-400 hover:shadow-lg transition-all"
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2 bg-amber-50 text-amber-600 rounded-2xl"><Banknote size={18} /></div>
             <div>
@@ -223,9 +247,12 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
               </ResponsiveContainer>
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+        <button
+          onClick={() => onOpen('cashflow')}
+          className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm text-left hover:border-teal-400 hover:shadow-lg transition-all"
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2 bg-teal-50 text-teal-600 rounded-2xl"><LineChart size={18} /></div>
             <div>
@@ -244,7 +271,62 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <button
+          onClick={() => onOpen('goal-summary')}
+          className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm text-left hover:border-teal-400 hover:shadow-lg transition-all"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-teal-50 text-teal-600 rounded-2xl"><Target size={18} /></div>
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Goals</p>
+              <h4 className="text-sm font-black text-slate-900">Goal Cost Summary</h4>
+            </div>
+          </div>
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={goalCostData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis hide />
+                <Tooltip formatter={(val: number) => formatCurrency(val, currencyCountry)} />
+                <Bar dataKey="value" radius={[12, 12, 0, 0]} fill="#0f766e" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </button>
+
+        <button
+          onClick={() => onOpen('investment-plan')}
+          className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm text-left hover:border-emerald-400 hover:shadow-lg transition-all"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-2xl"><TrendingUp size={18} /></div>
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Funding</p>
+              <h4 className="text-sm font-black text-slate-900">Return Comparison</h4>
+            </div>
+          </div>
+          <div className="h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={returnCompareData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis hide />
+                <Tooltip formatter={(val: number) => `${(val as number).toFixed(2)}%`} />
+                <Bar dataKey="value" radius={[12, 12, 0, 0]} fill="#0f172a" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+            Gap: <span className={snapshot.goals.returnComparison.delta >= 0 ? 'text-emerald-600' : 'text-rose-500'}>
+              {snapshot.goals.returnComparison.delta.toFixed(2)}%
+            </span>
+          </div>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
