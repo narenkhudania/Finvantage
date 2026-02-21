@@ -32,6 +32,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
 
   const unreadCount = state.notifications?.filter(n => !n.read).length || 0;
   const { completionPct, nextStep } = useMemo(() => getJourneyProgress(state), [state]);
+  const hideJourney = title === 'dashboard';
 
   return (
     <header className="min-h-[80px] md:h-24 bg-white/75 backdrop-blur-xl border-b border-white/60 shadow-sm sticky top-0 z-[50] px-4 sm:px-6 md:px-12 py-3 md:py-0 flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-0">
@@ -46,11 +47,13 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
           <h1 className="text-xl md:text-2xl font-black text-slate-900 capitalize tracking-tight leading-none font-display">
             {title.replace('-', ' ')}
           </h1>
-          <div className="flex items-center gap-1.5 mt-1.5">
-             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Journey Active</p>
-          </div>
-          {completionPct < 100 && (
+          {!hideJourney && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Journey Active</p>
+            </div>
+          )}
+          {!hideJourney && completionPct < 100 && (
             <>
               <div className="hidden md:flex items-center gap-3 mt-3">
                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Journey {completionPct}%</span>
