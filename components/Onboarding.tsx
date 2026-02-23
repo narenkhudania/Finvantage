@@ -151,7 +151,20 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
         password:   formData.password,
       });
 
-      if (!profile.onboarding_done) {
+      const hasCompletedOnboardingData = Boolean(
+        profile.dob &&
+        Number.isFinite(Number(profile.life_expectancy)) &&
+        Number.isFinite(Number(profile.retirement_age)) &&
+        Number(profile.life_expectancy) > Number(profile.retirement_age) &&
+        (profile.pincode ?? '').trim().length > 0 &&
+        (profile.city ?? '').trim().length > 0 &&
+        (profile.state ?? '').trim().length > 0 &&
+        (profile.country ?? '').trim().length > 0 &&
+        Number.isFinite(Number(profile.iq_score)) &&
+        Number(profile.iq_score) > 0
+      );
+
+      if (!profile.onboarding_done && !hasCompletedOnboardingData) {
         setLoggedInFirstName(profile.first_name);
         setFormData(prev => ({
           ...prev,
@@ -190,7 +203,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
           iqScore:        profile.iq_score,
           income: {
             salary: 50000, bonus: 0, reimbursements: 0,
-            business: 0, rental: 0, investment: 0, expectedIncrease: 6,
+            business: 0, rental: 0, investment: 0, pension: 0, expectedIncrease: 6,
           },
           monthlyExpenses: 20000,
         },
@@ -433,7 +446,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
           iqScore:        baselineIq,
           income: {
             salary: 0, bonus: 0, reimbursements: 0,
-            business: 0, rental: 0, investment: 0, expectedIncrease: 6,
+            business: 0, rental: 0, investment: 0, pension: 0, expectedIncrease: 6,
           },
           monthlyExpenses: 0,
         },

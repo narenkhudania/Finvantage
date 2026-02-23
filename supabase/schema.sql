@@ -97,6 +97,7 @@ create table if not exists public.family_members (
   relation text not null,
   age integer not null default 0,
   is_dependent boolean default false,
+  include_income_in_planning boolean default true,
   retirement_age integer,
   monthly_expenses numeric default 0,
   salary numeric default 0,
@@ -105,6 +106,7 @@ create table if not exists public.family_members (
   business numeric default 0,
   rental numeric default 0,
   investment numeric default 0,
+  pension numeric default 0,
   expected_increase numeric default 6,
   created_at timestamptz default now()
 );
@@ -125,6 +127,7 @@ create table if not exists public.income_profiles (
   business numeric default 0,
   rental numeric default 0,
   investment numeric default 0,
+  pension numeric default 0,
   expected_increase numeric default 6,
   created_at timestamptz default now(),
   unique (user_id, owner_ref)
@@ -525,6 +528,8 @@ create table if not exists public.risk_profiles (
   score integer not null,
   level text not null,
   last_updated timestamptz not null,
+  questionnaire_version integer not null default 1,
+  questionnaire_answers jsonb not null default '[]'::jsonb,
   equity integer not null,
   debt integer not null,
   gold integer not null,
@@ -540,6 +545,10 @@ create table if not exists public.risk_profiles (
 create table if not exists public.insurance_analysis_config (
   user_id uuid primary key references auth.users(id) on delete cascade,
   inflation numeric not null default 6,
+  term_insurance_amount numeric not null default 0,
+  health_insurance_amount numeric not null default 0,
+  insurance_type text not null default 'Term',
+  insurance_amount numeric not null default 0,
   investment_rate numeric not null default 11.5,
   replacement_years integer not null default 20,
   immediate_needs numeric not null default 1000000,

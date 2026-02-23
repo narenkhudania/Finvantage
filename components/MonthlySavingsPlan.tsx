@@ -9,12 +9,17 @@ import {
 import { FinanceState } from '../types';
 import { formatCurrency } from '../lib/currency';
 import { annualizeAmount } from '../lib/financeMath';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 const MonthlySavingsPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   const [activeView, setActiveView] = useState<'matrix' | 'ledger'>('matrix');
 
   const breakdown = useMemo(() => {
-    const monthlyIncome = (state.profile.income.salary || 0) + (state.profile.income.investment || 0);
+    const monthlyIncome =
+      monthlyIncomeFromDetailed(state.profile.income) +
+      state.family
+        .filter(member => member.includeIncomeInPlanning !== false)
+        .reduce((sum, member) => sum + monthlyIncomeFromDetailed(member.income), 0);
     const survival = state.profile.monthlyExpenses || 0;
     const servicing = state.loans.reduce((acc, l) => acc + (l.emi || 0), 0);
     const commitmentMonthly = (state.investmentCommitments || []).reduce((sum, c) => {

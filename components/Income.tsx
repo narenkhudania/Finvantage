@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { FinanceState, DetailedIncome, FamilyMember } from '../types';
+import { FinanceState, DetailedIncome } from '../types';
 import { 
   Calculator, User, Briefcase, TrendingUp, Coins, Home, Sparkles, 
   ChevronRight, Users, ArrowUpRight, Plus, Info, Wallet, Landmark,
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { clampNumber, parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 interface IncomeProps {
   state: FinanceState;
@@ -51,9 +52,7 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
   };
 
   const totalIncome = useMemo(() => {
-    const i = currentMember.income;
-    return (i.salary || 0) + (i.bonus || 0) + (i.reimbursements || 0) + 
-           (i.business || 0) + (i.rental || 0) + (i.investment || 0);
+    return monthlyIncomeFromDetailed(currentMember.income);
   }, [currentMember.income]);
 
   // Project 5-year growth for current member
@@ -125,7 +124,7 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
               <h4 className="text-lg font-black tracking-tight">{member.name}</h4>
               <div className="mt-4 flex items-center justify-between">
                 <span className={`text-[10px] font-bold ${selectedId === member.id ? 'text-teal-400' : 'text-teal-600'}`}>
-                  {formatCurrency(((member.income.salary || 0) + (member.income.bonus || 0) + (member.income.investment || 0)), currencyCountry)}
+                  {formatCurrency(monthlyIncomeFromDetailed(member.income), currencyCountry)}
                 </span>
                 <ChevronRight size={14} className={selectedId === member.id ? 'text-white' : 'text-slate-200'} />
               </div>
@@ -170,15 +169,16 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-6">
               <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-4">Core Earnings</h4>
-              <IncomeInput label="Base Salary" icon={Briefcase} value={currentMember.income.salary} field="salary" description="Net take-home after tax" />
-              <IncomeInput label="Regular Bonus" icon={Sparkles} value={currentMember.income.bonus} field="bonus" description="Performance/annual payouts" />
-              <IncomeInput label="Reimbursements" icon={Coins} value={currentMember.income.reimbursements} field="reimbursements" description="Travel, medical, telephone" />
+              <IncomeInput label="Net Salary (Monthly)" icon={Briefcase} value={currentMember.income.salary} field="salary" description="Net take-home after tax (monthly)" />
+              <IncomeInput label="Bonus (Yearly)" icon={Sparkles} value={currentMember.income.bonus} field="bonus" description="Annual bonus, auto-divided by 12 for monthly planning" />
+              <IncomeInput label="Reimbursements (Yearly)" icon={Coins} value={currentMember.income.reimbursements} field="reimbursements" description="Annual reimbursements, auto-divided by 12" />
             </div>
             <div className="space-y-6">
               <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest px-4">Secondary Flows</h4>
-              <IncomeInput label="Business Inflow" icon={Calculator} value={currentMember.income.business} field="business" description="Side ventures or consulting" />
-              <IncomeInput label="Rental Yield" icon={Home} value={currentMember.income.rental} field="rental" description="Real estate passive income" />
-              <IncomeInput label="Dividends/Interests" icon={TrendingUp} value={currentMember.income.investment} field="investment" description="Yield from assets" />
+              <IncomeInput label="Side Business (Monthly)" icon={Calculator} value={currentMember.income.business} field="business" description="Side ventures or consulting (monthly)" />
+              <IncomeInput label="Rental Income (Monthly)" icon={Home} value={currentMember.income.rental} field="rental" description="Real estate passive income (monthly)" />
+              <IncomeInput label="Annual Dividends (Yearly)" icon={TrendingUp} value={currentMember.income.investment} field="investment" description="Annual dividends/interest, auto-divided by 12" />
+              <IncomeInput label="Pension (Monthly)" icon={Landmark} value={currentMember.income.pension} field="pension" description="Recurring pension credits (monthly)" />
             </div>
           </div>
         </div>
@@ -240,16 +240,10 @@ const Income: React.FC<IncomeProps> = ({ state, updateState }) => {
                 <p className="text-[10px] font-black text-teal-200 uppercase tracking-[0.2em] mb-1">Combined Monthly Household</p>
                 <h3 className="text-4xl font-black">
                   {formatCurrency(
-                    state.family.reduce((acc, f) => {
-                      const i = f.income;
-                      return acc + (i.salary || 0) + (i.bonus || 0) + (i.reimbursements || 0) + (i.business || 0) + (i.rental || 0) + (i.investment || 0);
-                    }, 0) +
-                      ((state.profile.income.salary || 0) +
-                        (state.profile.income.bonus || 0) +
-                        (state.profile.income.reimbursements || 0) +
-                        (state.profile.income.business || 0) +
-                        (state.profile.income.rental || 0) +
-                        (state.profile.income.investment || 0)),
+                    state.family
+                      .filter(f => f.includeIncomeInPlanning !== false)
+                      .reduce((acc, f) => acc + monthlyIncomeFromDetailed(f.income), 0) +
+                      monthlyIncomeFromDetailed(state.profile.income),
                     currencyCountry
                   )}
                 </h3>

@@ -41,7 +41,7 @@ const SAVE_DEBOUNCE_MS = 1500;
 
 const INITIAL_INCOME: DetailedIncome = {
   salary: 0, bonus: 0, reimbursements: 0,
-  business: 0, rental: 0, investment: 0, expectedIncrease: 6,
+  business: 0, rental: 0, investment: 0, pension: 0, expectedIncrease: 6,
 };
 
 const INITIAL_STATE: FinanceState = {
@@ -57,13 +57,8 @@ const INITIAL_STATE: FinanceState = {
   insurance: [],
   insuranceAnalysis: {
     inflation: 6,
-    investmentRate: 11.5,
-    immediateAnnualValue: 1000000,
-    immediateYears: 1,
-    incomeAnnualValue: 0,
-    incomeYears: 20,
-    financialAssetDiscount: 50,
-    existingInsurance: 0,
+    termInsuranceAmount: 0,
+    healthInsuranceAmount: 0,
     liabilityCovers: {},
     goalCovers: {},
     assetCovers: { financial: 50, personal: 0, inheritance: 100 },
@@ -117,6 +112,22 @@ const normalizeState = (raw: Partial<FinanceState> | null | undefined): FinanceS
     insuranceAnalysis: {
       ...base.insuranceAnalysis,
       ...(raw?.insuranceAnalysis || {}),
+      termInsuranceAmount: Number(
+        (raw?.insuranceAnalysis as any)?.termInsuranceAmount
+          ?? ((raw?.insuranceAnalysis as any)?.insuranceType === 'Term'
+              ? (raw?.insuranceAnalysis as any)?.insuranceAmount
+              : undefined)
+          ?? (raw?.insuranceAnalysis as any)?.existingInsurance
+          ?? (raw?.insuranceAnalysis as any)?.immediateAnnualValue
+          ?? base.insuranceAnalysis.termInsuranceAmount,
+      ),
+      healthInsuranceAmount: Number(
+        (raw?.insuranceAnalysis as any)?.healthInsuranceAmount
+          ?? ((raw?.insuranceAnalysis as any)?.insuranceType === 'Health'
+              ? (raw?.insuranceAnalysis as any)?.insuranceAmount
+              : undefined)
+          ?? base.insuranceAnalysis.healthInsuranceAmount,
+      ),
       liabilityCovers: (raw?.insuranceAnalysis as any)?.liabilityCovers ?? base.insuranceAnalysis.liabilityCovers,
       goalCovers: (raw?.insuranceAnalysis as any)?.goalCovers ?? base.insuranceAnalysis.goalCovers,
       assetCovers: (raw?.insuranceAnalysis as any)?.assetCovers ?? base.insuranceAnalysis.assetCovers,

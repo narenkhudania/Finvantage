@@ -1,8 +1,9 @@
 
 import React, { useMemo } from 'react';
-import { FinanceState, DetailedIncome } from '../types';
+import { FinanceState } from '../types';
 import { formatCurrency } from '../lib/currency';
 import { getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   BarChart, Bar, Legend, Cell 
@@ -12,13 +13,12 @@ import { CalendarDays, Wallet, TrendingUp, Sparkles, Activity, ShieldCheck, Targ
 const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
   const currencyCountry = state.profile.country;
 
-  const calculateTotalMemberIncome = (income: DetailedIncome) => {
-    return (income.salary || 0) + (income.bonus || 0) + (income.reimbursements || 0) + 
-           (income.business || 0) + (income.rental || 0) + (income.investment || 0);
-  };
+  const calculateTotalMemberIncome = monthlyIncomeFromDetailed;
 
   const householdIncome = calculateTotalMemberIncome(state.profile.income) + 
-                          state.family.reduce((sum, f) => sum + calculateTotalMemberIncome(f.income), 0);
+                          state.family
+                            .filter(f => f.includeIncomeInPlanning !== false)
+                            .reduce((sum, f) => sum + calculateTotalMemberIncome(f.income), 0);
   const householdExpenses = state.profile.monthlyExpenses + state.family.reduce((sum, f) => sum + f.monthlyExpenses, 0);
 
   // Generate 20-year projection data

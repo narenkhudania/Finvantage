@@ -66,10 +66,19 @@ export type GoalType =
 
 export type ResourceBucket = 'Equity & MF' | 'Bank Balance' | 'NPS & EPF' | 'Cashflow Surplus' | 'Insurance Payouts';
 
+export interface RiskQuestionAnswer {
+  questionId: number;
+  question: string;
+  selectedOption: string;
+  score: number;
+}
+
 export interface RiskProfile {
   score: number;
   level: RiskLevel;
   lastUpdated: string;
+  questionnaireVersion?: number;
+  questionnaireAnswers?: RiskQuestionAnswer[];
   recommendedAllocation: {
     equity: number;
     debt: number;
@@ -85,6 +94,7 @@ export interface DetailedIncome {
   business: number;
   rental: number;
   investment: number;
+  pension: number;
   expectedIncrease: number;
 }
 
@@ -105,6 +115,7 @@ export interface FamilyMember {
   relation: Relation;
   age: number;
   isDependent: boolean;
+  includeIncomeInPlanning?: boolean;
   retirementAge?: number;
   income: DetailedIncome;
   monthlyExpenses: number;
@@ -186,13 +197,8 @@ export interface Goal {
 
 export interface InsuranceAnalysisConfig {
   inflation: number;
-  investmentRate: number;
-  immediateAnnualValue: number;
-  immediateYears: number;
-  incomeAnnualValue: number;
-  incomeYears: number;
-  financialAssetDiscount: number;
-  existingInsurance: number;
+  termInsuranceAmount: number;
+  healthInsuranceAmount: number;
   liabilityCovers: Record<string, number>;
   goalCovers: Record<string, number>;
   assetCovers: {
@@ -293,7 +299,8 @@ export interface ReportSnapshot {
   };
   assumptions: {
     inflation: number;
-    investmentRate: number;
+    termInsuranceAmount: number;
+    healthInsuranceAmount: number;
     expectedIncomeGrowth: number;
     retirementAge: number;
     lifeExpectancy: number;

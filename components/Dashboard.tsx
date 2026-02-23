@@ -14,11 +14,12 @@ import {
   LayoutGrid, ArrowDownRight, Users, ListChecks,
   PieChart, BarChart3, LineChart, RefreshCw
 } from 'lucide-react';
-import { FinanceState, DetailedIncome, View, Asset, Loan } from '../types';
+import { FinanceState, View, Asset, Loan } from '../types';
 import { getJourneyProgress } from '../lib/journey';
 import { getRiskReturnAssumption } from '../lib/financeMath';
 import { formatCurrency } from '../lib/currency';
 import { buildReportSnapshot } from '../lib/report';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 import CommandReport from './CommandReport';
 import Cashflow from './Cashflow';
 import InvestmentPlan from './InvestmentPlan';
@@ -31,11 +32,7 @@ interface DashboardProps {
 const COLORS = ['#0f766e', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#84cc16'];
 
 const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
-  const todayLabel = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-  const calculateTotalMemberIncome = (income: DetailedIncome) => {
-    return (income.salary || 0) + (income.bonus || 0) + (income.reimbursements || 0) + 
-           (income.business || 0) + (income.rental || 0) + (income.investment || 0);
-  };
+  const calculateTotalMemberIncome = monthlyIncomeFromDetailed;
 
   const totalAssets = useMemo(() => state.assets.reduce((sum, a) => sum + a.currentValue, 0), [state.assets]);
   const totalLoans = useMemo(() => state.loans.reduce((sum, l) => sum + l.outstandingAmount, 0), [state.loans]);
@@ -43,7 +40,9 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
 
   const householdIncome = useMemo(() => {
     const selfIncome = calculateTotalMemberIncome(state.profile.income);
-    const familyIncome = state.family.reduce((sum, f) => sum + calculateTotalMemberIncome(f.income), 0);
+    const familyIncome = state.family
+      .filter(f => f.includeIncomeInPlanning !== false)
+      .reduce((sum, f) => sum + calculateTotalMemberIncome(f.income), 0);
     return selfIncome + familyIncome;
   }, [state.profile, state.family]);
 
@@ -232,6 +231,14 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
   const completionPct = journey.completionPct;
   const isFullyInitialized = completionPct === 100;
   const gateUnlocked = isFullyInitialized;
+  const financialNodeReadyForRisk = useMemo(() => {
+    const hasHousehold = (state.profile.firstName || '').trim().length > 0 || state.family.length > 0;
+    const hasInflow = householdIncome > 0;
+    const hasOutflow = householdExpenses > 0;
+    const hasAssets = state.assets.length > 0;
+    return hasHousehold && hasInflow && hasOutflow && hasAssets;
+  }, [state.profile.firstName, state.family.length, state.assets.length, householdIncome, householdExpenses]);
+  const shouldPromptRiskProfile = financialNodeReadyForRisk && !state.riskProfile;
 
   const wellnessData = useMemo(() => {
     const riskScore = state.riskProfile?.score || 20;
@@ -300,6 +307,48 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
         </div>
       )}
 
+      {shouldPromptRiskProfile && (
+        <div className="surface-dark p-8 md:p-12 rounded-[3rem] border border-white/10 shadow-2xl relative overflow-hidden text-white">
+          <div className="absolute top-0 right-0 w-[420px] h-[420px] bg-teal-500/15 blur-[140px] rounded-full translate-x-1/3 -translate-y-1/3 pointer-events-none" />
+          <div className="relative z-10 grid grid-cols-1 xl:grid-cols-2 gap-10 items-start">
+            <div className="space-y-5">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-widest border border-teal-400/20">
+                <BrainCircuit size={14} /> Next Best Action
+              </div>
+              <h3 className="text-3xl md:text-4xl font-black tracking-tight leading-tight">
+                Calculate Your Risk Profile <span className="text-teal-400">Before Investing.</span>
+              </h3>
+              <p className="text-sm md:text-base text-slate-300 font-medium max-w-xl">
+                Your financial node data is ready. Complete Risk DNA now to make better allocation and investment decisions.
+              </p>
+              <button
+                onClick={() => setView('risk-profile')}
+                className="inline-flex items-center gap-2 px-6 py-4 bg-teal-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-500 transition-all shadow-xl"
+              >
+                Calculate Risk Profile <ArrowRight size={14} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { icon: PieChart, title: 'Better Allocation Fit', detail: 'Get equity, debt, gold, and liquid mix aligned to your risk capacity.' },
+                { icon: LineChart, title: 'Smarter Return Assumptions', detail: 'Use realistic portfolio return assumptions in planning and projections.' },
+                { icon: ShieldAlert, title: 'Lower Decision Stress', detail: 'Reduce panic moves during market volatility with a defined risk framework.' },
+                { icon: Sparkles, title: 'Sharper Investment Decisions', detail: 'Choose instruments and rebalancing actions with clear risk guardrails.' },
+              ].map((benefit) => (
+                <div key={benefit.title} className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                  <div className="w-9 h-9 rounded-xl bg-teal-500/15 text-teal-300 flex items-center justify-center mb-3">
+                    <benefit.icon size={16} />
+                  </div>
+                  <p className="text-[11px] font-black uppercase tracking-widest text-white mb-1">{benefit.title}</p>
+                  <p className="text-xs text-slate-300 leading-relaxed">{benefit.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Stats Node */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
@@ -320,6 +369,42 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
           </div>
         ))}
       </div>
+
+      {state.riskProfile && (
+        <button
+          type="button"
+          onClick={() => setView('risk-profile')}
+          className="w-full text-left surface-dark p-8 md:p-10 rounded-[3rem] border border-white/10 shadow-2xl relative overflow-hidden"
+        >
+          <div className="absolute top-0 right-0 w-[420px] h-[420px] bg-teal-600/15 blur-[140px] rounded-full translate-x-1/3 -translate-y-1/3 pointer-events-none" />
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-4 gap-8 items-center">
+            <div className="lg:col-span-2 space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-widest border border-teal-400/20">
+                <BrainCircuit size={14} /> Risk Profile Active
+              </div>
+              <h3 className="text-3xl md:text-4xl font-black text-white tracking-tight leading-tight">
+                {state.riskProfile.level} <span className="text-teal-400">Risk DNA</span>
+              </h3>
+              <p className="text-sm text-slate-300 font-medium">
+                Score {state.riskProfile.score}/100. Click to view answered questions, impact on goals/returns, and full profile comparison report.
+              </p>
+            </div>
+            <div className="lg:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: 'Equity', value: state.riskProfile.recommendedAllocation.equity },
+                { label: 'Debt', value: state.riskProfile.recommendedAllocation.debt },
+                { label: 'Gold', value: state.riskProfile.recommendedAllocation.gold },
+                { label: 'Liquid', value: state.riskProfile.recommendedAllocation.liquid },
+              ].map(item => (
+                <div key={item.label} className="p-3 rounded-2xl bg-white/5 border border-white/10">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</p>
+                  <p className="text-xl font-black text-white mt-1">{item.value}%</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </button>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
@@ -381,8 +466,11 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
               </ResponsiveContainer>
            </div>
 
-           <button onClick={() => setView('risk-profile')} className="w-full py-5 bg-slate-50 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all">
-              Recalibrate Risk DNA
+           <button
+             onClick={() => setView('risk-profile')}
+             className="w-full py-5 bg-slate-50 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all"
+           >
+              {state.riskProfile ? 'Open Risk Profile' : 'Complete Risk DNA'}
            </button>
         </div>
       </div>
@@ -551,6 +639,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
           <InvestmentPlan state={state} />
         </div>
       )}
+
     </div>
   );
 };

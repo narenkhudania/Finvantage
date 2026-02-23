@@ -8,11 +8,83 @@ import {
 import { FinanceState, DetailedIncome } from '../types';
 import { clampNumber, parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
+import { monthlyIncomeBreakdown, monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 interface InflowProfileProps {
   state: FinanceState;
   updateState: (data: Partial<FinanceState>) => void;
 }
+
+type IncomeInputConfig = {
+  label: string;
+  field: keyof DetailedIncome;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  min: number;
+  max: number;
+  helper: string;
+};
+
+const OPERATIONAL_FIELDS: IncomeInputConfig[] = [
+  {
+    label: 'Net Salary (Monthly)',
+    field: 'salary',
+    icon: Briefcase,
+    min: 5000,
+    max: 1000000,
+    helper: 'Enter your net take-home amount per month.',
+  },
+  {
+    label: 'Bonus (Yearly)',
+    field: 'bonus',
+    icon: Sparkles,
+    min: 12000,
+    max: 5000000,
+    helper: 'Enter yearly bonus. We convert it to monthly (divide by 12).',
+  },
+  {
+    label: 'Reimbursements (Yearly)',
+    field: 'reimbursements',
+    icon: Coins,
+    min: 1200,
+    max: 250000,
+    helper: 'Enter yearly reimbursements. We convert them to monthly (divide by 12).',
+  },
+];
+
+const PASSIVE_FIELDS: IncomeInputConfig[] = [
+  {
+    label: 'Rental Income (Monthly)',
+    field: 'rental',
+    icon: Home,
+    min: 5000,
+    max: 5000000,
+    helper: 'Add recurring rental receipts.',
+  },
+  {
+    label: 'Annual Dividends (Yearly)',
+    field: 'investment',
+    icon: TrendingUp,
+    min: 1200,
+    max: 2000000,
+    helper: 'Enter yearly dividends/interest. We convert it to monthly (divide by 12).',
+  },
+  {
+    label: 'Side Business (Monthly)',
+    field: 'business',
+    icon: Calculator,
+    min: 5000,
+    max: 5000000,
+    helper: 'Add business or freelance income.',
+  },
+  {
+    label: 'Pension (Monthly)',
+    field: 'pension',
+    icon: Landmark,
+    min: 5000,
+    max: 1500000,
+    helper: 'Add pension credited on a recurring basis.',
+  },
+];
 
 const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => {
   const [editingId, setEditingId] = useState<'self' | string | null>(null);
@@ -23,11 +95,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
   ], [state.profile, state.family]);
 
   const totalHouseholdInflow = useMemo(() => {
-    return members.reduce((acc, m) => {
-      const i = m.income;
-      return acc + (i.salary || 0) + (i.bonus || 0) + (i.reimbursements || 0) + 
-             (i.business || 0) + (i.rental || 0) + (i.investment || 0);
-    }, 0);
+    return members.reduce((acc, m) => acc + monthlyIncomeFromDetailed(m.income), 0);
   }, [members]);
 
   const sanitizeDigits = (value: string) => value.replace(/[^\d]/g, '');
@@ -49,7 +117,20 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
     }
   };
 
-  const IncomeForm = ({ member }: { member: any }) => (
+  const getBracketError = (memberIncome: DetailedIncome, item: IncomeInputConfig) => {
+    const raw = memberIncome[item.field];
+    const value = Number(raw || 0);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    if (value < item.min) {
+      return `${item.label} is lower than the usual bracket (${formatCurrency(item.min, currencyCountry)} - ${formatCurrency(item.max, currencyCountry)}).`;
+    }
+    if (value > item.max) {
+      return `${item.label} is higher than the usual bracket (${formatCurrency(item.min, currencyCountry)} - ${formatCurrency(item.max, currencyCountry)}).`;
+    }
+    return null;
+  };
+
+  const renderIncomeForm = (member: any) => (
     <div className="bg-slate-50 p-6 md:p-12 rounded-[3.5rem] border border-slate-200 animate-in slide-in-from-top-6 duration-500 space-y-10">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
          <h3 className="text-xl md:text-2xl font-black text-slate-900 flex items-center gap-3"><Edit3 className="text-teal-600"/> Calibrate: {member.name}</h3>
@@ -59,11 +140,9 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
         <div className="space-y-8">
            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Operational Core</h4>
-           {[
-             { label: 'Monthly Net Salary', field: 'salary' as keyof DetailedIncome, icon: Briefcase },
-             { label: 'Annual Bonus', field: 'bonus' as keyof DetailedIncome, icon: Sparkles },
-             { label: 'Reimbursements', field: 'reimbursements' as keyof DetailedIncome, icon: Coins }
-           ].map(item => (
+           {OPERATIONAL_FIELDS.map(item => {
+             const fieldError = getBracketError(member.income, item);
+             return (
              <div key={item.field} className="space-y-2">
                 <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest ml-2">{item.label}</label>
                 <div className="relative group">
@@ -74,20 +153,24 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                     pattern="[0-9]*"
                     value={member.income[item.field] || ''} 
                     onChange={e => updateIncomeField(member.id, item.field, sanitizeDigits(e.target.value))}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-12 md:px-14 py-3.5 md:py-4 font-black text-lg md:text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
+                    className={`w-full bg-white border rounded-2xl px-12 md:px-14 py-3.5 md:py-4 font-black text-lg md:text-xl outline-none transition-all shadow-sm ${
+                      fieldError ? 'border-rose-300 focus:border-rose-500' : 'border-slate-200 focus:border-teal-600'
+                    }`}
                     placeholder="0"
                    />
                 </div>
+                <p className={`text-[9px] font-bold ml-2 ${fieldError ? 'text-rose-500' : 'text-slate-400'}`}>
+                  {fieldError || item.helper}
+                </p>
              </div>
-           ))}
+           );
+           })}
         </div>
         <div className="space-y-8">
            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2">Passive & Secondary</h4>
-           {[
-             { label: 'Rental Income', field: 'rental' as keyof DetailedIncome, icon: Home },
-             { label: 'Dividends', field: 'investment' as keyof DetailedIncome, icon: TrendingUp },
-             { label: 'Side Business', field: 'business' as keyof DetailedIncome, icon: Calculator }
-           ].map(item => (
+           {PASSIVE_FIELDS.map(item => {
+             const fieldError = getBracketError(member.income, item);
+             return (
              <div key={item.field} className="space-y-2">
                 <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest ml-2">{item.label}</label>
                 <div className="relative group">
@@ -98,16 +181,27 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                     pattern="[0-9]*"
                     value={member.income[item.field] || ''} 
                     onChange={e => updateIncomeField(member.id, item.field, sanitizeDigits(e.target.value))}
-                    className="w-full bg-white border border-slate-200 rounded-2xl px-12 md:px-14 py-3.5 md:py-4 font-black text-lg md:text-xl outline-none focus:border-teal-600 transition-all shadow-sm"
+                    className={`w-full bg-white border rounded-2xl px-12 md:px-14 py-3.5 md:py-4 font-black text-lg md:text-xl outline-none transition-all shadow-sm ${
+                      fieldError ? 'border-rose-300 focus:border-rose-500' : 'border-slate-200 focus:border-teal-600'
+                    }`}
                     placeholder="0"
                    />
                 </div>
+                <p className={`text-[9px] font-bold ml-2 ${fieldError ? 'text-rose-500' : 'text-slate-400'}`}>
+                  {fieldError || item.helper}
+                </p>
              </div>
-           ))}
+           );
+           })}
         </div>
       </div>
     </div>
   );
+
+  const editingMember = useMemo(() => {
+    if (!editingId) return null;
+    return members.find(m => m.id === editingId) || null;
+  }, [editingId, members]);
 
   const currencyCountry = state.profile.country;
   const currencySymbol = getCurrencySymbol(currencyCountry);
@@ -143,7 +237,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
               {/* Mobile Cards */}
               <div className="md:hidden p-6 space-y-4">
                 {members.map(m => {
-                  const mTotal = (m.income.salary || 0) + (m.income.bonus || 0) + (m.income.reimbursements || 0) + (m.income.business || 0) + (m.income.rental || 0) + (m.income.investment || 0);
+                  const mTotal = monthlyIncomeFromDetailed(m.income);
                   const share = (mTotal / (totalHouseholdInflow || 1)) * 100;
                   return (
                     <div key={m.id} className="border border-slate-200 rounded-3xl p-5 space-y-4">
@@ -183,7 +277,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                        {members.map(m => {
-                          const mTotal = (m.income.salary || 0) + (m.income.bonus || 0) + (m.income.reimbursements || 0) + (m.income.business || 0) + (m.income.rental || 0) + (m.income.investment || 0);
+                          const mTotal = monthlyIncomeFromDetailed(m.income);
                           const share = (mTotal / (totalHouseholdInflow || 1)) * 100;
                           return (
                              <tr key={m.id} className="hover:bg-slate-50 transition-colors">
@@ -209,7 +303,7 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
               </div>
            </div>
            
-           {editingId && <IncomeForm member={members.find(m => m.id === editingId)} />}
+           {editingMember ? renderIncomeForm(editingMember) : null}
         </div>
 
         <div className="space-y-8">
@@ -222,8 +316,22 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
               
               <div className="space-y-6 relative z-10">
                  {[
-                   { label: 'Active Salary', val: members.reduce((s, m) => s + (m.income.salary || 0), 0), color: '#0f766e' },
-                   { label: 'Passive Yields', val: members.reduce((s, m) => s + (m.income.rental || 0) + (m.income.investment || 0), 0), color: '#10b981' },
+                   {
+                     label: 'Operational Core',
+                     val: members.reduce((s, m) => {
+                       const b = monthlyIncomeBreakdown(m.income);
+                       return s + b.salary + b.bonus + b.reimbursements;
+                     }, 0),
+                     color: '#0f766e'
+                   },
+                   {
+                     label: 'Passive Yields',
+                     val: members.reduce((s, m) => {
+                       const b = monthlyIncomeBreakdown(m.income);
+                       return s + b.rental + b.investment + b.pension;
+                     }, 0),
+                     color: '#10b981'
+                   },
                    { label: 'Side/Business', val: members.reduce((s, m) => s + (m.income.business || 0), 0), color: '#f59e0b' }
                  ].map((pool, i) => (
                     <div key={i} className="space-y-2">

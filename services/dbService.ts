@@ -30,6 +30,38 @@ const UUID_REGEX =
 
 const isUuid = (value: string) => UUID_REGEX.test(value);
 
+const hasCompleteOnboardingSections = (profile: Record<string, any>) => {
+  const dobRaw = typeof profile.dob === 'string' ? profile.dob.trim() : '';
+  const dob = dobRaw ? new Date(dobRaw) : null;
+  if (!dob || Number.isNaN(dob.getTime())) return false;
+
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age -= 1;
+  }
+
+  const lifeExpectancy = Number(profile.life_expectancy);
+  const retirementAge = Number(profile.retirement_age);
+  const hasPlanning =
+    Number.isFinite(lifeExpectancy) &&
+    Number.isFinite(retirementAge) &&
+    retirementAge > age &&
+    lifeExpectancy > retirementAge;
+
+  const hasLocation =
+    typeof profile.pincode === 'string' && profile.pincode.trim().length > 0 &&
+    typeof profile.city === 'string' && profile.city.trim().length > 0 &&
+    typeof profile.state === 'string' && profile.state.trim().length > 0 &&
+    typeof profile.country === 'string' && profile.country.trim().length > 0;
+
+  const iqScore = Number(profile.iq_score);
+  const hasIntelligence = Number.isFinite(iqScore) && iqScore > 0;
+
+  return hasPlanning && hasLocation && hasIntelligence;
+};
+
 // ─────────────────────────────────────────────────────────────
 // ROW ↔ TYPE MAPPERS
 // ─────────────────────────────────────────────────────────────
@@ -42,11 +74,12 @@ function rowToIncome(row: Record<string, any>): DetailedIncome {
     business:         Number(row.business           ?? 0),
     rental:           Number(row.rental             ?? 0),
     investment:       Number(row.investment         ?? 0),
+    pension:          Number(row.pension            ?? 0),
     expectedIncrease: Number(row.expected_increase  ?? 6),
   };
 }
 
-function incomeToColumns(inc: DetailedIncome) {
+function incomeToColumns(inc: DetailedIncome, includePension = true) {
   return {
     salary:            inc.salary,
     bonus:             inc.bonus,
@@ -54,6 +87,7 @@ function incomeToColumns(inc: DetailedIncome) {
     business:          inc.business,
     rental:            inc.rental,
     investment:        inc.investment,
+    ...(includePension ? { pension: inc.pension } : {}),
     expected_increase: inc.expectedIncrease,
   };
 }
@@ -65,6 +99,7 @@ function rowToFamilyMember(row: Record<string, any>): FamilyMember {
     relation:        row.relation,
     age:             Number(row.age              ?? 0),
     isDependent:     Boolean(row.is_dependent),
+    includeIncomeInPlanning: row.include_income_in_planning == null ? true : Boolean(row.include_income_in_planning),
     retirementAge:   row.retirement_age ?? undefined,
     monthlyExpenses: Number(row.monthly_expenses ?? 0),
     income:          rowToIncome(row),
@@ -240,6 +275,8 @@ function rowToRiskProfile(row: Record<string, any>): RiskProfile {
     lastUpdated: row.last_updated instanceof Date
       ? row.last_updated.toISOString()
       : row.last_updated,
+    questionnaireVersion: Number(row.questionnaire_version ?? 1),
+    questionnaireAnswers: Array.isArray(row.questionnaire_answers) ? row.questionnaire_answers : [],
     recommendedAllocation: {
       equity: Number(row.equity ?? 0),
       debt: Number(row.debt ?? 0),
@@ -257,15 +294,21 @@ function rowToEstateFlags(row: Record<string, any>) {
 }
 
 function rowToInsuranceAnalysis(row: Record<string, any>): InsuranceAnalysisConfig {
+  const legacyAmount = Number(row.existing_insurance ?? row.immediate_needs ?? 0);
+  const legacyType = row.insurance_type === 'Health' ? 'Health' : 'Term';
+  const legacyCombinedAmount = Number(row.insurance_amount ?? legacyAmount);
   return {
     inflation: Number(row.inflation ?? 0),
-    investmentRate: Number(row.investment_rate ?? 0),
-    immediateAnnualValue: Number(row.immediate_needs ?? 0),
-    immediateYears: Number(row.immediate_years ?? 1),
-    incomeAnnualValue: Number(row.income_annual_value ?? 0),
-    incomeYears: Number(row.replacement_years ?? 0),
-    financialAssetDiscount: Number(row.financial_asset_discount ?? 0),
-    existingInsurance: Number(row.existing_insurance ?? 0),
+    termInsuranceAmount: Number(
+      row.term_insurance_amount
+      ?? (legacyType === 'Term' ? legacyCombinedAmount : 0)
+      ?? 0,
+    ),
+    healthInsuranceAmount: Number(
+      row.health_insurance_amount
+      ?? (legacyType === 'Health' ? legacyCombinedAmount : 0)
+      ?? 0,
+    ),
     liabilityCovers: row.liability_covers && typeof row.liability_covers === 'object' ? row.liability_covers : {},
     goalCovers: row.goal_covers && typeof row.goal_covers === 'object' ? row.goal_covers : {},
     assetCovers: row.asset_covers && typeof row.asset_covers === 'object'
@@ -303,7 +346,7 @@ export async function loadFinanceData(
   ] = await Promise.all([
     supabase
       .from('profiles')
-      .select('identifier,first_name,last_name,dob,life_expectancy,retirement_age,pincode,city,state,country,income_source,iq_score')
+      .select('identifier,first_name,last_name,dob,life_expectancy,retirement_age,pincode,city,state,country,income_source,iq_score,onboarding_done')
       .eq('id', user.id)
       .single(),
     supabase.from('family_members').select('*').eq('user_id', user.id).order('created_at'),
@@ -346,7 +389,7 @@ export async function loadFinanceData(
     return incRow ? { ...member, income: rowToIncome(incRow) } : member;
   });
 
-  const onboardingDone = Boolean(p.onboarding_done);
+  const onboardingDone = Boolean(p.onboarding_done) || hasCompleteOnboardingSections(p);
 
   return {
     ...fallback,
@@ -508,22 +551,39 @@ async function saveFamilyMembers(
 
   const hasOnlyUuidIds = family.every(m => isUuid(m.id));
 
-  const rows = family.map(m => ({
+  const mapRows = (withPlanningFlag: boolean, withPension: boolean) => family.map(m => ({
     id:               hasOnlyUuidIds ? m.id : undefined,
     user_id:          uid,
     name:             m.name,
     relation:         m.relation,
     age:              m.age,
     is_dependent:     m.isDependent,
+    ...(withPlanningFlag ? { include_income_in_planning: m.includeIncomeInPlanning ?? true } : {}),
     retirement_age:   m.retirementAge ?? null,
     monthly_expenses: m.monthlyExpenses,
-    ...incomeToColumns(m.income),
+    ...incomeToColumns(m.income, withPension),
   }));
 
+  const isMissingOptionalColumnError = (error: any) =>
+    error?.code === 'PGRST204'
+    && typeof error?.message === 'string'
+    && (
+      error.message.includes("'include_income_in_planning'")
+      || error.message.includes("'pension'")
+    );
+
   if (hasOnlyUuidIds) {
-    const { error } = await supabase
+    const rows = mapRows(true, true);
+    let { error } = await supabase
       .from('family_members')
       .upsert(rows, { onConflict: 'id' });
+    if (error && isMissingOptionalColumnError(error)) {
+      const fallbackRows = mapRows(false, false);
+      const fallback = await supabase
+        .from('family_members')
+        .upsert(fallbackRows, { onConflict: 'id' });
+      error = fallback.error;
+    }
     if (error) throw error;
 
     const ids = family.map(m => m.id);
@@ -543,10 +603,20 @@ async function saveFamilyMembers(
     .eq('user_id', uid);
   if (delErr) throw delErr;
 
-  const { data, error } = await supabase
+  const rows = mapRows(true, true);
+  let { data, error } = await supabase
     .from('family_members')
     .insert(rows.map(({ id, ...rest }) => rest))
     .select();
+  if (error && isMissingOptionalColumnError(error)) {
+    const fallbackRows = mapRows(false, false);
+    const fallback = await supabase
+      .from('family_members')
+      .insert(fallbackRows.map(({ id, ...rest }) => rest))
+      .select();
+    data = fallback.data;
+    error = fallback.error;
+  }
   if (error) throw error;
 
   return (data ?? []).map(rowToFamilyMember);
@@ -558,20 +628,33 @@ async function saveIncomeProfiles(
   selfIncome: DetailedIncome,
   family: FamilyMember[], // use DB UUIDs from saveFamilyMembers result
 ): Promise<void> {
-  const rows = [
-    { user_id: uid, owner_ref: 'self', ...incomeToColumns(selfIncome) },
+  const mapRows = (withPension: boolean) => [
+    { user_id: uid, owner_ref: 'self', ...incomeToColumns(selfIncome, withPension) },
     ...family.map(m => ({
       user_id:   uid,
       owner_ref: m.id,           // now a real UUID
-      ...incomeToColumns(m.income),
+      ...incomeToColumns(m.income, withPension),
     })),
   ];
 
+  const isMissingPensionColumnError = (error: any) =>
+    error?.code === 'PGRST204'
+    && typeof error?.message === 'string'
+    && error.message.includes("'pension'");
+
   // UPSERT by unique(user_id, owner_ref) — safe because 'self' never changes
   // and family UUIDs are now real DB UUIDs
-  const { error } = await supabase
+  const rows = mapRows(true);
+  let { error } = await supabase
     .from('income_profiles')
     .upsert(rows, { onConflict: 'user_id,owner_ref' });
+  if (error && isMissingPensionColumnError(error)) {
+    const fallbackRows = mapRows(false);
+    const fallback = await supabase
+      .from('income_profiles')
+      .upsert(fallbackRows, { onConflict: 'user_id,owner_ref' });
+    error = fallback.error;
+  }
   if (error) throw error;
 
   // Clean up stale entries for removed family members
@@ -1060,19 +1143,41 @@ async function saveRiskProfile(
     return;
   }
 
-  const { error } = await supabase
+  let { error } = await supabase
     .from('risk_profiles')
     .upsert({
       user_id: uid,
       score: riskProfile.score,
       level: riskProfile.level,
       last_updated: riskProfile.lastUpdated,
+      questionnaire_version: riskProfile.questionnaireVersion ?? 1,
+      questionnaire_answers: riskProfile.questionnaireAnswers ?? [],
       equity: riskProfile.recommendedAllocation.equity,
       debt: riskProfile.recommendedAllocation.debt,
       gold: riskProfile.recommendedAllocation.gold,
       liquid: riskProfile.recommendedAllocation.liquid,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
+  if (
+    error?.code === 'PGRST204'
+    && typeof error?.message === 'string'
+    && (error.message.includes("'questionnaire_version'") || error.message.includes("'questionnaire_answers'"))
+  ) {
+    const fallback = await supabase
+      .from('risk_profiles')
+      .upsert({
+        user_id: uid,
+        score: riskProfile.score,
+        level: riskProfile.level,
+        last_updated: riskProfile.lastUpdated,
+        equity: riskProfile.recommendedAllocation.equity,
+        debt: riskProfile.recommendedAllocation.debt,
+        gold: riskProfile.recommendedAllocation.gold,
+        liquid: riskProfile.recommendedAllocation.liquid,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    error = fallback.error;
+  }
   if (error) throw error;
 }
 
@@ -1095,24 +1200,66 @@ async function saveInsuranceAnalysis(
   uid: string,
   config: InsuranceAnalysisConfig,
 ): Promise<void> {
-  const { error } = await supabase
+  let { error } = await supabase
     .from('insurance_analysis_config')
     .upsert({
       user_id: uid,
       inflation: config.inflation,
-      investment_rate: config.investmentRate,
-      replacement_years: config.incomeYears,
-      immediate_needs: config.immediateAnnualValue,
-      immediate_years: config.immediateYears,
-      income_annual_value: config.incomeAnnualValue,
-      financial_asset_discount: config.financialAssetDiscount,
-      existing_insurance: config.existingInsurance,
+      term_insurance_amount: config.termInsuranceAmount,
+      health_insurance_amount: config.healthInsuranceAmount,
       liability_covers: config.liabilityCovers,
       goal_covers: config.goalCovers,
       asset_covers: config.assetCovers,
       inheritance_value: config.inheritanceValue,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
+  if (
+    error?.code === 'PGRST204'
+    && typeof error?.message === 'string'
+    && (error.message.includes("'term_insurance_amount'") || error.message.includes("'health_insurance_amount'"))
+  ) {
+    // Backward compatibility for users who have not run the latest migration yet.
+    const fallbackType = config.termInsuranceAmount > 0 ? 'Term' : 'Health';
+    const fallbackAmount = config.termInsuranceAmount > 0
+      ? config.termInsuranceAmount
+      : config.healthInsuranceAmount;
+    const fallback = await supabase
+      .from('insurance_analysis_config')
+      .upsert({
+        user_id: uid,
+        inflation: config.inflation,
+        insurance_type: fallbackType,
+        insurance_amount: fallbackAmount,
+        immediate_needs: config.termInsuranceAmount,
+        existing_insurance: config.termInsuranceAmount,
+        liability_covers: config.liabilityCovers,
+        goal_covers: config.goalCovers,
+        asset_covers: config.assetCovers,
+        inheritance_value: config.inheritanceValue,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    error = fallback.error;
+    if (
+      error?.code === 'PGRST204'
+      && typeof error?.message === 'string'
+      && (error.message.includes("'insurance_type'") || error.message.includes("'insurance_amount'"))
+    ) {
+      const olderFallback = await supabase
+        .from('insurance_analysis_config')
+        .upsert({
+          user_id: uid,
+          inflation: config.inflation,
+          immediate_needs: config.termInsuranceAmount,
+          existing_insurance: config.termInsuranceAmount,
+          liability_covers: config.liabilityCovers,
+          goal_covers: config.goalCovers,
+          asset_covers: config.assetCovers,
+          inheritance_value: config.inheritanceValue,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+      error = olderFallback.error;
+    }
+  }
   if (error) throw error;
 }
 

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { FinanceState, DetailedIncome, FamilyMember, ExpenseItem } from '../types';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 interface CashflowProfileProps {
   state: FinanceState;
@@ -74,11 +75,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
   };
 
   const totalMonthlyIncome = useMemo(() => {
-    return members.reduce((acc, m) => {
-      const i = m.income;
-      return acc + (i.salary || 0) + (i.bonus || 0) + (i.reimbursements || 0) + 
-             (i.business || 0) + (i.rental || 0) + (i.investment || 0);
-    }, 0);
+    return members.reduce((acc, m) => acc + monthlyIncomeFromDetailed(m.income), 0);
   }, [members]);
 
   const totalMonthlyExpenses = state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -165,17 +162,18 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
                 <p className={`text-[9px] font-black uppercase mb-1 ${selectedMemberId === member.id ? 'text-slate-500' : 'text-slate-400'}`}>{member.relation}</p>
                 <h4 className="text-lg font-black tracking-tight">{member.name}</h4>
                 <p className={`text-[10px] font-bold mt-4 ${selectedMemberId === member.id ? 'text-teal-400' : 'text-teal-600'}`}>
-                  {formatCurrency((member.income.salary || 0) + (member.income.bonus || 0), currencyCountry)}
+                  {formatCurrency(monthlyIncomeFromDetailed(member.income), currencyCountry)}
                 </p>
               </button>
             ))}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <IncomeInput label="Monthly Base Salary" icon={Briefcase} value={currentMember.income.salary} field="salary" />
-            <IncomeInput label="Rental Income" icon={Home} value={currentMember.income.rental} field="rental" />
-            <IncomeInput label="Dividend/Investment Yield" icon={TrendingUp} value={currentMember.income.investment} field="investment" />
-            <IncomeInput label="Business Inflow" icon={Calculator} value={currentMember.income.business} field="business" />
+            <IncomeInput label="Net Salary (Monthly)" icon={Briefcase} value={currentMember.income.salary} field="salary" />
+            <IncomeInput label="Rental Income (Monthly)" icon={Home} value={currentMember.income.rental} field="rental" />
+            <IncomeInput label="Annual Dividends (Yearly)" icon={TrendingUp} value={currentMember.income.investment} field="investment" />
+            <IncomeInput label="Pension (Monthly)" icon={Landmark} value={currentMember.income.pension} field="pension" />
+            <IncomeInput label="Side Business (Monthly)" icon={Calculator} value={currentMember.income.business} field="business" />
           </div>
         </div>
       ) : (

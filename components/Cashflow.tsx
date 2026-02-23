@@ -9,10 +9,11 @@ import {
   ArrowUpRight, ArrowDownRight, Info, Calendar,
   Wallet, Landmark, PieChart, Zap, BarChart3, User
 } from 'lucide-react';
-import { FinanceState, DetailedIncome, Goal, RelativeDate } from '../types';
+import { FinanceState, Goal, RelativeDate } from '../types';
 import { formatCurrency } from '../lib/currency';
 import { annualizeAmount, buildBucketDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
 import { inferTenureMonths } from '../lib/loanMath';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 interface CashflowProps {
   state: FinanceState;
@@ -32,10 +33,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
     }
   };
 
-  const calculateTotalMemberIncome = (income: DetailedIncome) => {
-    return (income.salary || 0) + (income.bonus || 0) + (income.reimbursements || 0) + 
-           (income.business || 0) + (income.rental || 0) + (income.investment || 0);
-  };
+  const calculateTotalMemberIncome = monthlyIncomeFromDetailed;
 
   const projectionData = useMemo(() => {
     const data = [];
@@ -47,7 +45,9 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
 
     const incomeMembers = [
       { income: state.profile.income },
-      ...state.family.map(f => ({ income: f.income })),
+      ...state.family
+        .filter(f => f.includeIncomeInPlanning !== false)
+        .map(f => ({ income: f.income })),
     ];
     const baseMonthlyIncome = incomeMembers.reduce((sum, m) => sum + calculateTotalMemberIncome(m.income), 0);
     const totalIncomeForGrowth = incomeMembers.reduce((sum, m) => sum + calculateTotalMemberIncome(m.income), 0);

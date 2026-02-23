@@ -8,6 +8,7 @@ import {
 import { FinanceState, ExpenseItem } from '../types';
 import { parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 interface OutflowProfileProps {
   state: FinanceState;
@@ -45,21 +46,13 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
   };
 
   const totalHouseholdIncome =
-    (state.profile.income.salary || 0) +
-    (state.profile.income.bonus || 0) +
-    (state.profile.income.reimbursements || 0) +
-    (state.profile.income.business || 0) +
-    (state.profile.income.rental || 0) +
-    (state.profile.income.investment || 0) +
-    state.family.reduce((sum, f) => {
-      const i = f.income;
-      return sum + (i.salary || 0) + (i.bonus || 0) + (i.reimbursements || 0) +
-        (i.business || 0) + (i.rental || 0) + (i.investment || 0);
-    }, 0);
+    monthlyIncomeFromDetailed(state.profile.income) +
+    state.family.reduce((sum, f) => sum + monthlyIncomeFromDetailed(f.income), 0);
 
   const totalMonthlyExpenses = state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0);
   const totalMonthlyDebt = state.loans.reduce((sum, l) => sum + l.emi, 0);
   const totalMonthlyOutflow = totalMonthlyExpenses + totalMonthlyDebt;
+  const primaryInflow = monthlyIncomeFromDetailed(state.profile.income);
 
   const currencyCountry = state.profile.country;
   const currencySymbol = getCurrencySymbol(currencyCountry);
@@ -173,13 +166,13 @@ const OutflowProfile: React.FC<OutflowProfileProps> = ({ state, updateState }) =
                  <div className="p-4 bg-teal-50 text-teal-600 rounded-2xl shadow-inner"><ShieldCheck size={28}/></div>
                  <div className="text-left">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Inflow Buffer</p>
-                    <h4 className="text-lg font-black text-slate-900">{formatCurrency((state.profile.income.salary || 0) - totalMonthlyOutflow, currencyCountry)} Surplus</h4>
+                    <h4 className="text-lg font-black text-slate-900">{formatCurrency(primaryInflow - totalMonthlyOutflow, currencyCountry)} Surplus</h4>
                  </div>
               </div>
               <div className="space-y-4">
-                 <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase"><span>Consumption Ratio</span><span>{Math.round((totalMonthlyOutflow / (state.profile.income.salary || 1)) * 100)}%</span></div>
+                 <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase"><span>Consumption Ratio</span><span>{Math.round((totalMonthlyOutflow / (primaryInflow || 1)) * 100)}%</span></div>
                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-teal-500 transition-all duration-1000" style={{ width: `${Math.min(100, (totalMonthlyOutflow / (state.profile.income.salary || 1)) * 100)}%` }} />
+                    <div className="h-full bg-teal-500 transition-all duration-1000" style={{ width: `${Math.min(100, (totalMonthlyOutflow / (primaryInflow || 1)) * 100)}%` }} />
                  </div>
               </div>
            </div>

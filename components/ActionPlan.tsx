@@ -6,8 +6,9 @@ import {
   ArrowUpRight, ListChecks, Wallet, Activity, ArrowDownToLine,
   ChevronRight, ShieldCheck, Clock, Gauge, BarChart3, Lock
 } from 'lucide-react';
-import { FinanceState, DetailedIncome } from '../types';
+import { FinanceState } from '../types';
 import { formatCurrency } from '../lib/currency';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 interface Action {
   id: number;
@@ -27,18 +28,11 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
 
   const currencyCountry = state.profile.country;
 
-  const sumIncome = (income: DetailedIncome) => (
-    (income.salary || 0) +
-    (income.bonus || 0) +
-    (income.reimbursements || 0) +
-    (income.business || 0) +
-    (income.rental || 0) +
-    (income.investment || 0)
-  );
-
   const calculations = useMemo(() => {
-    const selfIncome = sumIncome(state.profile.income);
-    const familyIncome = state.family.reduce((sum, member) => sum + sumIncome(member.income), 0);
+    const selfIncome = monthlyIncomeFromDetailed(state.profile.income);
+    const familyIncome = state.family
+      .filter(member => member.includeIncomeInPlanning !== false)
+      .reduce((sum, member) => sum + monthlyIncomeFromDetailed(member.income), 0);
     const monthlyIncome = selfIncome + familyIncome;
 
     const monthlyExpenses = state.detailedExpenses.reduce((sum, e) => sum + (e.amount || 0), 0) || (state.profile.monthlyExpenses || 0);
@@ -59,45 +53,38 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
 
     const analysis = state.insuranceAnalysis ?? {
       inflation: 6,
-      investmentRate: 11.5,
-      immediateAnnualValue: 1000000,
-      immediateYears: 1,
-      incomeAnnualValue: 0,
-      incomeYears: 20,
-      financialAssetDiscount: 50,
-      existingInsurance: 0,
+      termInsuranceAmount: 0,
+      healthInsuranceAmount: 0,
       liabilityCovers: {},
       goalCovers: {},
       assetCovers: { financial: 50, personal: 0, inheritance: 100 },
       inheritanceValue: 0,
     };
-    const pvAnnuity = (annual: number, years: number, rate: number) => {
-      if (years <= 0) return 0;
-      const r = rate / 100;
-      if (r === 0) return annual * years;
-      return annual * ((1 - Math.pow(1 + r, -years)) / r);
-    };
-    const annualExpenses = monthlyExpenses * 12;
-    const incomeAnnual = analysis.incomeAnnualValue || annualExpenses;
-    const immediatePV = pvAnnuity(analysis.immediateAnnualValue, analysis.immediateYears, analysis.investmentRate);
-    const incomePV = pvAnnuity(incomeAnnual, analysis.incomeYears, analysis.investmentRate);
-    const totalDebt = state.loans.reduce((sum, loan) => sum + (loan.outstandingAmount || 0), 0);
-    const goalRequirements = state.goals.reduce((sum, goal) => sum + (goal.targetAmountToday || 0), 0);
-    const totalExistingInsurance = analysis.existingInsurance || state.insurance
-      .filter(policy => policy.category === 'Life Insurance')
-      .reduce((sum, policy) => sum + (policy.sumAssured || 0), 0);
+    const emergencyFundRequired = monthlyExpenses * 12;
+    const debtCovered = state.loans.reduce((sum, loan) => {
+      const coverPct = analysis.liabilityCovers?.[loan.id] ?? 100;
+      return sum + ((loan.outstandingAmount || 0) * (coverPct / 100));
+    }, 0);
+    const goalRequirements = state.goals.reduce((sum, goal) => {
+      const coverPct = analysis.goalCovers?.[goal.id] ?? 100;
+      return sum + ((goal.targetAmountToday || 0) * (coverPct / 100));
+    }, 0);
     const financialAssets = state.assets
       .filter(asset => ['Liquid', 'Equity', 'Debt', 'Gold/Silver'].includes(asset.category))
       .reduce((sum, asset) => sum + (asset.currentValue || 0), 0);
     const personalAssets = state.assets
       .filter(asset => ['Real Estate', 'Personal', 'Vehicle'].includes(asset.category))
       .reduce((sum, asset) => sum + (asset.currentValue || 0), 0);
-    const coveredAssets = (financialAssets * ((analysis.assetCovers?.financial ?? analysis.financialAssetDiscount) / 100))
+    const coveredAssets = (financialAssets * ((analysis.assetCovers?.financial ?? 50) / 100))
       + (personalAssets * ((analysis.assetCovers?.personal ?? 0) / 100))
       + ((analysis.inheritanceValue || 0) * ((analysis.assetCovers?.inheritance ?? 100) / 100));
-    const totalRequirement = immediatePV + incomePV + totalDebt + goalRequirements;
-    const totalAvailable = totalExistingInsurance + coveredAssets;
-    const insuranceGap = Math.max(0, totalRequirement - totalAvailable);
+    const termRequirement = Math.max(0, emergencyFundRequired + debtCovered + goalRequirements - coveredAssets);
+    const policyTermCover = state.insurance
+      .filter(policy => policy.category === 'Life Insurance' && policy.type === 'Term')
+      .reduce((sum, policy) => sum + (policy.sumAssured || 0), 0);
+    const enteredTermCover = analysis.termInsuranceAmount || 0;
+    const availableTermCover = enteredTermCover > 0 ? enteredTermCover : policyTermCover;
+    const insuranceGap = Math.max(0, termRequirement - availableTermCover);
 
     return {
       monthlyIncome,
@@ -143,7 +130,7 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         tactics: [
           'Update salary or business inflow in Inflow Profile',
           'Add family members with income if applicable',
-          'Confirm monthly reimbursements or rental inflow'
+          'Confirm yearly bonus/reimbursements and monthly rental inflow'
         ],
         icon: TrendingUp,
         color: 'teal',
@@ -219,7 +206,7 @@ const ActionPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
         id: ids.insurance,
         priority: 'Strategic',
         title: 'Close Protection Gap',
-        description: `Current coverage falls short by ${formatCurrency(calculations.insuranceGap, currencyCountry)} based on HLV needs.`,
+        description: `Current term coverage falls short by ${formatCurrency(calculations.insuranceGap, currencyCountry)} after accounting for emergency corpus, liabilities, goals, and covered assets.`,
         impact: 'Secures Family Goals',
         delta: `${formatCurrency(calculations.insuranceGap, currencyCountry)} cover`,
         tactics: [

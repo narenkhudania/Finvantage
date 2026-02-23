@@ -11,6 +11,7 @@ import { FinanceState, Goal, RelativeDate, Asset } from '../types';
 import { formatCurrency } from '../lib/currency';
 import { annualizeAmount, getGoalIntervalYears, getLifeExpectancyYear, getReturnRateForYear, getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
 import { inferTenureMonths } from '../lib/loanMath';
+import { annualIncomeFromDetailed, monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
   const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
@@ -140,19 +141,14 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
 
     const incomeMembers = [
       { income: state.profile.income },
-      ...state.family.map(f => ({ income: f.income })),
+      ...state.family
+        .filter(f => f.includeIncomeInPlanning !== false)
+        .map(f => ({ income: f.income })),
     ];
-    const baseMonthlyIncome = incomeMembers.reduce((sum, m) => {
-      return sum + (m.income.salary || 0) + (m.income.bonus || 0) + (m.income.reimbursements || 0) +
-        (m.income.business || 0) + (m.income.rental || 0) + (m.income.investment || 0);
-    }, 0);
-    const totalIncomeForGrowth = incomeMembers.reduce((sum, m) => {
-      return sum + (m.income.salary || 0) + (m.income.bonus || 0) + (m.income.reimbursements || 0) +
-        (m.income.business || 0) + (m.income.rental || 0) + (m.income.investment || 0);
-    }, 0);
+    const baseMonthlyIncome = incomeMembers.reduce((sum, m) => sum + monthlyIncomeFromDetailed(m.income), 0);
+    const totalIncomeForGrowth = incomeMembers.reduce((sum, m) => sum + monthlyIncomeFromDetailed(m.income), 0);
     const weightedGrowth = incomeMembers.reduce((sum, m) => {
-      const memberTotal = (m.income.salary || 0) + (m.income.bonus || 0) + (m.income.reimbursements || 0) +
-        (m.income.business || 0) + (m.income.rental || 0) + (m.income.investment || 0);
+      const memberTotal = monthlyIncomeFromDetailed(m.income);
       return sum + (memberTotal * (m.income.expectedIncrease || 0));
     }, 0);
     const incomeGrowthRate = totalIncomeForGrowth > 0 ? (weightedGrowth / totalIncomeForGrowth) / 100 : 0;
@@ -466,8 +462,13 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
   const auditData = useMemo(() => {
     const s = state.profile.income;
     const netSalaryPa = (s.salary || 0) * 12;
-    const dividendPa = (s.investment || 0) * 12;
-    const totalInflowPa = netSalaryPa + dividendPa;
+    const bonusPa = s.bonus || 0;
+    const reimbursementsPa = s.reimbursements || 0;
+    const businessPa = (s.business || 0) * 12;
+    const rentalPa = (s.rental || 0) * 12;
+    const dividendPa = s.investment || 0;
+    const pensionPa = (s.pension || 0) * 12;
+    const totalInflowPa = annualIncomeFromDetailed(s);
     const livingExpensesPa = (state.profile.monthlyExpenses || 0) * 12;
     const fallbackSavings = [
       { label: "NPS & EPF", value: 180000 },
@@ -489,8 +490,13 @@ const GoalFunding: React.FC<{ state: FinanceState }> = ({ state }) => {
 
     return {
       incomes: [
-        { label: "Net Salary Income", value: netSalaryPa },
-        { label: "Dividend Income", value: dividendPa }
+        { label: "Net Salary (Monthly x12)", value: netSalaryPa },
+        { label: "Bonus (Yearly)", value: bonusPa },
+        { label: "Reimbursements (Yearly)", value: reimbursementsPa },
+        { label: "Side Business (Monthly x12)", value: businessPa },
+        { label: "Rental Income (Monthly x12)", value: rentalPa },
+        { label: "Annual Dividends (Yearly)", value: dividendPa },
+        { label: "Pension (Monthly x12)", value: pensionPa },
       ],
       totalInflowPa,
       expenses: [{ label: "Living Expenses", value: livingExpensesPa }],

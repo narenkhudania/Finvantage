@@ -1,20 +1,17 @@
 import type {
   FinanceState,
   ReportSnapshot,
-  DetailedIncome,
   Asset,
   Loan,
   AllocationBreakdown,
 } from '../types';
 import { currentYear, getRiskReturnAssumption, resolveRelativeYear, inflateByBuckets, getGoalIntervalYears } from './financeMath';
 import { getJourneyProgress } from './journey';
+import { monthlyIncomeFromDetailed } from './incomeMath';
 
 const sum = (values: number[]) => values.reduce((acc, v) => acc + (Number.isFinite(v) ? v : 0), 0);
 
-const calculateTotalMemberIncome = (income: DetailedIncome) => {
-  return (income.salary || 0) + (income.bonus || 0) + (income.reimbursements || 0)
-    + (income.business || 0) + (income.rental || 0) + (income.investment || 0);
-};
+const calculateTotalMemberIncome = monthlyIncomeFromDetailed;
 
 const toPercent = (value: number, total: number) => (total > 0 ? (value / total) * 100 : 0);
 
@@ -49,7 +46,11 @@ export const buildReportSnapshot = (state: FinanceState): ReportSnapshot => {
   const netWorth = totalAssets - totalLiabilities;
 
   const householdIncome = calculateTotalMemberIncome(state.profile.income)
-    + sum(state.family.map(m => calculateTotalMemberIncome(m.income)));
+    + sum(
+      state.family
+        .filter(m => m.includeIncomeInPlanning !== false)
+        .map(m => calculateTotalMemberIncome(m.income))
+    );
   const householdExpenses = state.detailedExpenses.length > 0
     ? sum(state.detailedExpenses.map(e => e.amount))
     : state.profile.monthlyExpenses;
@@ -291,7 +292,8 @@ export const buildReportSnapshot = (state: FinanceState): ReportSnapshot => {
     },
     assumptions: {
       inflation: state.insuranceAnalysis.inflation,
-      investmentRate: state.insuranceAnalysis.investmentRate,
+      termInsuranceAmount: state.insuranceAnalysis.termInsuranceAmount,
+      healthInsuranceAmount: state.insuranceAnalysis.healthInsuranceAmount,
       expectedIncomeGrowth: state.profile.income.expectedIncrease,
       retirementAge: state.profile.retirementAge,
       lifeExpectancy: state.profile.lifeExpectancy,

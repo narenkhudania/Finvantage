@@ -1,4 +1,5 @@
 import { FinanceState, DetailedIncome, View } from '../types';
+import { monthlyIncomeFromDetailed } from './incomeMath';
 
 export interface JourneyStep {
   id: View;
@@ -7,14 +8,7 @@ export interface JourneyStep {
   complete: boolean;
 }
 
-const sumIncome = (income?: Partial<DetailedIncome>) => (
-  (income?.salary || 0) +
-  (income?.bonus || 0) +
-  (income?.reimbursements || 0) +
-  (income?.business || 0) +
-  (income?.rental || 0) +
-  (income?.investment || 0)
-);
+const sumIncome = (income?: Partial<DetailedIncome>) => monthlyIncomeFromDetailed(income);
 
 export const getJourneySteps = (state: FinanceState): JourneyStep[] => {
   const profileIncome = state.profile?.income;
@@ -23,7 +17,9 @@ export const getJourneySteps = (state: FinanceState): JourneyStep[] => {
 
   const householdIncome =
     sumIncome(profileIncome) +
-    family.reduce((sum, member) => sum + sumIncome(member?.income), 0);
+    family
+      .filter(member => member?.includeIncomeInPlanning !== false)
+      .reduce((sum, member) => sum + sumIncome(member?.income), 0);
 
   const hasOutflow =
     detailedExpenses.length > 0 ||

@@ -21,6 +21,7 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
     business: 0,
     rental: 0,
     investment: 0,
+    pension: 0,
     expectedIncrease: 5
   };
 
@@ -29,10 +30,29 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
     relation: 'Spouse',
     age: 30,
     isDependent: true,
+    includeIncomeInPlanning: false,
     retirementAge: undefined,
     income: { ...initialIncome },
     monthlyExpenses: 0
   });
+  const safeAge = Number.isFinite(newMember.age) ? newMember.age : 0;
+  const defaultRetirementAge = Math.min(100, safeAge + 30);
+  const safeRetirementAge = Number.isFinite(newMember.retirementAge as number)
+    ? (newMember.retirementAge as number)
+    : defaultRetirementAge;
+
+  const getPrimaryAge = (): number | null => {
+    if (!state.profile.dob) return null;
+    const dob = new Date(state.profile.dob);
+    if (Number.isNaN(dob.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+    const monthDiff = today.getMonth() - dob.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+      age -= 1;
+    }
+    return age >= 0 ? age : null;
+  };
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,21 +67,36 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
       setFormError('Age must be between 0 and 110.');
       return;
     }
-    if (!newMember.isDependent) {
+    const primaryAge = getPrimaryAge();
+    if (primaryAge !== null) {
+      if (newMember.relation === 'Spouse' && (age < primaryAge - 10 || age > primaryAge + 10)) {
+        setFormError(`Spouse age should be within +/-10 years of head of household age (${primaryAge}).`);
+        return;
+      }
+      if (newMember.relation === 'Parent' && age < primaryAge + 10) {
+        setFormError(`Parent age should be at least 10 years greater than head of household age (${primaryAge}).`);
+        return;
+      }
+    }
+    if (!newMember.isDependent && (newMember.includeIncomeInPlanning ?? false)) {
       const retirementAge = Number(newMember.retirementAge);
       if (!Number.isFinite(retirementAge) || retirementAge <= age || retirementAge > 100) {
         setFormError('Retirement age must be greater than current age and <= 100 for independent members.');
         return;
       }
     }
-    const member: FamilyMember = { ...newMember, id: Math.random().toString(36).substr(2, 9) };
+    const member: FamilyMember = {
+      ...newMember,
+      includeIncomeInPlanning: newMember.isDependent ? false : (newMember.includeIncomeInPlanning ?? false),
+      id: Math.random().toString(36).substr(2, 9),
+    };
     if (member.isDependent && age > 25) {
       setNotice('Dependent age is over 25. Please confirm this is intended.');
       setTimeout(() => setNotice(null), 4000);
     }
     updateState({ family: [...state.family, member] });
     setShowAdd(false);
-    setNewMember({ name: '', relation: 'Spouse', age: 30, isDependent: true, retirementAge: undefined, income: { ...initialIncome }, monthlyExpenses: 0 });
+    setNewMember({ name: '', relation: 'Spouse', age: 30, isDependent: true, includeIncomeInPlanning: false, retirementAge: undefined, income: { ...initialIncome }, monthlyExpenses: 0 });
   };
 
   const removeMember = (id: string) => {
@@ -131,25 +166,70 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Age</label>
-                <input required type="number" value={newMember.age} onChange={e => setNewMember({...newMember, age: parseInt(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none" />
+                <input
+                  required
+                  type="number"
+                  value={Number.isFinite(newMember.age) ? newMember.age : ''}
+                  onChange={e => {
+                    const nextAge = Number.parseInt(e.target.value, 10);
+                    setNewMember({ ...newMember, age: Number.isFinite(nextAge) ? nextAge : 0 });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                />
               </div>
             </div>
             <div className="flex items-center gap-4">
-              <button type="button" onClick={() => setNewMember({...newMember, isDependent: !newMember.isDependent})} className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newMember.isDependent ? 'bg-teal-600 text-white border-teal-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextDependent = !newMember.isDependent;
+                  setNewMember({
+                    ...newMember,
+                    isDependent: nextDependent,
+                    includeIncomeInPlanning: nextDependent ? false : true,
+                  });
+                }}
+                className={`flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newMember.isDependent ? 'bg-teal-600 text-white border-teal-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}
+              >
                 {newMember.isDependent ? 'Dependent' : 'Independent'}
               </button>
             </div>
             {!newMember.isDependent && (
               <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Consider Income in Planning?</label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setNewMember({ ...newMember, includeIncomeInPlanning: !(newMember.includeIncomeInPlanning ?? false) })}
+                    className={`w-20 h-10 rounded-full transition-all relative ${(newMember.includeIncomeInPlanning ?? false) ? 'bg-teal-600' : 'bg-slate-200'}`}
+                  >
+                    <div className={`absolute top-1 w-8 h-8 rounded-full bg-white transition-all shadow-md ${(newMember.includeIncomeInPlanning ?? false) ? 'left-11' : 'left-1'}`} />
+                  </button>
+                  <p className="text-[10px] font-bold text-slate-500">
+                    {(newMember.includeIncomeInPlanning ?? false) ? 'Included in household planning calculations' : 'Excluded from planning calculations'}
+                  </p>
+                </div>
+              </div>
+            )}
+            {!newMember.isDependent && (newMember.includeIncomeInPlanning ?? false) && (
+              <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Retirement Age</label>
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl font-black text-emerald-600">{safeRetirementAge} yrs</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Planned retirement</span>
+                </div>
                 <input
                   required
-                  type="number"
-                  min={newMember.age + 1}
+                  type="range"
+                  min={Math.max(18, safeAge + 1)}
                   max={100}
-                  value={newMember.retirementAge ?? ''}
-                  onChange={e => setNewMember({ ...newMember, retirementAge: parseInt(e.target.value) })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
+                  step={1}
+                  value={safeRetirementAge}
+                  onChange={e => {
+                    const nextRetirement = Number.parseInt(e.target.value, 10);
+                    setNewMember({ ...newMember, retirementAge: Number.isFinite(nextRetirement) ? nextRetirement : defaultRetirementAge });
+                  }}
+                  className="w-full h-1.5 bg-slate-100 rounded-full appearance-none accent-emerald-500 cursor-pointer"
                 />
               </div>
             )}
@@ -183,6 +263,9 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
                   <h4 className="font-black text-slate-900 text-lg">{member.name}</h4>
                   <p className="text-xs font-bold text-slate-400">
                     {member.relation} • Age {member.age}{member.retirementAge ? ` • Retire ${member.retirementAge}` : ''}
+                  </p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">
+                    {(member.includeIncomeInPlanning ?? true) ? 'Income Included' : 'Income Excluded'}
                   </p>
                 </div>
               </div>

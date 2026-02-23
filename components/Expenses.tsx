@@ -3,6 +3,7 @@ import React from 'react';
 import { FinanceState, ExpenseItem } from '../types';
 import { ShoppingCart, Home, Car, HeartPulse, Zap, Smartphone, Utensils, Plane, GraduationCap, ShieldCheck, Wallet, ChevronRight } from 'lucide-react';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 interface ExpensesProps {
   state: FinanceState;
@@ -40,12 +41,8 @@ const Expenses: React.FC<ExpensesProps> = ({ state, updateState }) => {
   const totalOutflow = state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0);
   
   const calculateTotalIncome = () => {
-    const s = state.profile.income;
-    const self = (s.salary || 0) + (s.bonus || 0) + (s.reimbursements || 0) + (s.business || 0) + (s.rental || 0) + (s.investment || 0);
-    const family = state.family.reduce((sum, f) => {
-      const i = f.income;
-      return sum + (i.salary || 0) + (i.bonus || 0) + (i.reimbursements || 0) + (i.business || 0) + (i.rental || 0) + (i.investment || 0);
-    }, 0);
+    const self = monthlyIncomeFromDetailed(state.profile.income);
+    const family = state.family.reduce((sum, f) => sum + monthlyIncomeFromDetailed(f.income), 0);
     return self + family;
   };
 
