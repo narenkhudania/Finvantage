@@ -17,6 +17,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     // Persist the session in localStorage automatically
     persistSession: true,
     autoRefreshToken: true,
+    // Reduces lock contention errors when multiple tabs/contexts race on auth token locks.
+    multiTab: false,
   },
 });
 

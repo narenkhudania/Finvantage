@@ -334,9 +334,10 @@ function rowToDiscountSettings(row: Record<string, any>): DiscountSettings {
 // ─────────────────────────────────────────────────────────────
 export async function loadFinanceData(
   fallback: FinanceState,
+  userId?: string | null,
 ): Promise<FinanceState | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const uid = userId || (await supabase.auth.getSession()).data.session?.user.id || null;
+  if (!uid) return null;
 
   const [
     profileRes, familyRes, incomeRes,
@@ -347,23 +348,23 @@ export async function loadFinanceData(
     supabase
       .from('profiles')
       .select('identifier,first_name,last_name,dob,life_expectancy,retirement_age,pincode,city,state,country,income_source,iq_score,onboarding_done')
-      .eq('id', user.id)
+      .eq('id', uid)
       .single(),
-    supabase.from('family_members').select('*').eq('user_id', user.id).order('created_at'),
-    supabase.from('income_profiles').select('*').eq('user_id', user.id),
-    supabase.from('expenses').select('*').eq('user_id', user.id).order('category'),
-    supabase.from('cashflows').select('*').eq('user_id', user.id).order('created_at'),
-    supabase.from('investment_commitments').select('*').eq('user_id', user.id).order('created_at'),
-    supabase.from('assets').select('*').eq('user_id', user.id).order('created_at'),
-    supabase.from('loans').select('*').eq('user_id', user.id).order('created_at'),
-    supabase.from('goals').select('*').eq('user_id', user.id).order('priority'),
-    supabase.from('insurances').select('*').eq('user_id', user.id).order('created_at'),
-    supabase.from('transactions').select('*').eq('user_id', user.id).order('date', { ascending: false }),
-    supabase.from('notifications').select('*').eq('user_id', user.id).order('timestamp', { ascending: false }),
-    supabase.from('risk_profiles').select('*').eq('user_id', user.id).maybeSingle(),
-    supabase.from('estate_flags').select('*').eq('user_id', user.id).maybeSingle(),
-    supabase.from('insurance_analysis_config').select('*').eq('user_id', user.id).maybeSingle(),
-    supabase.from('discount_settings').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('family_members').select('*').eq('user_id', uid).order('created_at'),
+    supabase.from('income_profiles').select('*').eq('user_id', uid),
+    supabase.from('expenses').select('*').eq('user_id', uid).order('category'),
+    supabase.from('cashflows').select('*').eq('user_id', uid).order('created_at'),
+    supabase.from('investment_commitments').select('*').eq('user_id', uid).order('created_at'),
+    supabase.from('assets').select('*').eq('user_id', uid).order('created_at'),
+    supabase.from('loans').select('*').eq('user_id', uid).order('created_at'),
+    supabase.from('goals').select('*').eq('user_id', uid).order('priority'),
+    supabase.from('insurances').select('*').eq('user_id', uid).order('created_at'),
+    supabase.from('transactions').select('*').eq('user_id', uid).order('date', { ascending: false }),
+    supabase.from('notifications').select('*').eq('user_id', uid).order('timestamp', { ascending: false }),
+    supabase.from('risk_profiles').select('*').eq('user_id', uid).maybeSingle(),
+    supabase.from('estate_flags').select('*').eq('user_id', uid).maybeSingle(),
+    supabase.from('insurance_analysis_config').select('*').eq('user_id', uid).maybeSingle(),
+    supabase.from('discount_settings').select('*').eq('user_id', uid).maybeSingle(),
   ]);
 
   if (profileRes.error || !profileRes.data) {
@@ -451,12 +452,10 @@ export async function loadFinanceData(
 // ─────────────────────────────────────────────────────────────
 export async function saveFinanceData(
   state: FinanceState,
+  userId?: string | null,
 ): Promise<Partial<FinanceState>> {
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-  if (userError) throw userError;
-  if (!user) throw new Error('No active auth session.');
-
-  const uid = user.id;
+  const uid = userId || (await supabase.auth.getSession()).data.session?.user.id || null;
+  if (!uid) throw new Error('No active auth session.');
   const dbUpdates: Partial<FinanceState> = {};
 
   // ── Step 1: family_members (must be first — income_profiles needs UUIDs)

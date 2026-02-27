@@ -33,8 +33,11 @@ import { LayoutDashboard, Bell, ListChecks, Cloud, CloudOff, Loader2 } from 'luc
 import { supabase } from './services/supabase';
 import { signOut } from './services/authService';
 import { saveFinanceData, loadFinanceData } from './services/dbService';
+import { getSelfAdminFlag } from './services/admin/adminService';
+import { flushActivityEvents, setUsageTrackingUserId, trackEvent } from './services/usageTracking';
 import { getJourneyProgress } from './lib/journey';
 import { setActiveCountry } from './lib/currency';
+import { applySeoMeta } from './services/seoMeta';
 
 const LOCAL_KEY        = 'finvantage_active_session';
 const SAVE_DEBOUNCE_MS = 1500;
@@ -182,6 +185,16 @@ const App: React.FC = () => {
 
   const saveTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstRender = useRef(true);
+  const authUserIdRef = useRef<string | null>(null);
+  const usageSnapshotRef = useRef<{
+    familyCount: number;
+    goalCount: number;
+    assetCount: number;
+    loanCount: number;
+    txCount: number;
+    insuranceCount: number;
+    hasRiskProfile: boolean;
+  } | null>(null);
 
   const [financeState, setFinanceState] = useState<FinanceState>(() => {
     const saved = localStorage.getItem(LOCAL_KEY);
@@ -201,11 +214,24 @@ const App: React.FC = () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          const loaded = await loadFinanceData(financeState);
+          authUserIdRef.current = session.user.id;
+          setUsageTrackingUserId(session.user.id);
+          const loaded = await loadFinanceData(financeState, session.user.id);
           if (loaded) {
             const normalized = normalizeState(loaded);
             setFinanceState(normalized);
             localStorage.setItem(LOCAL_KEY, JSON.stringify(normalized));
+            void trackEvent(
+              'app.session_restored',
+              {
+                onboardingDone: normalized.profile?.firstName ? true : normalized.isRegistered,
+                goals: normalized.goals.length,
+                assets: normalized.assets.length,
+                liabilities: normalized.loans.length,
+              },
+              'app.lifecycle',
+              session.user.id
+            );
             if (!normalized.isRegistered) {
               setShowAuth(true);
               setResumeProfile(normalized.profile);
@@ -214,6 +240,8 @@ const App: React.FC = () => {
             }
           }
         } else {
+          authUserIdRef.current = null;
+          setUsageTrackingUserId(null);
           if (financeState.isRegistered) {
             localStorage.removeItem(LOCAL_KEY);
             setFinanceState({ ...INITIAL_STATE });
@@ -228,8 +256,14 @@ const App: React.FC = () => {
 
     restoreSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        authUserIdRef.current = session?.user?.id || null;
+        setUsageTrackingUserId(session?.user?.id || null);
+      }
       if (event === 'SIGNED_OUT') {
+        authUserIdRef.current = null;
+        setUsageTrackingUserId(null);
         localStorage.removeItem(LOCAL_KEY);
         setFinanceState({ ...INITIAL_STATE });
         setShowAuth(false);
@@ -257,7 +291,7 @@ const App: React.FC = () => {
     saveTimer.current = setTimeout(async () => {
       try {
         // dbUpdates contains arrays with DB-assigned UUIDs
-        const dbUpdates = await saveFinanceData(financeState);
+        const dbUpdates = await saveFinanceData(financeState, authUserIdRef.current);
 
         // Merge DB UUIDs back into state (silent — no re-render cascade)
         if (Object.keys(dbUpdates).length > 0) {
@@ -283,12 +317,115 @@ const App: React.FC = () => {
     setActiveCountry(financeState.profile?.country || 'India');
   }, [financeState.profile?.country]);
 
+  // ── Enforce admin controls: force logout + blocked user sessions ──
+  useEffect(() => {
+    if (!financeState.isRegistered) return;
+
+    let cancelled = false;
+
+    const enforceAdminFlags = async () => {
+      try {
+        const flags = await getSelfAdminFlag(authUserIdRef.current);
+        if (!flags || cancelled) return;
+
+        if (flags.is_blocked || flags.force_logout_requested_at) {
+          await signOut().catch(() => {});
+          localStorage.removeItem(LOCAL_KEY);
+          setFinanceState({ ...INITIAL_STATE, isRegistered: false });
+          setShowAuth(false);
+          setResumeProfile(null);
+          setView('dashboard');
+
+          const reason = flags.is_blocked
+            ? `Your account is blocked. ${flags.blocked_reason ? `Reason: ${flags.blocked_reason}` : ''}`
+            : 'Your session was reset by operations. Please sign in again.';
+          window.alert(reason.trim());
+        }
+      } catch {
+        // Ignore polling errors to keep UX uninterrupted.
+      }
+    };
+
+    enforceAdminFlags();
+    const intervalId = window.setInterval(enforceAdminFlags, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [financeState.isRegistered]);
+
+  useEffect(() => {
+    if (!financeState.isRegistered) return;
+    void trackEvent('app.view_opened', { view }, 'app.navigation');
+  }, [financeState.isRegistered, view]);
+
+  useEffect(() => {
+    if (!financeState.isRegistered) {
+      usageSnapshotRef.current = null;
+      return;
+    }
+
+    const current = {
+      familyCount: financeState.family.length,
+      goalCount: financeState.goals.length,
+      assetCount: financeState.assets.length,
+      loanCount: financeState.loans.length,
+      txCount: financeState.transactions.length,
+      insuranceCount: financeState.insurance.length,
+      hasRiskProfile: Boolean(financeState.riskProfile),
+    };
+
+    const previous = usageSnapshotRef.current;
+    usageSnapshotRef.current = current;
+    if (!previous) return;
+
+    if (current.familyCount > previous.familyCount) {
+      void trackEvent('family.member_added', { added: current.familyCount - previous.familyCount, total: current.familyCount }, 'app.family');
+    }
+    if (current.goalCount > previous.goalCount) {
+      void trackEvent('goal.created', { added: current.goalCount - previous.goalCount, total: current.goalCount }, 'app.goals');
+    }
+    if (current.assetCount > previous.assetCount) {
+      void trackEvent('asset.added', { added: current.assetCount - previous.assetCount, total: current.assetCount }, 'app.assets');
+    }
+    if (current.loanCount > previous.loanCount) {
+      void trackEvent('liability.added', { added: current.loanCount - previous.loanCount, total: current.loanCount }, 'app.liabilities');
+    }
+    if (current.txCount > previous.txCount) {
+      void trackEvent('transaction.logged', { added: current.txCount - previous.txCount, total: current.txCount }, 'app.transactions');
+    }
+    if (current.insuranceCount > previous.insuranceCount) {
+      void trackEvent('insurance.policy_added', { added: current.insuranceCount - previous.insuranceCount, total: current.insuranceCount }, 'app.insurance');
+    }
+    if (!previous.hasRiskProfile && current.hasRiskProfile) {
+      void trackEvent(
+        'risk.profile_completed',
+        {
+          level: financeState.riskProfile?.level || null,
+          score: financeState.riskProfile?.score ?? null,
+        },
+        'app.risk'
+      );
+    }
+  }, [
+    financeState.isRegistered,
+    financeState.family.length,
+    financeState.goals.length,
+    financeState.assets.length,
+    financeState.loans.length,
+    financeState.transactions.length,
+    financeState.insurance.length,
+    financeState.riskProfile,
+  ]);
+
   // ── Logout ────────────────────────────────────────────────────
   const handleLogout = async () => {
     const confirmed = window.confirm('Terminate session? Your data is saved in the cloud.');
     if (!confirmed) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    await saveFinanceData(financeState).catch(() => {});
+    await saveFinanceData(financeState, authUserIdRef.current).catch(() => {});
+    await flushActivityEvents().catch(() => {});
     try {
       await signOut();
     } catch (err) {
@@ -322,6 +459,126 @@ const App: React.FC = () => {
     }
   }, [gateUnlocked, view, journey.nextStep?.view]);
 
+  useEffect(() => {
+    const canonicalRoot = `${window.location.origin}/`;
+
+    if (!financeState.isRegistered && !showAuth) {
+      // Landing page handles indexable SEO metadata in Landing.tsx.
+      return;
+    }
+
+    if (!financeState.isRegistered && showAuth) {
+      applySeoMeta({
+        title: 'Start Financial Onboarding | FinVantage',
+        description: 'Set up your profile, planning horizon, and intelligence baseline to start financial planning.',
+        canonicalUrl: canonicalRoot,
+        type: 'website',
+        robots: 'noindex,nofollow',
+      });
+      return;
+    }
+
+    const viewMeta: Record<View, { title: string; description: string }> = {
+      dashboard: {
+        title: 'Financial Dashboard | FinVantage',
+        description: 'Monitor net worth, goal progress, and household financial trajectory in one command view.',
+      },
+      family: {
+        title: 'Family Financial Profile | FinVantage',
+        description: 'Map family members, dependencies, and income planning assumptions.',
+      },
+      inflow: {
+        title: 'Income Planning Node | FinVantage',
+        description: 'Track operational and passive income streams for long-term financial planning.',
+      },
+      outflow: {
+        title: 'Expense Planning Node | FinVantage',
+        description: 'Capture household expenses and inflation-adjusted cashflow assumptions.',
+      },
+      insurance: {
+        title: 'Insurance Planning Node | FinVantage',
+        description: 'Analyze term and health insurance requirements against liabilities and goals.',
+      },
+      assets: {
+        title: 'Assets Register | FinVantage',
+        description: 'Track assets available for goals, growth assumptions, and contribution plans.',
+      },
+      debt: {
+        title: 'Liabilities Register | FinVantage',
+        description: 'Track loans, obligations, EMI pressure, and outstanding balances.',
+      },
+      'risk-profile': {
+        title: 'Risk Profile | FinVantage',
+        description: 'Assess household risk capacity and match portfolio allocation to goals.',
+      },
+      transactions: {
+        title: 'Transactions | FinVantage',
+        description: 'Review household transaction flows for planning and analysis.',
+      },
+      goals: {
+        title: 'Goals Configurator | FinVantage',
+        description: 'Create and prioritize financial goals with timeline and inflation assumptions.',
+      },
+      'goal-summary': {
+        title: 'Goals Summary | FinVantage',
+        description: 'Review all goals with funded status and horizon alignment.',
+      },
+      cashflow: {
+        title: 'Cashflow Plan | FinVantage',
+        description: 'Analyze surplus trajectory and future funding capacity.',
+      },
+      'investment-plan': {
+        title: 'Investment Plan | FinVantage',
+        description: 'Translate goals into investment strategy and allocation pathways.',
+      },
+      'action-plan': {
+        title: 'Action Plan | FinVantage',
+        description: 'Step-by-step recommendations to improve household financial outcomes.',
+      },
+      'monthly-savings': {
+        title: 'Monthly Savings Plan | FinVantage',
+        description: 'Calibrate monthly savings targets and execution priorities.',
+      },
+      settings: {
+        title: 'Settings | FinVantage',
+        description: 'Manage account preferences and planning configuration.',
+      },
+      notifications: {
+        title: 'Notifications | FinVantage',
+        description: 'View strategy alerts, risk prompts, and planning notifications.',
+      },
+      benefits: {
+        title: 'Benefits | FinVantage',
+        description: 'Explore platform value and outcomes across your financial journey.',
+      },
+      scenarios: {
+        title: 'Scenario Planning | FinVantage',
+        description: 'Stress-test decisions with scenario analysis and outcome comparison.',
+      },
+      'tax-estate': {
+        title: 'Tax & Estate Planning | FinVantage',
+        description: 'Review tax and estate readiness for wealth continuity.',
+      },
+      projections: {
+        title: 'Retirement Projections | FinVantage',
+        description: 'Evaluate retirement trajectory and long-horizon funding sustainability.',
+      },
+      'ai-advisor': {
+        title: 'AI Financial Advisor | FinVantage',
+        description: 'Get AI-backed planning suggestions tailored to your financial profile.',
+      },
+    };
+
+    const meta = viewMeta[view] || viewMeta.dashboard;
+    applySeoMeta({
+      title: meta.title,
+      description: meta.description,
+      canonicalUrl: canonicalRoot,
+      type: 'website',
+      robots: 'noindex,nofollow',
+    });
+  }, [financeState.isRegistered, showAuth, view]);
+
   if (isRestoring) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -345,6 +602,15 @@ const App: React.FC = () => {
           setShowAuth(false);
           setResumeProfile(null);
           setView('dashboard');
+          void trackEvent(
+            'app.onboarding_completed',
+            {
+              country: data.profile?.country || 'India',
+              lifeExpectancy: data.profile?.lifeExpectancy,
+              retirementAge: data.profile?.retirementAge,
+            },
+            'app.onboarding'
+          );
         }}
         onBackToLanding={() => {
           setShowAuth(false);

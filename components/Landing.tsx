@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getCurrencySymbol } from '../lib/currency';
+import { applySeoMeta } from '../services/seoMeta';
 import {
   TrendingUp,
   ShieldCheck,
@@ -95,6 +96,39 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
   const cashflowSeries = cashflowMode === 'income'
     ? [68, 72, 78, 84, 88, 92, 96]
     : [22, 26, 31, 35, 30, 34, 38];
+
+  useEffect(() => {
+    const canonical = `${window.location.origin}/`;
+    applySeoMeta({
+      title: 'FinVantage | Financial Planning, Goals, Risk Profiling & Wealth Dashboard',
+      description:
+        'Plan goals, track assets and liabilities, assess risk profile, and build long-term wealth decisions with FinVantage financial command center.',
+      canonicalUrl: canonical,
+      type: 'website',
+      keywords: [
+        'financial planning app',
+        'goal based investing',
+        'risk profile assessment',
+        'retirement planning',
+        'wealth management india',
+        'personal finance dashboard',
+      ],
+      robots: 'index,follow',
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        name: 'FinVantage',
+        url: canonical,
+        description:
+          'Financial planning and investment decision platform for households and long-term wealth goals.',
+        potentialAction: {
+          '@type': 'SearchAction',
+          target: `${window.location.origin}/blog?query={search_term_string}`,
+          'query-input': 'required name=search_term_string',
+        },
+      },
+    });
+  }, []);
 
   return (
     <div className="min-h-screen text-slate-900 overflow-x-hidden">
