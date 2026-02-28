@@ -12,6 +12,7 @@ import {
   Gauge,
   CheckCircle2,
   ShieldAlert,
+  Clock3,
 } from 'lucide-react';
 import { FinanceState, RiskLevel, RiskQuestionAnswer } from '../types';
 import {
@@ -25,6 +26,7 @@ import { formatCurrency } from '../lib/currency';
 import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
 
 const RISK_LEVEL_ORDER: RiskLevel[] = ['Conservative', 'Moderate', 'Balanced', 'Aggressive', 'Very Aggressive'];
+const RISK_REASSESS_DAYS = 180;
 
 const projectCorpus = (principal: number, annualContribution: number, annualReturnPct: number, years: number) => {
   const r = annualReturnPct / 100;
@@ -60,36 +62,81 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
   const [currentStep, setCurrentStep] = useState<'intro' | 'quiz' | 'result'>(state.riskProfile ? 'result' : 'intro');
   const [answers, setAnswers] = useState<RiskQuestionAnswer[]>([]);
   const [activeQuestion, setActiveQuestion] = useState(0);
+  const [quizHint, setQuizHint] = useState<string | null>(null);
 
-  const handleAnswer = (selectedOption: { text: string; score: number }) => {
-    const question = RISK_QUESTIONS[activeQuestion];
+  const startQuiz = (prefillFromExisting: boolean) => {
+    const previousAnswers = prefillFromExisting ? (state.riskProfile?.questionnaireAnswers ?? []) : [];
+    const sanitizedAnswers = previousAnswers
+      .filter(answer => RISK_QUESTIONS.some(question => question.id === answer.questionId))
+      .sort((a, b) => a.questionId - b.questionId);
+    setAnswers(sanitizedAnswers);
+    setActiveQuestion(0);
+    setQuizHint(null);
+    setCurrentStep('quiz');
+  };
+
+  const setAnswerForQuestion = (questionId: number, selectedOption: { text: string; score: number }) => {
+    const question = RISK_QUESTIONS.find(item => item.id === questionId);
+    if (!question) return;
     const answer: RiskQuestionAnswer = {
       questionId: question.id,
       question: question.text,
       selectedOption: selectedOption.text,
       score: selectedOption.score,
     };
-    const newAnswers = [...answers, answer];
-    if (activeQuestion < RISK_QUESTIONS.length - 1) {
-      setAnswers(newAnswers);
-      setActiveQuestion(activeQuestion + 1);
-    } else {
-      const result = buildRiskProfileFromAnswers(newAnswers);
-      updateState({ riskProfile: result });
-      setCurrentStep('result');
+    setAnswers(prevAnswers => {
+      const nextAnswers = [
+        ...prevAnswers.filter(item => item.questionId !== question.id),
+        answer,
+      ];
+      return nextAnswers.sort((a, b) => a.questionId - b.questionId);
+    });
+    setQuizHint(null);
+  };
+
+  const submitQuiz = () => {
+    const orderedAnswers: RiskQuestionAnswer[] = [];
+    for (let index = 0; index < RISK_QUESTIONS.length; index += 1) {
+      const question = RISK_QUESTIONS[index];
+      const answer = answers.find(item => item.questionId === question.id);
+      if (!answer) {
+        setActiveQuestion(index);
+        setQuizHint('Please answer all questions to complete your risk profiling.');
+        return;
+      }
+      orderedAnswers.push(answer);
     }
+    const nextResult = buildRiskProfileFromAnswers(orderedAnswers);
+    updateState({ riskProfile: nextResult });
+    setQuizHint(null);
+    setCurrentStep('result');
+  };
+
+  const handleContinue = () => {
+    const question = RISK_QUESTIONS[activeQuestion];
+    const currentAnswer = answers.find(item => item.questionId === question.id);
+    if (!currentAnswer) {
+      setQuizHint('Please choose one option before continuing.');
+      return;
+    }
+    if (activeQuestion < RISK_QUESTIONS.length - 1) {
+      setActiveQuestion(prevQuestion => prevQuestion + 1);
+      return;
+    }
+    submitQuiz();
   };
 
   const reset = () => {
-    setAnswers([]);
-    setActiveQuestion(0);
-    setCurrentStep('quiz');
+    startQuiz(true);
   };
 
   const result = state.riskProfile;
   const currentRiskLevel: RiskLevel = result?.level ?? 'Balanced';
   const allocation = result?.recommendedAllocation ?? RISK_LEVEL_ALLOCATIONS[currentRiskLevel];
   const riskQuestionAnswers = result?.questionnaireAnswers ?? [];
+  const answeredQuestionCount = useMemo(() => (
+    new Set(answers.map(answer => answer.questionId)).size
+  ), [answers]);
   const currencyCountry = state.profile.country;
   const [scenarioLevel, setScenarioLevel] = useState<RiskLevel>(currentRiskLevel);
 
@@ -194,24 +241,77 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     if (Number.isNaN(parsed.getTime())) return 'Recently';
     return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }, [result?.lastUpdated]);
+  const lastUpdatedDaysAgo = useMemo(() => {
+    const parsed = new Date(result?.lastUpdated ?? '');
+    if (Number.isNaN(parsed.getTime())) return null;
+    const diffMs = Date.now() - parsed.getTime();
+    if (diffMs < 0) return 0;
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  }, [result?.lastUpdated]);
+  const shouldPromptReassessment = Boolean(
+    result && (
+      riskQuestionAnswers.length === 0
+      || (lastUpdatedDaysAgo !== null && lastUpdatedDaysAgo >= RISK_REASSESS_DAYS)
+    ),
+  );
 
   if (currentStep === 'intro') {
     return (
-      <div className="max-w-4xl mx-auto py-8 md:py-12 px-4 md:px-6 animate-in fade-in slide-in-from-bottom-4">
-        <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-2xl overflow-hidden p-8 md:p-20 text-center space-y-8 md:space-y-10 relative">
+      <div className="max-w-5xl mx-auto py-8 md:py-12 px-4 md:px-6 animate-in fade-in slide-in-from-bottom-4">
+        <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-2xl overflow-hidden p-8 md:p-12 space-y-8 md:space-y-10 relative">
           <div className="absolute top-0 right-0 w-64 h-64 bg-teal-50/50 blur-[100px] -z-10 rounded-full translate-x-1/2 -translate-y-1/2" />
-          <div className="mx-auto w-16 h-16 md:w-24 md:h-24 bg-teal-600 text-white rounded-2xl md:rounded-[2.5rem] flex items-center justify-center shadow-2xl">
-            <BrainCircuit size={32} />
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+            <div className="flex items-start gap-4">
+              <div className="w-16 h-16 md:w-20 md:h-20 bg-teal-600 text-white rounded-2xl md:rounded-[2rem] flex items-center justify-center shadow-xl shrink-0">
+                <BrainCircuit size={30} />
+              </div>
+              <div className="space-y-3 text-left">
+                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-50 text-teal-700 text-[10px] font-black uppercase tracking-widest">
+                  Risk Profiling Prompt
+                </span>
+                <h1 className="text-3xl md:text-5xl font-black text-slate-900 leading-tight">Complete Your Risk Profile</h1>
+                <p className="text-sm md:text-base text-slate-500 max-w-2xl font-medium">
+                  This profile is required to personalize your allocation, expected return assumptions, and goal projections.
+                </p>
+              </div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 min-w-[220px]">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Assessment Snapshot</p>
+              <div className="mt-3 space-y-2">
+                <p className="text-sm font-black text-slate-900">5 guided questions</p>
+                <p className="text-sm font-black text-slate-900 inline-flex items-center gap-2"><Clock3 size={14} className="text-teal-600" /> Takes about 2 minutes</p>
+                <p className="text-xs text-slate-500 font-medium">No right/wrong answers. Just choose what matches your real behavior.</p>
+              </div>
+            </div>
           </div>
-          <div className="space-y-4">
-            <h1 className="text-3xl md:text-6xl font-black text-slate-900 leading-tight">Risk DNA</h1>
-            <p className="text-sm md:text-lg text-slate-500 max-w-2xl mx-auto font-medium">A scientific assessment of capacity for volatility. Discover your ideal asset allocation.</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {[
+              {
+                title: 'Personalized Allocation',
+                text: 'Equity, debt, gold, and liquid mix gets calibrated to your risk behavior.',
+              },
+              {
+                title: 'Projection Accuracy',
+                text: 'Goal readiness and corpus projections use risk-adjusted return assumptions.',
+              },
+              {
+                title: 'Actionable Guidance',
+                text: 'Rebalancing and contribution recommendations adapt to your risk profile.',
+              },
+            ].map((item) => (
+              <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-left">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{item.title}</p>
+                <p className="text-sm text-slate-700 font-medium mt-2 leading-relaxed">{item.text}</p>
+              </div>
+            ))}
           </div>
+
           <button
-            onClick={() => setCurrentStep('quiz')}
-            className="w-full md:w-auto px-10 md:px-12 py-5 md:py-6 bg-teal-600 text-white rounded-[1.5rem] md:rounded-[2rem] font-black text-base md:text-xl hover:bg-teal-700 transition-all flex items-center justify-center gap-3 mx-auto shadow-xl"
+            onClick={() => startQuiz(false)}
+            className="w-full md:w-auto px-10 md:px-12 py-5 md:py-6 bg-teal-600 text-white rounded-[1.5rem] md:rounded-[2rem] font-black text-base md:text-lg hover:bg-teal-700 transition-all flex items-center justify-center gap-3 shadow-xl"
           >
-            Start Assessment <ChevronRight />
+            Start Risk Profiling <ChevronRight />
           </button>
         </div>
       </div>
@@ -220,29 +320,112 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
 
   if (currentStep === 'quiz') {
     const q = RISK_QUESTIONS[activeQuestion];
-    const progress = ((activeQuestion + 1) / RISK_QUESTIONS.length) * 100;
+    const selectedAnswer = answers.find(answer => answer.questionId === q.id);
+    const progress = (answeredQuestionCount / RISK_QUESTIONS.length) * 100;
     return (
-      <div className="max-w-3xl mx-auto py-6 md:py-12 px-4 md:px-6 animate-in fade-in zoom-in-95">
-        <div className="bg-white rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-200 shadow-xl overflow-hidden">
+      <div className="max-w-4xl mx-auto py-6 md:py-12 px-4 md:px-6 animate-in fade-in zoom-in-95">
+        <div className="bg-white rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-200 shadow-xl overflow-hidden space-y-1">
           <div className="p-6 md:p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50">
             <button onClick={() => activeQuestion > 0 ? setActiveQuestion(activeQuestion - 1) : setCurrentStep('intro')} className="p-2 hover:bg-white rounded-full text-slate-400 transition-colors">
               <ArrowLeft size={20} />
             </button>
             <div className="flex-1 px-4 md:px-8">
-              <div className="w-full h-1.5 md:h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-teal-600 transition-all duration-500" style={{ width: `${progress}%` }} /></div>
+              <div className="w-full h-1.5 md:h-2 bg-slate-200 rounded-full overflow-hidden">
+                <div className="h-full bg-teal-600 transition-all duration-500" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-500">{answeredQuestionCount} of {RISK_QUESTIONS.length} answered</p>
             </div>
-            <span className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest">{activeQuestion + 1}/{RISK_QUESTIONS.length}</span>
+            <span className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest">Q{activeQuestion + 1}/{RISK_QUESTIONS.length}</span>
           </div>
-          <div className="p-8 md:p-16 space-y-8 md:space-y-10">
-            <p className="text-[10px] md:text-xs font-black uppercase tracking-widest text-slate-400">Choose what matches you best. There are no right or wrong answers.</p>
-            <h2 className="text-xl md:text-3xl font-black text-slate-900 leading-tight">{q.text}</h2>
+
+          <div className="px-8 md:px-12 pt-6">
+            <div className="flex flex-wrap gap-2">
+              {RISK_QUESTIONS.map((question, index) => {
+                const answered = answers.some(answer => answer.questionId === question.id);
+                const isActive = index === activeQuestion;
+                return (
+                  <button
+                    key={question.id}
+                    onClick={() => setActiveQuestion(index)}
+                    className={`w-8 h-8 rounded-full text-[10px] font-black uppercase tracking-widest transition ${
+                      isActive
+                        ? 'bg-teal-600 text-white'
+                        : answered
+                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                          : 'bg-slate-100 text-slate-500'
+                    }`}
+                    aria-label={`Go to question ${index + 1}`}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="p-8 md:p-12 space-y-6 md:space-y-8">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-3 py-1">
+                  {q.dimension}
+                </span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  Choose what matches you best
+                </span>
+              </div>
+              <h2 className="text-xl md:text-3xl font-black text-slate-900 leading-tight">{q.text}</h2>
+              <p className="text-sm text-slate-500 font-medium">Why this matters: {q.whyItMatters}</p>
+            </div>
+
             <div className="space-y-3 md:space-y-4">
               {q.options.map((opt, i) => (
-                <button key={i} onClick={() => handleAnswer(opt)} className="w-full p-5 md:p-6 text-left border-2 border-slate-100 rounded-2xl md:rounded-[1.5rem] hover:border-teal-600 hover:bg-teal-50/50 transition-all group flex items-center justify-between">
-                  <span className="text-xs md:text-sm font-bold text-slate-700 group-hover:text-teal-900">{opt.text}</span>
-                  <div className="w-5 h-5 md:w-6 md:h-6 rounded-full border-2 border-slate-200 flex items-center justify-center group-hover:border-teal-600 transition-colors shrink-0 ml-4"><div className="w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-teal-600 scale-0 group-hover:scale-100 transition-transform" /></div>
+                <button
+                  key={i}
+                  onClick={() => setAnswerForQuestion(q.id, opt)}
+                  className={`w-full p-5 md:p-6 text-left border-2 rounded-2xl md:rounded-[1.5rem] transition-all group flex items-center justify-between ${
+                    selectedAnswer?.selectedOption === opt.text
+                      ? 'border-teal-500 bg-teal-50'
+                      : 'border-slate-100 hover:border-teal-300 hover:bg-teal-50/40'
+                  }`}
+                >
+                  <div>
+                    <span className={`text-xs md:text-sm font-bold ${selectedAnswer?.selectedOption === opt.text ? 'text-teal-900' : 'text-slate-700 group-hover:text-teal-900'}`}>
+                      {opt.text}
+                    </span>
+                  </div>
+                  <div className={`w-5 h-5 md:w-6 md:h-6 rounded-full border-2 flex items-center justify-center transition-colors shrink-0 ml-4 ${
+                    selectedAnswer?.selectedOption === opt.text
+                      ? 'border-teal-600 bg-teal-600'
+                      : 'border-slate-200 group-hover:border-teal-400'
+                  }`}>
+                    <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full bg-white transition-transform ${
+                      selectedAnswer?.selectedOption === opt.text ? 'scale-100' : 'scale-0 group-hover:scale-100'
+                    }`} />
+                  </div>
                 </button>
               ))}
+            </div>
+
+            {quizHint && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-xs font-bold text-amber-700">{quizHint}</p>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
+              <button
+                onClick={() => activeQuestion > 0 ? setActiveQuestion(activeQuestion - 1) : setCurrentStep('intro')}
+                className="px-5 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+              >
+                {activeQuestion > 0 ? 'Previous Question' : 'Back to Intro'}
+              </button>
+              <button
+                onClick={handleContinue}
+                className="px-6 py-3 rounded-xl bg-teal-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-teal-500 transition-all inline-flex items-center justify-center gap-2"
+              >
+                {activeQuestion < RISK_QUESTIONS.length - 1 ? 'Save & Continue' : 'See Risk Profile'}
+                <ChevronRight size={14} />
+              </button>
             </div>
           </div>
         </div>
@@ -255,12 +438,14 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
       <div className="max-w-4xl mx-auto py-8 md:py-12 px-4 md:px-6">
         <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] border border-slate-200 shadow-sm p-8 md:p-12 text-center space-y-5">
           <h2 className="text-2xl md:text-3xl font-black text-slate-900">Risk Profile Not Available</h2>
-          <p className="text-sm text-slate-500 font-medium">Complete the assessment to unlock risk analysis and profile comparison.</p>
+          <p className="text-sm text-slate-500 font-medium">
+            Please complete risk profiling to unlock allocation guidance, projection assumptions, and goal-readiness insights.
+          </p>
           <button
-            onClick={() => setCurrentStep('quiz')}
+            onClick={() => startQuiz(false)}
             className="px-6 py-3 rounded-2xl bg-teal-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-teal-500 transition-all"
           >
-            Start Assessment
+            Start Risk Profiling
           </button>
         </div>
       </div>
@@ -303,6 +488,28 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           </button>
         </div>
       </div>
+
+      {shouldPromptReassessment && (
+        <div className="p-5 rounded-3xl border border-amber-200 bg-amber-50 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Risk Profiling Prompt</p>
+            <p className="text-sm font-bold text-amber-900">
+              {riskQuestionAnswers.length === 0
+                ? 'Question-level risk answers are missing. Reassess now to improve profile quality.'
+                : `Last profiling was ${lastUpdatedDaysAgo ?? 0} days ago. Reassessment is recommended every ${RISK_REASSESS_DAYS} days.`}
+            </p>
+            <p className="text-xs text-amber-800 font-medium">
+              Updated profiling keeps return assumptions and allocation recommendations aligned with your current situation.
+            </p>
+          </div>
+          <button
+            onClick={reset}
+            className="px-5 py-3 rounded-2xl bg-amber-500 text-white text-[10px] font-black uppercase tracking-widest hover:bg-amber-600 transition-all shrink-0"
+          >
+            Update Risk Profiling
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {[
@@ -470,9 +677,18 @@ const RiskProfile: React.FC<{ state: FinanceState, updateState: (data: Partial<F
         {riskQuestionAnswers.length > 0 ? (
           <div className="space-y-3">
             {riskQuestionAnswers.map((answer) => (
-              <div key={answer.questionId} className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
+              <div key={answer.questionId} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="px-2 py-1 rounded-full bg-teal-100 text-teal-700 text-[10px] font-black uppercase tracking-widest">
+                    {RISK_QUESTIONS.find(question => question.id === answer.questionId)?.dimension || `Question ${answer.questionId}`}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Score impact: {answer.score}</span>
+                </div>
                 <p className="text-xs font-black text-slate-800">{answer.question}</p>
                 <p className="text-xs text-slate-600 mt-1">Answer: {answer.selectedOption}</p>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  {RISK_QUESTIONS.find(question => question.id === answer.questionId)?.whyItMatters}
+                </p>
               </div>
             ))}
           </div>

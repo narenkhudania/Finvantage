@@ -1,15 +1,16 @@
 
 import React, { useMemo, useState } from 'react';
 import { FinanceState, Asset, RiskLevel } from '../types';
-import { 
+import {
   TrendingUp, BarChart3, PieChart, Wallet, 
   ArrowUpRight, Info, AlertCircle, CheckCircle2, 
   Circle, Coins, Landmark, Briefcase, Home, Activity,
   Zap, ChevronRight, ShieldCheck, Sparkles, LayoutGrid,
   ArrowRight, ArrowDownRight, RefreshCw, ListChecks
 } from 'lucide-react';
-import { ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 import { formatCurrency } from '../lib/currency';
+import SafeResponsiveContainer from './common/SafeResponsiveContainer';
 
 const ASSET_ICONS: Record<string, any> = {
   'Liquid': Landmark,
@@ -414,14 +415,14 @@ const InvestmentPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
                </div>
 
                <div className="w-full h-64 md:h-80 flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <SafeResponsiveContainer>
                     <RadarChart cx="50%" cy="50%" outerRadius="80%" data={driftData}>
                       <PolarGrid stroke="#f1f5f9" />
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 900 }} />
                       <Radar name="Ideal" dataKey="A" stroke="#0f766e" strokeWidth={3} fill="#0f766e" fillOpacity={0.1} />
                       <Radar name="Current" dataKey="B" stroke="#f59e0b" strokeWidth={3} fill="#f59e0b" fillOpacity={0.15} />
                     </RadarChart>
-                  </ResponsiveContainer>
+                  </SafeResponsiveContainer>
                </div>
                
                <div className="mt-8 space-y-4">

@@ -38,6 +38,12 @@ import { flushActivityEvents, setUsageTrackingUserId, trackEvent } from './servi
 import { getJourneyProgress } from './lib/journey';
 import { setActiveCountry } from './lib/currency';
 import { applySeoMeta } from './services/seoMeta';
+import { monthlyIncomeFromDetailed } from './lib/incomeMath';
+import {
+  buildDataShareReminderNotification,
+  recordDataSharePrompt,
+  shouldShowDataShareReminder,
+} from './lib/dataSharingReminder';
 
 const LOCAL_KEY        = 'finvantage_active_session';
 const SAVE_DEBOUNCE_MS = 1500;
@@ -206,10 +212,6 @@ const App: React.FC = () => {
 
   // ── On mount: restore full state from all 6 DB tables ────────
   useEffect(() => {
-    if (import.meta.env.DEV) {
-      (window as any).supabase = supabase;
-    }
-
     const restoreSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -441,8 +443,25 @@ const App: React.FC = () => {
   const handleUpdateState = (data: Partial<FinanceState>) =>
     setFinanceState(prev => ({ ...prev, ...data }));
 
+  const ensureNotification = (id: string, title: string, message: string, type: 'critical' | 'strategy' | 'success') => {
+    setFinanceState(prev => {
+      const list = prev.notifications || [];
+      if (list.some(n => n.id === id)) return prev;
+      const next = [{
+        id,
+        title,
+        message,
+        type,
+        timestamp: new Date().toISOString(),
+        read: false,
+      }, ...list].slice(0, 80);
+      return { ...prev, notifications: next };
+    });
+  };
+
   const journey = getJourneyProgress(financeState);
   const gateUnlocked = journey.completionPct === 100;
+  const isTerminalOnline = financeState.isRegistered && gateUnlocked && saveStatus !== 'error';
   const gatedViews = new Set<View>([
     'action-plan',
     'monthly-savings',
@@ -458,6 +477,102 @@ const App: React.FC = () => {
       setView(journey.nextStep?.view || 'dashboard');
     }
   }, [gateUnlocked, view, journey.nextStep?.view]);
+
+  useEffect(() => {
+    if (!financeState.isRegistered) return;
+
+    const monthlyIncome = monthlyIncomeFromDetailed(financeState.profile.income)
+      + financeState.family
+        .filter(member => member.includeIncomeInPlanning !== false)
+        .reduce((sum, member) => sum + monthlyIncomeFromDetailed(member.income), 0);
+    const monthlyExpenses = financeState.detailedExpenses.reduce((sum, item) => sum + (item.amount || 0), 0) || financeState.profile.monthlyExpenses || 0;
+    const totalMonthlyDebt = financeState.loans.reduce((sum, loan) => sum + (loan.emi || 0), 0);
+    const dti = monthlyIncome > 0 ? (totalMonthlyDebt / monthlyIncome) * 100 : 0;
+    const financialNodeReady = monthlyIncome > 0 && monthlyExpenses > 0 && financeState.assets.length > 0;
+
+    if (journey.completionPct < 100) {
+      ensureNotification(
+        'journey-pending',
+        'Complete Initialization',
+        `Journey is ${journey.completionPct}% complete. Finish remaining setup to unlock full planning modules.`,
+        'strategy',
+      );
+    }
+
+    if (financialNodeReady && !financeState.riskProfile) {
+      ensureNotification(
+        'risk-profile-required',
+        'Risk Profile Required',
+        'Financial node is ready. Complete risk profile before finalizing investment decisions.',
+        'strategy',
+      );
+    }
+
+    if (dti >= 40) {
+      ensureNotification(
+        'high-debt-load',
+        'High Debt Service Ratio',
+        `Your DTI is ${dti.toFixed(1)}%. Review EMI obligations and rebalance liabilities.`,
+        'critical',
+      );
+    }
+
+    if (financeState.insurance.length === 0 && (financeState.loans.length > 0 || financeState.goals.length > 0)) {
+      ensureNotification(
+        'insurance-data-missing',
+        'Insurance Inventory Missing',
+        'Add term and health insurance details to compute required cover and deficit.',
+        'strategy',
+      );
+    }
+  }, [
+    financeState.isRegistered,
+    financeState.profile,
+    financeState.family,
+    financeState.assets.length,
+    financeState.detailedExpenses,
+    financeState.loans,
+    financeState.goals.length,
+    financeState.insurance.length,
+    financeState.riskProfile,
+    journey.completionPct,
+  ]);
+
+  useEffect(() => {
+    if (!financeState.isRegistered) return;
+
+    const hasLocationData = Boolean(
+      (financeState.profile.pincode || '').trim()
+      || (financeState.profile.city || '').trim()
+      || (financeState.profile.state || '').trim()
+    );
+    const notifications = financeState.notifications || [];
+
+    if (!shouldShowDataShareReminder({
+      hasLocationData,
+      transactionCount: financeState.transactions.length,
+      notifications,
+    })) {
+      return;
+    }
+
+    const reminder = buildDataShareReminderNotification();
+    setFinanceState(prev => {
+      const list = prev.notifications || [];
+      return {
+        ...prev,
+        notifications: [reminder, ...list].slice(0, 80),
+      };
+    });
+    recordDataSharePrompt();
+  }, [
+    financeState.isRegistered,
+    financeState.profile.pincode,
+    financeState.profile.city,
+    financeState.profile.state,
+    financeState.transactions.length,
+    financeState.notifications,
+  ]);
 
   useEffect(() => {
     const canonicalRoot = `${window.location.origin}/`;
@@ -634,13 +749,13 @@ const App: React.FC = () => {
       case 'risk-profile':    return <RiskProfile state={financeState} updateState={handleUpdateState} />;
       case 'transactions':    return <Transactions transactions={financeState.transactions} onAddTransaction={(t) => setFinanceState(prev => ({...prev, transactions: [{...t, id: Math.random().toString()}, ...prev.transactions]}))} country={financeState.profile.country} />;
       case 'goals':           return <Goals state={financeState} updateState={handleUpdateState} />;
-      case 'goal-summary':    return <GoalSummary state={financeState} />;
+      case 'goal-summary':    return <GoalSummary state={financeState} setView={setView} />;
       case 'cashflow':        return <Cashflow state={financeState} />;
       case 'investment-plan': return <InvestmentPlan state={financeState} />;
       case 'action-plan':     return <ActionPlan state={financeState} />;
       case 'monthly-savings': return <MonthlySavingsPlan state={financeState} />;
       case 'settings':        return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} />;
-      case 'notifications':   return <Notifications state={financeState} updateState={handleUpdateState} />;
+      case 'notifications':   return <Notifications state={financeState} updateState={handleUpdateState} setView={setView} />;
       case 'tax-estate':      return <TaxEstate state={financeState} />;
       case 'projections':     return <RetirementPlan state={financeState} />;
       case 'ai-advisor':      return <AIAdvisor state={financeState} />;
@@ -662,8 +777,15 @@ const App: React.FC = () => {
       </div>
 
       <main className="flex-1 lg:ml-[260px] flex flex-col min-h-screen relative h-screen">
-        <Header onMenuClick={() => setIsSidebarOpen(true)} title={view} state={financeState} setView={setView} onLogout={handleLogout} />
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 pb-24 md:p-10 md:pb-10 max-w-[1400px] mx-auto w-full no-scrollbar scroll-smooth">
+        <Header
+          onMenuClick={() => setIsSidebarOpen(true)}
+          title={view}
+          state={financeState}
+          setView={setView}
+          onLogout={handleLogout}
+          isTerminalOnline={isTerminalOnline}
+        />
+        <div className="flex-1 overflow-y-auto overflow-x-auto md:overflow-x-hidden p-4 pb-24 md:p-6 md:pb-10 w-full no-scrollbar scroll-smooth">
           <div key={view} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
             {renderView()}
           </div>

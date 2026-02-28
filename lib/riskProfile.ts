@@ -7,14 +7,18 @@ export interface RiskQuestionOption {
 
 export interface RiskQuestion {
   id: number;
+  dimension: string;
   text: string;
+  whyItMatters: string;
   options: RiskQuestionOption[];
 }
 
 export const RISK_QUESTIONS: RiskQuestion[] = [
   {
     id: 1,
+    dimension: 'Goal Priority',
     text: 'What is your primary goal for your investment portfolio?',
+    whyItMatters: 'This tells us whether your portfolio should prioritize stability, income, or long-term growth.',
     options: [
       { text: 'Preserving capital with zero risk of loss', score: 5 },
       { text: 'Stable income with minimal fluctuations', score: 10 },
@@ -24,7 +28,9 @@ export const RISK_QUESTIONS: RiskQuestion[] = [
   },
   {
     id: 2,
+    dimension: 'Time Horizon',
     text: 'When do you plan to start withdrawing significant funds?',
+    whyItMatters: 'Longer horizons generally allow higher equity exposure and short-term volatility.',
     options: [
       { text: 'Within 1-2 years', score: 5 },
       { text: 'In 3-7 years', score: 15 },
@@ -34,7 +40,9 @@ export const RISK_QUESTIONS: RiskQuestion[] = [
   },
   {
     id: 3,
+    dimension: 'Behavior Under Stress',
     text: 'If your portfolio dropped by 20% in one month, how would you react?',
+    whyItMatters: 'Real behavior during market drawdowns is one of the strongest indicators of risk capacity.',
     options: [
       { text: 'Sell everything immediately', score: 5 },
       { text: 'Shift most funds to safer cash', score: 15 },
@@ -44,7 +52,9 @@ export const RISK_QUESTIONS: RiskQuestion[] = [
   },
   {
     id: 4,
+    dimension: 'Volatility Comfort',
     text: 'Comfort level with fluctuations for higher returns?',
+    whyItMatters: 'Comfort with volatility helps determine if aggressive allocation is sustainable for you.',
     options: [
       { text: 'None. I prefer guaranteed returns.', score: 0 },
       { text: 'Low. I can handle small, infrequent dips.', score: 15 },
@@ -54,7 +64,9 @@ export const RISK_QUESTIONS: RiskQuestion[] = [
   },
   {
     id: 5,
+    dimension: 'Cashflow Capacity',
     text: 'Monthly investable income after expenses?',
+    whyItMatters: 'Higher surplus can support market volatility and reduce the need to liquidate during downturns.',
     options: [
       { text: 'Less than 10%', score: 5 },
       { text: '10% to 25%', score: 15 },

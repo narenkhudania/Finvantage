@@ -29,6 +29,33 @@ const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isUuid = (value: string) => UUID_REGEX.test(value);
+const SELF_OWNER_REF = 'self';
+
+const getErrorText = (error: any) => (
+  `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`
+).toLowerCase();
+
+const isMissingColumnError = (error: any, column: string) => {
+  const text = getErrorText(error);
+  const needle = column.toLowerCase();
+  return (
+    text.includes(`'${needle}'`) ||
+    text.includes(`"${needle}"`) ||
+    text.includes(` ${needle} `) ||
+    text.includes(`.${needle}`) ||
+    text.includes(needle)
+  );
+};
+
+const isOnConflictTargetError = (error: any) => {
+  const text = getErrorText(error);
+  return text.includes('on conflict') && text.includes('constraint');
+};
+
+const isOwnerRefUuidError = (error: any) => {
+  const text = getErrorText(error);
+  return text.includes('owner_ref') && text.includes('uuid');
+};
 
 const hasCompleteOnboardingSections = (profile: Record<string, any>) => {
   const dobRaw = typeof profile.dob === 'string' ? profile.dob.trim() : '';
@@ -382,7 +409,7 @@ export async function loadFinanceData(
 
   // Merge income_profiles into family members (matched by owner_ref = DB UUID)
   const incomeRows = incomeRes.data ?? [];
-  const selfIncomeRow = incomeRows.find((r: any) => r.owner_ref === 'self');
+  const selfIncomeRow = incomeRows.find((r: any) => r.owner_ref === SELF_OWNER_REF || r.owner_ref === uid);
   const selfIncome = selfIncomeRow ? rowToIncome(selfIncomeRow) : fallback.profile.income;
 
   const familyWithIncome = family.map(member => {
@@ -627,8 +654,8 @@ async function saveIncomeProfiles(
   selfIncome: DetailedIncome,
   family: FamilyMember[], // use DB UUIDs from saveFamilyMembers result
 ): Promise<void> {
-  const mapRows = (withPension: boolean) => [
-    { user_id: uid, owner_ref: 'self', ...incomeToColumns(selfIncome, withPension) },
+  const mapRows = (withPension: boolean, selfOwnerRef: string) => [
+    { user_id: uid, owner_ref: selfOwnerRef, ...incomeToColumns(selfIncome, withPension) },
     ...family.map(m => ({
       user_id:   uid,
       owner_ref: m.id,           // now a real UUID
@@ -636,29 +663,43 @@ async function saveIncomeProfiles(
     })),
   ];
 
-  const isMissingPensionColumnError = (error: any) =>
-    error?.code === 'PGRST204'
-    && typeof error?.message === 'string'
-    && error.message.includes("'pension'");
-
-  // UPSERT by unique(user_id, owner_ref) — safe because 'self' never changes
-  // and family UUIDs are now real DB UUIDs
-  const rows = mapRows(true);
-  let { error } = await supabase
-    .from('income_profiles')
-    .upsert(rows, { onConflict: 'user_id,owner_ref' });
-  if (error && isMissingPensionColumnError(error)) {
-    const fallbackRows = mapRows(false);
-    const fallback = await supabase
+  const persistRows = async (rows: Record<string, any>[]) => {
+    let { error } = await supabase
       .from('income_profiles')
-      .upsert(fallbackRows, { onConflict: 'user_id,owner_ref' });
-    error = fallback.error;
+      .upsert(rows, { onConflict: 'user_id,owner_ref' });
+
+    if (error && isOnConflictTargetError(error)) {
+      const { error: deleteError } = await supabase
+        .from('income_profiles')
+        .delete()
+        .eq('user_id', uid);
+      if (deleteError) return deleteError;
+      const insertResult = await supabase
+        .from('income_profiles')
+        .insert(rows);
+      error = insertResult.error;
+    }
+    return error ?? null;
+  };
+
+  let selfOwnerRef = SELF_OWNER_REF;
+  let error = await persistRows(mapRows(true, selfOwnerRef));
+
+  // Backward compatibility: some older deployments typed owner_ref as UUID.
+  if (error && isOwnerRefUuidError(error)) {
+    selfOwnerRef = uid;
+    error = await persistRows(mapRows(true, selfOwnerRef));
   }
+
+  if (error && isMissingColumnError(error, 'pension')) {
+    error = await persistRows(mapRows(false, selfOwnerRef));
+  }
+
   if (error) throw error;
 
   // Clean up stale entries for removed family members
   if (family.length > 0) {
-    const validRefs = ['self', ...family.map(m => m.id)];
+    const validRefs = [selfOwnerRef, ...family.map(m => m.id)];
     await supabase
       .from('income_profiles')
       .delete()
@@ -1199,66 +1240,86 @@ async function saveInsuranceAnalysis(
   uid: string,
   config: InsuranceAnalysisConfig,
 ): Promise<void> {
-  let { error } = await supabase
-    .from('insurance_analysis_config')
-    .upsert({
-      user_id: uid,
-      inflation: config.inflation,
-      term_insurance_amount: config.termInsuranceAmount,
-      health_insurance_amount: config.healthInsuranceAmount,
-      liability_covers: config.liabilityCovers,
-      goal_covers: config.goalCovers,
-      asset_covers: config.assetCovers,
-      inheritance_value: config.inheritanceValue,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id' });
-  if (
-    error?.code === 'PGRST204'
-    && typeof error?.message === 'string'
-    && (error.message.includes("'term_insurance_amount'") || error.message.includes("'health_insurance_amount'"))
-  ) {
-    // Backward compatibility for users who have not run the latest migration yet.
-    const fallbackType = config.termInsuranceAmount > 0 ? 'Term' : 'Health';
-    const fallbackAmount = config.termInsuranceAmount > 0
-      ? config.termInsuranceAmount
-      : config.healthInsuranceAmount;
-    const fallback = await supabase
+  const nowIso = new Date().toISOString();
+  const fallbackType = config.termInsuranceAmount > 0 ? 'Term' : 'Health';
+  const fallbackAmount = config.termInsuranceAmount > 0
+    ? config.termInsuranceAmount
+    : config.healthInsuranceAmount;
+
+  const latestPayload = {
+    user_id: uid,
+    inflation: config.inflation,
+    term_insurance_amount: config.termInsuranceAmount,
+    health_insurance_amount: config.healthInsuranceAmount,
+    liability_covers: config.liabilityCovers,
+    goal_covers: config.goalCovers,
+    asset_covers: config.assetCovers,
+    inheritance_value: config.inheritanceValue,
+    updated_at: nowIso,
+  };
+
+  const fallbackPayload = {
+    user_id: uid,
+    inflation: config.inflation,
+    insurance_type: fallbackType,
+    insurance_amount: fallbackAmount,
+    immediate_needs: config.termInsuranceAmount,
+    existing_insurance: config.termInsuranceAmount,
+    liability_covers: config.liabilityCovers,
+    goal_covers: config.goalCovers,
+    asset_covers: config.assetCovers,
+    inheritance_value: config.inheritanceValue,
+    updated_at: nowIso,
+  };
+
+  const olderFallbackPayload = {
+    user_id: uid,
+    inflation: config.inflation,
+    immediate_needs: config.termInsuranceAmount,
+    existing_insurance: config.termInsuranceAmount,
+    liability_covers: config.liabilityCovers,
+    goal_covers: config.goalCovers,
+    asset_covers: config.assetCovers,
+    inheritance_value: config.inheritanceValue,
+    updated_at: nowIso,
+  };
+
+  const persistPayload = async (payload: Record<string, any>) => {
+    let { error } = await supabase
       .from('insurance_analysis_config')
-      .upsert({
-        user_id: uid,
-        inflation: config.inflation,
-        insurance_type: fallbackType,
-        insurance_amount: fallbackAmount,
-        immediate_needs: config.termInsuranceAmount,
-        existing_insurance: config.termInsuranceAmount,
-        liability_covers: config.liabilityCovers,
-        goal_covers: config.goalCovers,
-        asset_covers: config.assetCovers,
-        inheritance_value: config.inheritanceValue,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
-    error = fallback.error;
-    if (
-      error?.code === 'PGRST204'
-      && typeof error?.message === 'string'
-      && (error.message.includes("'insurance_type'") || error.message.includes("'insurance_amount'"))
-    ) {
-      const olderFallback = await supabase
+      .upsert(payload, { onConflict: 'user_id' });
+
+    if (error && isOnConflictTargetError(error)) {
+      const { error: deleteError } = await supabase
         .from('insurance_analysis_config')
-        .upsert({
-          user_id: uid,
-          inflation: config.inflation,
-          immediate_needs: config.termInsuranceAmount,
-          existing_insurance: config.termInsuranceAmount,
-          liability_covers: config.liabilityCovers,
-          goal_covers: config.goalCovers,
-          asset_covers: config.assetCovers,
-          inheritance_value: config.inheritanceValue,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' });
-      error = olderFallback.error;
+        .delete()
+        .eq('user_id', uid);
+      if (deleteError) return deleteError;
+      const insertResult = await supabase
+        .from('insurance_analysis_config')
+        .insert(payload);
+      error = insertResult.error;
     }
+
+    return error ?? null;
+  };
+
+  let error = await persistPayload(latestPayload);
+
+  if (
+    error &&
+    (isMissingColumnError(error, 'term_insurance_amount') || isMissingColumnError(error, 'health_insurance_amount'))
+  ) {
+    error = await persistPayload(fallbackPayload);
   }
+
+  if (
+    error &&
+    (isMissingColumnError(error, 'insurance_type') || isMissingColumnError(error, 'insurance_amount'))
+  ) {
+    error = await persistPayload(olderFallbackPayload);
+  }
+
   if (error) throw error;
 }
 

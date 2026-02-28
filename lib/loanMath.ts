@@ -1,4 +1,4 @@
-import type { Loan } from '../types';
+import type { DayCountDenominator, InstallmentType, Loan } from '../types';
 
 export const calculateEmi = (principal: number, annualRate: number, months: number) => {
   if (months <= 0) return 0;
@@ -26,17 +26,76 @@ export const inferTenureMonths = (loan: Loan) => {
   return { months: assumeMonths, basis: 'months' as const };
 };
 
-type LumpSum = { year: number; amount: number };
+type RepriceStrategy = 'keep-emi' | 'keep-tenure';
+type RateAdjustment = { fromMonth: number; annualRate: number };
+type DueDayMode = 'fixed' | 'month-end';
+
+type ScheduleOptions = {
+  extraPayment?: number;
+  extraPaymentMonth?: number;
+  overrideMonths?: number;
+  dayCountDenominator?: DayCountDenominator;
+  dueDay?: number;
+  dueDayMode?: DueDayMode;
+  installmentType?: InstallmentType;
+  brokenInterestCharged?: boolean;
+  repriceStrategy?: RepriceStrategy;
+  rateAdjustments?: RateAdjustment[];
+};
+
+const MS_PER_DAY = 86_400_000;
+
+const clampDay = (day: number) => Math.min(31, Math.max(1, Math.round(day)));
+
+const monthEndDay = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
+
+const formatIsoDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const resolveDueDate = (baseDate: Date, monthOffset: number, dueDayMode: DueDayMode, dueDay: number) => {
+  const monthStart = new Date(baseDate.getFullYear(), baseDate.getMonth() + monthOffset, 1);
+  const year = monthStart.getFullYear();
+  const month = monthStart.getMonth();
+  const day = dueDayMode === 'month-end'
+    ? monthEndDay(year, month)
+    : Math.min(clampDay(dueDay), monthEndDay(year, month));
+  return new Date(year, month, day);
+};
+
+const getAnnualRateForMonth = (baseRate: number, month: number, adjustments: RateAdjustment[]) => {
+  let rate = baseRate;
+  for (const adjustment of adjustments) {
+    if (adjustment.fromMonth <= month) rate = adjustment.annualRate;
+    else break;
+  }
+  return rate;
+};
 
 export const buildAmortizationSchedule = (
   loan: Loan,
-  options?: { extraPayment?: number; overrideMonths?: number }
+  options?: ScheduleOptions
 ) => {
   const { months, basis } = inferTenureMonths(loan);
   const totalMonths = Math.max(1, options?.overrideMonths ?? months);
-  const monthlyRate = loan.interestRate / 12 / 100;
   const emi = loan.emi > 0 ? loan.emi : calculateEmi(loan.outstandingAmount, loan.interestRate, totalMonths);
   const startYear = loan.startYear ?? new Date().getFullYear();
+  const startDate = new Date(startYear, 0, 1);
+  const dueDayMode: DueDayMode = options?.dueDayMode ?? (loan.dueDayMode === 'Month End' ? 'month-end' : 'fixed');
+  const dueDay = options?.dueDay ?? loan.dueDay ?? 5;
+  const dayCountDenominator = options?.dayCountDenominator ?? loan.dayCountDenominator ?? 365;
+  const installmentType: InstallmentType = options?.installmentType ?? loan.installmentType ?? 'EMI';
+  const brokenInterestCharged = options?.brokenInterestCharged ?? loan.brokenInterestCharged ?? true;
+  const repriceStrategy = options?.repriceStrategy ?? 'keep-emi';
+  const rateAdjustments = (options?.rateAdjustments || [])
+    .filter(r => Number.isFinite(r?.annualRate) && Number.isFinite(r?.fromMonth) && r.fromMonth >= 1)
+    .sort((a, b) => a.fromMonth - b.fromMonth);
+
+  const firstDueCandidate = resolveDueDate(startDate, 0, dueDayMode, dueDay);
+  const firstDueOffset = firstDueCandidate <= startDate ? 1 : 0;
 
   const lumpSumMap = (loan.lumpSumRepayments || []).reduce((acc, ls) => {
     if (!ls || typeof ls.year !== 'number') return acc;
@@ -47,7 +106,12 @@ export const buildAmortizationSchedule = (
 
   const schedule: Array<{
     month: number;
+    installmentNo: number;
     year: number;
+    dueDate: string;
+    daysInPeriod: number;
+    annualRate: number;
+    effectiveAnnualRate: number;
     openingBalance: number;
     interest: number;
     emi: number;
@@ -60,35 +124,61 @@ export const buildAmortizationSchedule = (
   let totalInterest = 0;
   let monthIndex = 0;
 
-  let extraApplied = false;
+  let scheduledEmi = emi;
+  const equalPrincipalAmount = loan.outstandingAmount / totalMonths;
   while (balance > 0 && monthIndex < totalMonths + 600) {
     monthIndex += 1;
-    const year = startYear + Math.floor((monthIndex - 1) / 12);
-    const monthOfYear = ((monthIndex - 1) % 12) + 1;
-    const opening = balance;
+    const dueDate = resolveDueDate(startDate, firstDueOffset + monthIndex - 1, dueDayMode, dueDay);
+    const previousDueDate = monthIndex === 1
+      ? startDate
+      : resolveDueDate(startDate, firstDueOffset + monthIndex - 2, dueDayMode, dueDay);
+    const rawDays = Math.max(1, Math.round((dueDate.getTime() - previousDueDate.getTime()) / MS_PER_DAY));
+    const daysInPeriod = monthIndex === 1 && !brokenInterestCharged ? 30 : rawDays;
+    const annualRate = getAnnualRateForMonth(loan.interestRate, monthIndex, rateAdjustments);
+    const periodicRate = (annualRate / 100) * (daysInPeriod / dayCountDenominator);
 
-    const interest = opening * monthlyRate;
-    let principal = emi - interest;
-    let adjustedBalance = opening + interest - emi;
-
-    if (principal < 0) {
-      principal = 0;
-      adjustedBalance = opening + interest - emi;
+    if (installmentType === 'EMI' && repriceStrategy === 'keep-tenure') {
+      const previousAnnualRate = getAnnualRateForMonth(loan.interestRate, Math.max(1, monthIndex - 1), rateAdjustments);
+      const hasRateResetAtStart = monthIndex === 1 && rateAdjustments.some(item => item.fromMonth === 1);
+      if (hasRateResetAtStart || (monthIndex > 1 && Math.abs(previousAnnualRate - annualRate) > 0.0001)) {
+        const remainingMonths = Math.max(1, totalMonths - monthIndex + 1);
+        scheduledEmi = calculateEmi(balance, annualRate, remainingMonths);
+      }
     }
 
+    const year = dueDate.getFullYear();
+    const opening = balance;
+    const interest = opening * periodicRate;
+    let principal = installmentType === 'Equal Principal'
+      ? Math.min(opening, equalPrincipalAmount)
+      : Math.max(0, scheduledEmi - interest);
+    let installment = installmentType === 'Equal Principal'
+      ? (interest + principal)
+      : scheduledEmi;
+    if (principal > opening) {
+      principal = opening;
+      installment = interest + principal;
+    }
+    const adjustedBalance = Math.max(0, opening + interest - installment);
+
+    const monthOfYear = dueDate.getMonth() + 1;
     let extra = monthOfYear === 1 ? (lumpSumMap[year] || 0) : 0;
-    if (!extraApplied && options?.extraPayment && options.extraPayment > 0) {
+    if (options?.extraPayment && options.extraPayment > 0 && (options.extraPaymentMonth ?? 1) === monthIndex) {
       extra += options.extraPayment;
-      extraApplied = true;
     }
     const closing = Math.max(0, adjustedBalance - extra);
 
     schedule.push({
       month: monthIndex,
+      installmentNo: monthIndex,
       year,
+      dueDate: formatIsoDate(dueDate),
+      daysInPeriod,
+      annualRate: Number(annualRate.toFixed(4)),
+      effectiveAnnualRate: Number(annualRate.toFixed(4)),
       openingBalance: Math.max(0, Math.round(opening)),
       interest: Math.round(interest),
-      emi: Math.round(emi),
+      emi: Math.round(installment),
       principal: Math.round(Math.min(opening, principal)),
       extraPayment: Math.round(extra),
       closingBalance: Math.round(closing),

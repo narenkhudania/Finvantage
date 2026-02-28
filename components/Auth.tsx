@@ -1,6 +1,11 @@
 import { useState } from "react"
 import { supabase } from "../services/supabase"
 
+const sanitizeErrorText = (value: string) =>
+  value
+    .replace(/supabase/gi, "platform")
+    .replace(/gotrue/gi, "identity service")
+
 export default function Auth({ onLogin }: { onLogin: () => void }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -12,7 +17,7 @@ export default function Auth({ onLogin }: { onLogin: () => void }) {
     })
 
     if (error) {
-      alert(error.message)
+      alert(sanitizeErrorText(error.message || "Authentication failed."))
     } else {
       onLogin()
     }
@@ -25,7 +30,7 @@ export default function Auth({ onLogin }: { onLogin: () => void }) {
     })
 
     if (error) {
-      alert(error.message)
+      alert(sanitizeErrorText(error.message || "Sign-up failed."))
     } else {
       alert("Check your email for confirmation")
     }

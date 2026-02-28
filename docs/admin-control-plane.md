@@ -149,6 +149,7 @@ Trade-off:
   - `api/admin/analytics.ts`
 - Database migration:
   - `supabase/migrations/20260227_admin_control_plane.sql`
+  - `supabase/migrations/20260228_foundation_tenant_security.sql`
 
 ## 7) Scalability & Future-Proofing Path
 
@@ -204,11 +205,37 @@ Trade-off:
 1. (Recommended for legacy schemas) run strict cleanup:
    `supabase/migrations/20260227_strict_unused_legacy_cleanup.sql`
 2. Run migration `supabase/migrations/20260227_admin_control_plane.sql`.
-3. Insert first admin user:
+3. Run migration `supabase/migrations/20260228_foundation_tenant_security.sql` for:
+   - Tenant core: organizations, workspaces, memberships
+   - Workspace RBAC roles: Admin/Manager/Analyst/Support
+   - Tenant-scoped audit logs, session monitoring, TOTP 2FA + recovery codes
+   - Seeded default org/workspace + first-user workspace admin bootstrap
+4. Run migration `supabase/migrations/20260228_internal_crm_behavior_automation.sql` for:
+   - Behavior intelligence tables (heatmaps, session records, feedback polls)
+   - Internal CRM objects (contacts, leads, deals, tasks, templates, workflows, custom objects)
+5. Insert first admin user (legacy `admin_users`, optional if workspace bootstrap is active):
 ```sql
 insert into public.admin_users (user_id, role_id)
 select '<YOUR_AUTH_USER_UUID>'::uuid, id
 from public.admin_roles
 where role_key = 'super_admin';
 ```
-4. Open `/admin` and sign in with that Supabase account.
+6. Open `/admin` and sign in with that Supabase account.
+7. Run smoke checks: `supabase/tests/foundation_smoke.sql`.
+
+## 11) New Internal Modules (No External Integrations)
+
+- `Behavior` module:
+  - Event-based analytics and real-time event stream
+  - Cohorting, retention/churn reports, path/journey analysis
+  - Funnel drop-off visualization and A/B impact table
+  - Cross-platform traffic, rage/dead click metrics, issue triggers
+  - Session replay index + searchable event/issue insights
+
+- `CRM` module:
+  - Contact + lead management with scoring and tags
+  - Deal pipeline board with stage updates
+  - Task/meeting scheduling and unified timeline
+  - Email template analytics and builder
+  - Workflow automation with conditional logic and channels
+  - Custom objects for internal automation flows

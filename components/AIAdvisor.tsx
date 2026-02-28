@@ -61,7 +61,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
   );
 
   return (
-    <div className="flex flex-col h-[calc(100vh-12rem)] max-w-4xl mx-auto bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)] w-full max-w-4xl mx-auto bg-white rounded-[1.5rem] md:rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
       {/* Header */}
       <div className="p-6 border-b border-slate-100 surface-dark text-white flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -80,19 +80,19 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
       </div>
 
       {/* Chat Messages */}
-      <div 
+      <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 scroll-smooth no-scrollbar"
+        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 scroll-smooth no-scrollbar"
       >
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`flex gap-4 max-w-[90%] md:max-w-[80%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div className={`flex gap-3 md:gap-4 max-w-[95%] md:max-w-[80%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
               <div className={`w-10 h-10 rounded-2xl flex-shrink-0 flex items-center justify-center border ${
                 msg.role === 'assistant' ? 'bg-teal-50 text-teal-600 border-teal-100' : 'bg-slate-900 text-white border-slate-800 shadow-xl shadow-slate-900/10'
               }`}>
                 {msg.role === 'assistant' ? <Bot size={20} /> : <User size={20} />}
               </div>
-              <div className={`p-6 rounded-[2rem] text-sm leading-relaxed font-medium ${
+              <div className={`p-4 md:p-6 rounded-[1.25rem] md:rounded-[2rem] text-sm leading-relaxed font-medium ${
                 msg.role === 'assistant' 
                   ? 'bg-slate-50 text-slate-800 rounded-tl-none border border-slate-100' 
                   : 'bg-teal-600 text-white rounded-tr-none shadow-xl shadow-teal-600/10'
@@ -112,7 +112,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
               <div className="w-10 h-10 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center border border-teal-100">
                 <Loader2 size={20} className="animate-spin" />
               </div>
-              <div className="p-6 rounded-[2rem] bg-slate-50 text-slate-400 text-sm animate-pulse rounded-tl-none border border-slate-100">
+              <div className="p-4 md:p-6 rounded-[1.25rem] md:rounded-[2rem] bg-slate-50 text-slate-400 text-sm animate-pulse rounded-tl-none border border-slate-100">
                 Projecting 10-year cash flow...
               </div>
             </div>
@@ -121,7 +121,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
       </div>
 
       {/* Action Chips */}
-      <div className="px-6 py-4 bg-white border-t border-slate-50 flex gap-3 overflow-x-auto no-scrollbar">
+      <div className="px-4 md:px-6 py-3 md:py-4 bg-white border-t border-slate-50 flex gap-3 overflow-x-auto no-scrollbar">
         <SimulationChip label="10yr Car Impact" icon={Car} query="Project my 10-year cash flow if I buy a $50k car today. Will it delay my retirement? Show me the math." />
         <SimulationChip label="Can I retire in 10yrs?" icon={Clock} query="Can I retire in exactly 10 years given my current surplus, assets, and income growth? Show me a sustainability score." />
         <SimulationChip label="Laptop Affordability" icon={Laptop} query="I want a $3000 laptop. Can I afford this without dipping into my 'Home Downpayment' fund?" />
@@ -129,7 +129,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ state }) => {
       </div>
 
       {/* Input Area */}
-      <div className="p-6 md:p-8 border-t border-slate-100 bg-slate-50">
+      <div className="p-4 md:p-8 border-t border-slate-100 bg-slate-50">
         <div className="relative">
           <input 
             type="text" 

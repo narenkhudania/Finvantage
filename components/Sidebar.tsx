@@ -47,7 +47,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
         { id: 'family', label: 'Household', icon: Users },
         { id: 'inflow', label: 'Inflow (Income)', icon: TrendingUp },
         { id: 'outflow', label: 'Outflow (Burn)', icon: ArrowDownRight },
-        { id: 'assets', label: 'Inventory', icon: Landmark },
+        { id: 'assets', label: 'Assets', icon: Landmark },
         { id: 'debt', label: 'Liabilities', icon: CreditCard },
         { id: 'insurance', label: 'Insurance', icon: Shield },
       ]

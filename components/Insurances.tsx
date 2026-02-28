@@ -13,10 +13,49 @@ import {
 
 const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [activeTab, setActiveTab] = useState<'inventory' | 'analysis'>('analysis');
+  const [inventoryType, setInventoryType] = useState<'all' | 'Term' | 'Health'>('all');
+  const [newPolicyType, setNewPolicyType] = useState<'Term' | 'Health'>('Term');
+  const [newPolicyInsured, setNewPolicyInsured] = useState<string>('self');
+  const [newPolicyAmount, setNewPolicyAmount] = useState<number>(0);
+  const [newPolicyPremium, setNewPolicyPremium] = useState<number>(0);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
   const analysisConfig = state.insuranceAnalysis;
 
   const removePolicy = (id: string) => {
     updateState({ insurance: state.insurance.filter(p => p.id !== id) });
+  };
+
+  const addPolicy = () => {
+    setInventoryError(null);
+
+    if (newPolicyAmount <= 0) {
+      setInventoryError('Insurance amount must be greater than 0.');
+      return;
+    }
+
+    const isValidOwner = newPolicyInsured === 'self' || state.family.some(member => member.id === newPolicyInsured);
+    if (!isValidOwner) {
+      setInventoryError('Please select a valid insured member.');
+      return;
+    }
+
+    const policy = {
+      id: Math.random().toString(36).slice(2, 11),
+      category: newPolicyType === 'Term' ? 'Life Insurance' : 'General Insurance',
+      type: newPolicyType,
+      proposer: 'self',
+      insured: newPolicyInsured,
+      sumAssured: newPolicyAmount,
+      sumInsured: newPolicyType === 'Health' ? newPolicyAmount : undefined,
+      premium: Math.max(0, newPolicyPremium),
+      isMoneyBack: false,
+      moneyBackYears: [],
+      moneyBackAmounts: [],
+    } as any;
+
+    updateState({ insurance: [policy, ...state.insurance] });
+    setNewPolicyAmount(0);
+    setNewPolicyPremium(0);
   };
 
   const getMemberName = (id: string) => {
@@ -243,6 +282,10 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
   };
 
   const currencyCountry = state.profile.country;
+  const filteredPolicies = state.insurance.filter(policy => {
+    if (inventoryType === 'all') return true;
+    return policy.type === inventoryType;
+  });
 
   return (
     <div className="space-y-8 md:space-y-10 animate-in fade-in duration-700 pb-24">
@@ -558,13 +601,109 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
         </div>
       ) : (
         <div className="space-y-6 animate-in slide-in-from-bottom-6 duration-700">
+          <div className="bg-white p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-200 shadow-sm space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Add Insurance Policy</h3>
+                <p className="text-[10px] mt-1 font-black uppercase tracking-widest text-slate-500">Separate capture for term and health</p>
+              </div>
+              <div className="flex p-1 bg-slate-100 rounded-xl w-fit">
+                <button
+                  type="button"
+                  onClick={() => setNewPolicyType('Term')}
+                  className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${newPolicyType === 'Term' ? 'bg-teal-600 text-white' : 'text-slate-500'}`}
+                >
+                  Term
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewPolicyType('Health')}
+                  className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${newPolicyType === 'Health' ? 'bg-emerald-600 text-white' : 'text-slate-500'}`}
+                >
+                  Health
+                </button>
+              </div>
+            </div>
+
+            {inventoryError && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold">
+                {inventoryError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Insured</label>
+                <select
+                  value={newPolicyInsured}
+                  onChange={e => setNewPolicyInsured(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold"
+                >
+                  <option value="self">Self</option>
+                  {state.family.map(member => (
+                    <option key={member.id} value={member.id}>{member.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                  {newPolicyType === 'Term' ? 'Term Insurance Amount' : 'Health Insurance Amount'}
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={newPolicyAmount || ''}
+                  onChange={e => setNewPolicyAmount(parseNumber(e.target.value, 0))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Annual Premium (Optional)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={newPolicyPremium || ''}
+                  onChange={e => setNewPolicyPremium(parseNumber(e.target.value, 0))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-transparent uppercase tracking-widest">Action</label>
+                <button
+                  type="button"
+                  onClick={addPolicy}
+                  className="w-full py-3 px-4 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition-all"
+                >
+                  Add {newPolicyType} Policy
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex p-1 bg-white border border-slate-200 rounded-xl w-fit shadow-sm">
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'Term', label: 'Term' },
+              { key: 'Health', label: 'Health' },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setInventoryType(tab.key as 'all' | 'Term' | 'Health')}
+                className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${inventoryType === tab.key ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           {state.insurance.length === 0 ? (
             <div className="bg-white p-8 rounded-[2rem] border border-slate-200 text-center">
               <p className="text-sm font-semibold text-slate-600">No insurance policies added yet.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
-              {state.insurance.map((policy) => {
+              {filteredPolicies.map((policy) => {
                 const displaySum = policy.category === 'General Insurance' && policy.sumInsured
                   ? policy.sumInsured
                   : policy.sumAssured;
@@ -581,6 +720,11 @@ const Insurances: React.FC<{ state: FinanceState, updateState: (data: Partial<Fi
                   </div>
                 );
               })}
+            </div>
+          )}
+          {state.insurance.length > 0 && filteredPolicies.length === 0 && (
+            <div className="bg-white p-8 rounded-[2rem] border border-slate-200 text-center">
+              <p className="text-sm font-semibold text-slate-600">No {inventoryType} insurance policies found.</p>
             </div>
           )}
         </div>

@@ -135,7 +135,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
           </div>
           <div className="flex items-center gap-6">
             <div className="w-32 h-32">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
                 <RePie data={introProgress} innerRadius={42} outerRadius={60} dataKey="value">
                   {introProgress.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={index === 0 ? '#0f766e' : '#e2e8f0'} stroke="transparent" />
@@ -176,7 +176,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
             </div>
           </div>
           <div className="h-40">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
               <BarChart data={executiveData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -200,7 +200,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
             </div>
           </div>
           <div className="h-40">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
               <BarChart data={allocationData} barGap={4} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -228,7 +228,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
             <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
                 <RePie data={positionSplit} innerRadius={45} outerRadius={70} paddingAngle={4} dataKey="value">
                   {positionSplit.map((entry, index) => (
                     <Cell key={`pos-${index}`} fill={COLORS[index % COLORS.length]} stroke="transparent" />
@@ -237,7 +237,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
               </ResponsiveContainer>
             </div>
             <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
                 <BarChart data={liabilitiesData} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
                   <XAxis type="number" hide />
                   <YAxis dataKey="label" type="category" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} width={110} />
@@ -261,7 +261,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
             </div>
           </div>
           <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
               <BarChart data={cashFlowData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -287,7 +287,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
             </div>
           </div>
           <div className="h-44">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
               <BarChart data={goalCostData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -311,7 +311,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
             </div>
           </div>
           <div className="h-44">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
               <BarChart data={returnCompareData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -340,7 +340,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
           </div>
           <div className="flex items-center gap-6">
             <div className="w-40 h-40">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
                 <RePie data={goalsData} innerRadius={50} outerRadius={70} dataKey="value">
                   {goalsData.map((entry, index) => (
                     <Cell key={`goal-${index}`} fill={index === 0 ? '#0f766e' : '#fee2e2'} stroke="transparent" />
@@ -370,7 +370,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
             </div>
           </div>
           <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
               <BarChart data={assumptionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 800, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -393,7 +393,7 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[
-            { label: 'Risk Identity', view: 'risk-profile', desc: 'Allocation fit and risk scoring.' },
+            { label: 'Loan Planning Drilldown', view: 'debt', desc: 'Loan schedule, what-if prepay, and repayment analysis.' },
             { label: 'Shield Configuration', view: 'insurance', desc: 'Insurance gap & coverage logic.' },
             { label: 'Tax & Compliance', view: 'tax-estate', desc: 'Tax regime checks and estate flags.' },
             { label: 'Action Strategy', view: 'action-plan', desc: 'Priority actions and alerts.' },

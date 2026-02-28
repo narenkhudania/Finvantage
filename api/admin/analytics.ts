@@ -39,22 +39,39 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     return;
   }
 
-  await ctx.client
-    .from('admin_audit_logs')
-    .insert({
-      admin_user_id: ctx.user.id,
-      action: 'admin.analytics.read',
-      entity_type: 'analytics',
-      entity_id: null,
-      reason: `days=${days}`,
-      payload: {
-        role: ctx.roleKey,
-      },
-      ip: null,
-      user_agent: null,
-    })
-    .then(() => null)
-    .catch(() => null);
+  if (ctx.workspaceId) {
+    try {
+      await ctx.client.rpc('workspace_admin_insert_audit_log', {
+        p_workspace_id: ctx.workspaceId,
+        p_action: 'admin.analytics.read',
+        p_entity_type: 'analytics',
+        p_entity_id: null,
+        p_reason: `days=${days}`,
+        p_payload: { role: ctx.roleKey },
+        p_ip: null,
+        p_user_agent: null,
+      });
+    } catch {
+      // best-effort audit write
+    }
+  } else {
+    try {
+      await ctx.client.from('admin_audit_logs').insert({
+        admin_user_id: ctx.user.id,
+        action: 'admin.analytics.read',
+        entity_type: 'analytics',
+        entity_id: null,
+        reason: `days=${days}`,
+        payload: {
+          role: ctx.roleKey,
+        },
+        ip: null,
+        user_agent: null,
+      });
+    } catch {
+      // best-effort audit write
+    }
+  }
 
   res.status(200).json({ data });
 }

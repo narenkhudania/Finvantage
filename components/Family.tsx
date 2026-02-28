@@ -104,42 +104,53 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+    <div className="space-y-10 animate-in fade-in duration-700 pb-24">
       {notice && (
         <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl px-6 py-3 text-[10px] font-black uppercase tracking-widest">
           {notice}
         </div>
       )}
-      <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
-        <div className="space-y-4">
-          <h3 className="text-2xl font-black text-slate-900">Step 1: Family Profile</h3>
-          <p className="text-slate-500 font-medium max-w-lg">Define who lives in your household. This is required before we can map out individual income streams and benefits.</p>
-          <div className="flex gap-4">
+      <div className="surface-dark p-10 md:p-14 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[340px] h-[340px] bg-teal-600/10 blur-[90px] rounded-full translate-x-1/3 -translate-y-1/3" />
+        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+          <div className="space-y-4 text-left">
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
+              <Users size={14}/> Family Profile
+            </div>
+            <h3 className="text-4xl md:text-5xl font-black tracking-tight">Household Node</h3>
+            <p className="text-slate-300 font-medium max-w-xl">
+              Define family members, dependency status, and planning participation before mapping income and goals.
+            </p>
+            <div className="flex gap-4">
              <div className="flex items-center gap-2 text-[10px] font-black text-teal-600 uppercase tracking-widest bg-teal-50 px-3 py-1.5 rounded-full">
                <Users size={14}/> {state.family.length} Added
              </div>
              {state.family.length > 0 && (
                <button 
-                onClick={() => setView('income')}
+                onClick={() => setView('inflow')}
                 className="flex items-center gap-2 text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors"
                >
                  Go to Income Mapping <ArrowRight size={14}/>
                </button>
              )}
+            </div>
           </div>
-        </div>
         <button 
           onClick={() => setShowAdd(prev => !prev)}
-          className="px-10 py-6 bg-slate-900 text-white rounded-[2rem] hover:bg-slate-800 transition-all flex items-center gap-3 font-black uppercase text-sm tracking-widest shadow-2xl shadow-slate-900/20"
+          className="px-10 py-5 bg-teal-600 text-white rounded-[2rem] hover:bg-teal-500 transition-all flex items-center gap-3 font-black uppercase text-[10px] tracking-widest shadow-2xl"
         >
           <Plus size={20} /> {showAdd ? 'Close Form' : 'Add Member'}
         </button>
       </div>
+      </div>
 
       {showAdd && (
-        <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden">
           <div className="p-8 sm:p-10 border-b border-slate-100 flex justify-between items-center bg-white/90">
-            <h3 className="text-2xl font-black text-slate-900">Add Household Member</h3>
+            <div className="text-left">
+              <h3 className="text-2xl font-black text-slate-900">Add Household Member</h3>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Basic profile + planning behavior</p>
+            </div>
             <button onClick={() => setShowAdd(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-900 transition-colors">
               <Plus size={24} className="rotate-45" />
             </button>
@@ -239,7 +250,7 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-[2rem] border-2 border-teal-100 shadow-sm relative overflow-hidden h-48 flex flex-col justify-center">
+        <div className="bg-white p-6 rounded-[2.25rem] border border-slate-200 shadow-sm relative overflow-hidden h-48 flex flex-col justify-center">
           <div className="absolute top-0 right-0 p-2 bg-teal-600 text-[8px] font-black text-white rounded-bl-xl uppercase tracking-widest">Primary</div>
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600">
@@ -253,7 +264,7 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
         </div>
 
         {state.family.map((member) => (
-          <div key={member.id} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm group hover:border-teal-300 transition-all h-48 flex flex-col justify-center">
+          <div key={member.id} className="bg-white p-6 rounded-[2.25rem] border border-slate-200 shadow-sm group hover:border-teal-300 transition-all h-48 flex flex-col justify-center">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-teal-50 group-hover:text-teal-600 transition-colors">

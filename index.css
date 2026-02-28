@@ -168,7 +168,7 @@ h4 {
   background: linear-gradient(160deg, #071615 0%, #0c1f1e 100%);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .text-7xl { font-size: 2.5rem !important; line-height: 1.05 !important; }
   .text-8xl { font-size: 2.75rem !important; line-height: 1.05 !important; }
   .text-9xl { font-size: 3rem !important; line-height: 1.05 !important; }
@@ -206,5 +206,54 @@ h4 {
   .rounded-\[3rem\],
   .rounded-\[2\.5rem\] {
     border-radius: 1.5rem !important;
+  }
+
+  .min-h-\[480px\],
+  .min-h-\[450px\],
+  .min-h-\[420px\],
+  .min-h-\[400px\],
+  .min-h-\[300px\],
+  .min-h-\[220px\] {
+    min-height: auto !important;
+  }
+
+  .h-\[300px\],
+  .h-\[320px\],
+  .h-\[400px\] {
+    height: 220px !important;
+  }
+
+  table {
+    font-size: 0.75rem;
+  }
+
+  table[class*="min-w-"] {
+    min-width: 680px !important;
+  }
+
+  th, td {
+    padding-left: 0.625rem !important;
+    padding-right: 0.625rem !important;
+    white-space: nowrap;
+  }
+
+  .overflow-auto,
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+}
+
+@media (max-width: 1024px) {
+  .max-w-\[1700px\],
+  .max-w-7xl,
+  .max-w-6xl,
+  .max-w-5xl,
+  .max-w-4xl {
+    max-width: 100% !important;
+  }
+
+  .h-\[calc\(100vh-12rem\)\] {
+    height: calc(100vh - 10rem) !important;
   }
 }

@@ -7,6 +7,11 @@ interface BlogPostPageProps {
   slug: string;
 }
 
+const sanitizeErrorText = (value: string) =>
+  value
+    .replace(/supabase/gi, 'platform')
+    .replace(/gotrue/gi, 'identity service');
+
 const DATE_FMT = new Intl.DateTimeFormat('en-IN', {
   day: '2-digit',
   month: 'short',
@@ -168,7 +173,7 @@ const BlogPostPage: React.FC<BlogPostPageProps> = ({ slug }) => {
         });
       } catch (err) {
         if (!mounted) return;
-        setError((err as Error).message || 'Could not load blog post.');
+        setError(sanitizeErrorText((err as Error).message || 'Could not load blog post.'));
       } finally {
         if (mounted) setLoading(false);
       }

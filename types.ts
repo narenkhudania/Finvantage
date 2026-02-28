@@ -19,6 +19,11 @@ export interface Notification {
 
 export type LoanSourceType = 'Bank' | 'NBFC' | 'Friends & Family';
 export type LoanType = 'Home Loan' | 'Personal Loan' | 'Credit Card EMI' | 'OD' | 'Car Loan' | 'Property Purchase' | 'Others';
+export type InterestRateType = 'Fixed' | 'Floating';
+export type AnchorType = 'Repo' | 'MCLR' | 'External Benchmark' | 'Custom';
+export type InstallmentType = 'EMI' | 'Equal Principal';
+export type DueDayMode = 'Fixed Day' | 'Month End';
+export type DayCountDenominator = 360 | 365;
 export type RiskLevel = 'Conservative' | 'Moderate' | 'Balanced' | 'Aggressive' | 'Very Aggressive';
 
 export type DiscountBucketStartType = 'Offset' | 'Retirement';
@@ -151,6 +156,17 @@ export interface Loan {
   interestRate: number;
   remainingTenure: number; 
   emi: number;
+  repaymentFrequency?: 'Monthly';
+  tenureUnit?: 'Months' | 'Years';
+  installmentType?: InstallmentType;
+  dueDayMode?: DueDayMode;
+  dueDay?: number;
+  dayCountDenominator?: DayCountDenominator;
+  interestRateType?: InterestRateType;
+  anchorType?: AnchorType;
+  anchorRate?: number;
+  spreadRate?: number;
+  brokenInterestCharged?: boolean;
   notes?: string;
   startYear?: number;
   lumpSumRepayments: { year: number; amount: number }[];

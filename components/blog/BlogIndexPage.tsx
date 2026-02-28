@@ -3,6 +3,11 @@ import { ArrowRight, Search } from 'lucide-react';
 import { listPublishedBlogPosts, type BlogPost } from '../../services/blogService';
 import { applySeoMeta } from '../../services/seoMeta';
 
+const sanitizeErrorText = (value: string) =>
+  value
+    .replace(/supabase/gi, 'platform')
+    .replace(/gotrue/gi, 'identity service');
+
 const DATE_FMT = new Intl.DateTimeFormat('en-IN', {
   day: '2-digit',
   month: 'short',
@@ -51,7 +56,7 @@ const BlogIndexPage: React.FC = () => {
         setPosts(rows);
       } catch (err) {
         if (!mounted) return;
-        setError((err as Error).message || 'Could not load blog posts.');
+        setError(sanitizeErrorText((err as Error).message || 'Could not load blog posts.'));
       } finally {
         if (mounted) setLoading(false);
       }

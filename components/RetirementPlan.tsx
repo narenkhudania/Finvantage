@@ -102,7 +102,7 @@ const RetirementPlan: React.FC<{ state: FinanceState }> = ({ state }) => {
            </div>
            
            <div className="flex-1 min-h-[400px]">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
                 <AreaChart data={accumulationData}>
                   <defs>
                     <linearGradient id="colorNominal" x1="0" y1="0" x2="0" y2="1">

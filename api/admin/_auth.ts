@@ -13,6 +13,8 @@ export type AdminRequestContext = {
   client: SupabaseClient;
   user: User;
   roleKey: string;
+  workspaceId: string | null;
+  organizationId: string | null;
 };
 
 const supabaseUrl =
@@ -46,6 +48,13 @@ const readBearerToken = (req: RequestLike): string => {
   return token.trim();
 };
 
+const readWorkspaceId = (req: RequestLike): string | null => {
+  const header = req.headers?.['x-workspace-id'];
+  const value = Array.isArray(header) ? header[0] : header;
+  if (!value || !value.trim()) return null;
+  return value.trim();
+};
+
 export async function requireAdmin(
   req: RequestLike,
   res: ResponseLike,
@@ -72,6 +81,80 @@ export async function requireAdmin(
     return null;
   }
 
+  const workspaceFromHeader = readWorkspaceId(req);
+  if (workspaceFromHeader) {
+    const { data: membership, error: membershipError } = await adminClient
+      .from('workspace_memberships')
+      .select('workspace_id, organization_id, role_key, is_active')
+      .eq('workspace_id', workspaceFromHeader)
+      .eq('user_id', userData.user.id)
+      .maybeSingle();
+
+    if (!membershipError && membership && membership.is_active) {
+      const { data: allowed, error: permissionError } = await adminClient.rpc('workspace_has_permission', {
+        p_workspace_id: workspaceFromHeader,
+        p_permission_key: requiredPermission,
+        p_user_id: userData.user.id,
+      });
+
+      if (permissionError) {
+        res.status(500).json({ error: 'Failed to verify workspace permissions.' });
+        return null;
+      }
+
+      if (!allowed) {
+        res.status(403).json({ error: `Permission denied: ${requiredPermission}` });
+        return null;
+      }
+
+      return {
+        client: adminClient,
+        user: userData.user,
+        roleKey: String(membership.role_key || 'support'),
+        workspaceId: workspaceFromHeader,
+        organizationId: membership.organization_id ? String(membership.organization_id) : null,
+      };
+    }
+  }
+
+  // Auto-pick first active workspace membership if header is missing.
+  const { data: firstMembership, error: firstMembershipError } = await adminClient
+    .from('workspace_memberships')
+    .select('workspace_id, organization_id, role_key, is_active')
+    .eq('user_id', userData.user.id)
+    .eq('is_active', true)
+    .order('joined_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (!firstMembershipError && firstMembership?.workspace_id) {
+    const workspaceId = String(firstMembership.workspace_id);
+    const { data: allowed, error: permissionError } = await adminClient.rpc('workspace_has_permission', {
+      p_workspace_id: workspaceId,
+      p_permission_key: requiredPermission,
+      p_user_id: userData.user.id,
+    });
+
+    if (permissionError) {
+      res.status(500).json({ error: 'Failed to verify workspace permissions.' });
+      return null;
+    }
+
+    if (!allowed) {
+      res.status(403).json({ error: `Permission denied: ${requiredPermission}` });
+      return null;
+    }
+
+    return {
+      client: adminClient,
+      user: userData.user,
+      roleKey: String(firstMembership.role_key || 'support'),
+      workspaceId,
+      organizationId: firstMembership.organization_id ? String(firstMembership.organization_id) : null,
+    };
+  }
+
+  // Legacy fallback: global admin_users role model.
   const { data: adminUser, error: adminError } = await adminClient
     .from('admin_users')
     .select('user_id, is_active, admin_roles(role_key)')
@@ -111,5 +194,7 @@ export async function requireAdmin(
     client: adminClient,
     user: userData.user,
     roleKey,
+    workspaceId: null,
+    organizationId: null,
   };
 }

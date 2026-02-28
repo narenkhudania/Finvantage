@@ -21,6 +21,11 @@ function toAuthEmail(identifier: string): string {
   return email;
 }
 
+const sanitizeProviderText = (value: string) =>
+  value
+    .replace(/supabase/gi, 'platform')
+    .replace(/gotrue/gi, 'identity service');
+
 // ─────────────────────────────────────────────────────────────
 // AUTH OPERATIONS
 // ─────────────────────────────────────────────────────────────
@@ -34,7 +39,7 @@ export async function checkIdentifier(identifier: string): Promise<boolean> {
   const { data, error } = await supabase.rpc('identifier_exists', {
     p_identifier: identifier.trim(),
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(sanitizeProviderText(error.message || 'Could not verify identifier.'));
   return data as boolean;
 }
 
@@ -63,7 +68,22 @@ export async function signUp(payload: {
     },
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    const rawMessage = (error.message || 'Sign-up failed.').trim();
+    const lowerMessage = rawMessage.toLowerCase();
+    const status = (error as any)?.status;
+    const isServerSideSignupFailure =
+      status === 500 ||
+      lowerMessage.includes('database error saving new user');
+
+    if (isServerSideSignupFailure) {
+      throw new Error(
+        'Sign-up is blocked by a server-side profile bootstrap error. Apply the latest platform migrations (including signup trigger fixes) and try again.'
+      );
+    }
+
+    throw new Error(sanitizeProviderText(rawMessage));
+  }
   if (!data.user) throw new Error('Sign-up failed — no user returned.');
 
   // Step 2 — Create the profile row
@@ -78,7 +98,18 @@ export async function signUp(payload: {
       last_name:  payload.lastName?.trim() ?? null,
     }, { onConflict: 'id' });
 
-  if (profileError) throw new Error(profileError.message);
+  if (profileError) {
+    const profileMessage = (profileError.message || '').toLowerCase();
+    const isRlsOrPermission =
+      profileMessage.includes('row-level security') ||
+      profileMessage.includes('permission denied');
+
+    // In email-confirmation mode, Auth may not return an active session immediately.
+    // The auth trigger already creates the profile row, so we don't block signup here.
+    if (!isRlsOrPermission) {
+      throw new Error(sanitizeProviderText(profileError.message || 'Could not complete profile setup.'));
+    }
+  }
 }
 
 /**
@@ -183,7 +214,7 @@ export async function saveOnboardingProfile(payload: {
     })
     .eq('id', user.id);
 
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(sanitizeProviderText(error.message || 'Could not save profile.'));
 }
 
 /**

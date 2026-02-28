@@ -1,11 +1,37 @@
-
-import React, { useState } from 'react';
-import { FinanceState, Asset, AssetType } from '../types';
-import { Plus, Trash2, Coins, TrendingUp, Home, Landmark, Briefcase, Car, CheckCircle2, Circle, Percent, Users, Info } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import type { Asset, AssetType, FinanceState, InvestmentFrequency } from '../types';
+import {
+  ResponsiveContainer,
+  PieChart as RePie,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from 'recharts';
+import {
+  Plus,
+  Trash2,
+  Coins,
+  TrendingUp,
+  Home,
+  Landmark,
+  Briefcase,
+  Car,
+  Users,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+} from 'lucide-react';
 import { clampNumber, parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencyConfig, getCurrencySymbol } from '../lib/currency';
+import { getRiskReturnAssumption } from '../lib/financeMath';
 
-const ASSET_CLASSES: { name: AssetType, icon: any, subCategories: string[] }[] = [
+const ASSET_CLASSES: { name: AssetType; icon: any; subCategories: string[] }[] = [
   { name: 'Liquid', icon: Landmark, subCategories: ['Savings Account', 'Cash', 'Liquid Mutual Funds', 'Overnight Funds'] },
   { name: 'Debt', icon: Briefcase, subCategories: ['Fixed Deposits', 'Bonds', 'Corporate Deposits', 'Debt Mutual Funds', 'PPF', 'EPF'] },
   { name: 'Equity', icon: TrendingUp, subCategories: ['Direct Equity', 'Equity MFs', 'ELSS (Tax Saver)', 'Index Funds', 'Small-cap Funds', 'Mid-cap Funds'] },
@@ -13,6 +39,15 @@ const ASSET_CLASSES: { name: AssetType, icon: any, subCategories: string[] }[] =
   { name: 'Gold/Silver', icon: Coins, subCategories: ['Physical Gold', 'Sovereign Gold Bonds', 'Gold ETFs', 'Silver'] },
   { name: 'Personal', icon: Car, subCategories: ['Vehicle', 'Art/Collectibles', 'Other Personal Assets'] },
 ];
+
+const ASSET_TYPE_OPTIONS = ASSET_CLASSES.flatMap(group =>
+  group.subCategories.map(subCategory => ({
+    category: group.name,
+    subCategory,
+    value: `${group.name}::${subCategory}`,
+    label: `${subCategory} (${group.name})`,
+  })),
+);
 
 const GOLD_RATE_PER_GRAM_BY_CURRENCY: Record<string, number> = {
   INR: 7000,
@@ -25,100 +60,223 @@ const GOLD_RATE_PER_GRAM_BY_CURRENCY: Record<string, number> = {
   SGD: 95,
 };
 
-const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
-  const [showAdd, setShowAdd] = useState(false);
-  const [hasRegularContribution, setHasRegularContribution] = useState(false);
-  const [goldGrams, setGoldGrams] = useState('');
-  const [formError, setFormError] = useState<string | null>(null);
-  const [formWarning, setFormWarning] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [newAsset, setNewAsset] = useState<Partial<Asset>>({
+const CHART_COLORS = ['#0f766e', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#84cc16'];
+
+const isVehicleAsset = (asset: Pick<Asset, 'category' | 'subCategory'> | Partial<Asset>) =>
+  asset.category === 'Personal' && asset.subCategory === 'Vehicle';
+
+const getDefaultGrowthRate = (category: AssetType, subCategory: string) => {
+  if (category === 'Equity') return 10;
+  if (category === 'Liquid') return 4;
+  if (category === 'Debt') return 7;
+  if (category === 'Real Estate') return 8;
+  if (category === 'Gold/Silver') return 6;
+  if (category === 'Personal' && subCategory === 'Vehicle') return -10;
+  return 5;
+};
+
+const buildDefaultDraft = (): Partial<Asset> => {
+  const year = new Date().getFullYear();
+  return {
     category: 'Equity',
     subCategory: 'Direct Equity',
+    name: '',
     owner: 'self',
     currentValue: 0,
-    purchaseYear: new Date().getFullYear(),
     growthRate: 10,
+    purchaseYear: year,
     availableForGoals: true,
-    availableFrom: new Date().getFullYear(),
-    name: '',
+    availableFrom: year,
     monthlyContribution: 0,
     contributionFrequency: 'Monthly',
     contributionStepUp: 0,
-    contributionStartYear: new Date().getFullYear(),
-    contributionEndYear: new Date().getFullYear(),
-  });
+    contributionStartYear: year,
+    contributionEndYear: year,
+  };
+};
 
-  const handleCategoryChange = (category: AssetType) => {
-    const assetClass = ASSET_CLASSES.find(ac => ac.name === category);
-    const nextSubCategory = assetClass?.subCategories[0] || '';
-    const defaultGrowthRate =
-      category === 'Equity'
-        ? 10
-        : (category === 'Personal' && nextSubCategory === 'Vehicle' ? -10 : 5);
-    setNewAsset({
-      ...newAsset,
+const Assets: React.FC<{ state: FinanceState; updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
+  const [showAdd, setShowAdd] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [hasRegularContribution, setHasRegularContribution] = useState(false);
+  const [goldGrams, setGoldGrams] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [newAsset, setNewAsset] = useState<Partial<Asset>>(buildDefaultDraft());
+
+  const currentYear = new Date().getFullYear();
+  const currencyCountry = state.profile.country;
+  const currencySymbol = getCurrencySymbol(currencyCountry);
+  const { code: currencyCode } = getCurrencyConfig(currencyCountry);
+
+  const isGoldAsset = newAsset.category === 'Gold/Silver';
+  const isAvailableForGoals = newAsset.availableForGoals !== false;
+
+  const goldRatePerGram = GOLD_RATE_PER_GRAM_BY_CURRENCY[currencyCode] ?? GOLD_RATE_PER_GRAM_BY_CURRENCY.INR;
+  const grams = parseNumber(goldGrams, 0);
+  const calculatedGoldValue = grams > 0 ? grams * goldRatePerGram : 0;
+
+  const selectedType = `${newAsset.category || 'Equity'}::${newAsset.subCategory || 'Direct Equity'}`;
+
+  const summary = useMemo(() => {
+    const byCategory = {
+      Liquid: 0,
+      Debt: 0,
+      Equity: 0,
+      'Real Estate': 0,
+      'Gold/Silver': 0,
+      Personal: 0,
+    } as Record<AssetType, number>;
+
+    for (const asset of state.assets) {
+      byCategory[asset.category] += parseNumber(asset.currentValue, 0);
+    }
+
+    const total = Object.values(byCategory).reduce((sum, value) => sum + value, 0);
+    return { total, byCategory };
+  }, [state.assets]);
+
+  const totalLiabilities = useMemo(
+    () => state.loans.reduce((sum, loan) => sum + parseNumber(loan.outstandingAmount, 0), 0),
+    [state.loans],
+  );
+
+  const assetMixData = useMemo(
+    () =>
+      Object.entries(summary.byCategory)
+        .filter(([, value]) => value > 0)
+        .map(([name, value]) => ({ name, value })),
+    [summary.byCategory],
+  );
+
+  const netWorthSummary = useMemo(() => {
+    const financial = summary.byCategory.Liquid + summary.byCategory.Debt + summary.byCategory.Equity + summary.byCategory['Gold/Silver'];
+    const physical = summary.byCategory['Real Estate'];
+    const personal = summary.byCategory.Personal;
+    const total = financial + physical + personal;
+    return {
+      financial,
+      physical,
+      personal,
+      totalAssets: total,
+      liabilities: totalLiabilities,
+      netWorth: total - totalLiabilities,
+      pct: (value: number) => (total > 0 ? (value / total) * 100 : 0),
+    };
+  }, [summary.byCategory, totalLiabilities]);
+
+  const projectedEquity = useMemo(() => {
+    const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
+    const annualContribution = state.assets.reduce(
+      (sum, asset) => sum + Math.max(0, parseNumber(asset.monthlyContribution, 0)) * 12,
+      0,
+    );
+    const points: { year: number; value: number }[] = [];
+    let value = netWorthSummary.netWorth;
+    const year = new Date().getFullYear();
+    for (let i = 0; i <= 5; i += 1) {
+      points.push({ year: year + i, value: Math.round(value) });
+      value = value * (1 + assumedReturn / 100) + annualContribution;
+    }
+    return points;
+  }, [netWorthSummary.netWorth, state.assets, state.riskProfile?.level]);
+
+  const resetDraft = () => {
+    setNewAsset(buildDefaultDraft());
+    setShowAdvanced(false);
+    setHasRegularContribution(false);
+    setGoldGrams('');
+    setFormError(null);
+  };
+
+  const getOwnerName = (id: string) => {
+    if (id === 'self') return state.profile.firstName || 'Self';
+    return state.family.find(member => member.id === id)?.name || 'Unknown';
+  };
+
+  const getAssetNamePlaceholder = () => {
+    const sub = newAsset.subCategory || '';
+    const mapped: Record<string, string> = {
+      'Savings Account': 'e.g. HDFC Salary Account',
+      'Fixed Deposits': 'e.g. SBI 3Y Fixed Deposit',
+      'Direct Equity': 'e.g. Reliance Industries Shares',
+      'ELSS (Tax Saver)': 'e.g. Tax Saver Fund',
+      'Residential Property': 'e.g. Apartment - Whitefield',
+      'Commercial Property': 'e.g. Office Unit - BKC',
+      'Physical Gold': 'e.g. Gold Jewellery',
+      Vehicle: 'e.g. Hyundai Creta',
+      'Other Personal Assets': 'e.g. Premium Watch Collection',
+    };
+    return mapped[sub] || 'e.g. Asset Name';
+  };
+
+  const handleAssetTypeChange = (value: string) => {
+    const [categoryRaw, subCategoryRaw] = value.split('::');
+    const category = (categoryRaw || 'Equity') as AssetType;
+    const subCategory = subCategoryRaw || 'Direct Equity';
+
+    setNewAsset(prev => ({
+      ...prev,
       category,
-      subCategory: nextSubCategory,
-      growthRate: defaultGrowthRate
-    });
+      subCategory,
+      growthRate: getDefaultGrowthRate(category, subCategory),
+    }));
+
     if (category !== 'Gold/Silver') setGoldGrams('');
   };
 
-  const handleAdd = () => {
+  const handleAddAsset = () => {
     setFormError(null);
-    setFormWarning(null);
-    const currentYear = new Date().getFullYear();
-    const isGoldAsset = newAsset.category === 'Gold/Silver';
-    const isVehicleAsset = newAsset.category === 'Personal' && newAsset.subCategory === 'Vehicle';
-    const name = (newAsset.name || '').trim();
-    const subCategory = newAsset.subCategory || '';
-    const owner = newAsset.owner || 'self';
-    const purchaseYear = parseNumber(newAsset.purchaseYear || currentYear, currentYear);
-    const growthRate = parseNumber(newAsset.growthRate || 0, 0);
-    const { code } = getCurrencyConfig(state.profile.country);
-    const goldRatePerGram = GOLD_RATE_PER_GRAM_BY_CURRENCY[code] ?? GOLD_RATE_PER_GRAM_BY_CURRENCY.INR;
-    const grams = parseNumber(goldGrams, 0);
-    const currentValue = isGoldAsset
-      ? Math.max(0, grams * goldRatePerGram)
-      : parseNumber(newAsset.currentValue || 0, 0);
-    const availableFrom = newAsset.availableFrom ? parseNumber(newAsset.availableFrom, currentYear) : undefined;
-    const monthlyContribution = hasRegularContribution ? parseNumber(newAsset.monthlyContribution || 0, 0) : 0;
-    const contributionStepUp = hasRegularContribution ? parseNumber(newAsset.contributionStepUp || 0, 0) : 0;
-    const contributionFrequency = hasRegularContribution ? (newAsset.contributionFrequency || 'Monthly') : 'Monthly';
-    const contributionStartYear = hasRegularContribution
-      ? (newAsset.contributionStartYear ? parseNumber(newAsset.contributionStartYear, currentYear) : undefined)
-      : undefined;
-    const contributionEndYear = hasRegularContribution
-      ? (newAsset.contributionEndYear ? parseNumber(newAsset.contributionEndYear, currentYear) : undefined)
-      : undefined;
 
-    if (subCategory.toLowerCase().includes('other') && name.length < 2) {
-      setFormError('Asset name is required for custom/other categories.');
+    const category = (newAsset.category || 'Equity') as AssetType;
+    const subCategory = (newAsset.subCategory || '').trim();
+    const owner = newAsset.owner || 'self';
+    const name = (newAsset.name || '').trim() || subCategory || category;
+
+    if (!subCategory) {
+      setFormError('Please choose an asset type.');
       return;
     }
-    if (!owner || (owner !== 'self' && !state.family.find(f => f.id === owner))) {
-      setFormError('Owner must be Self or a valid family member.');
+
+    if (owner !== 'self' && !state.family.find(member => member.id === owner)) {
+      setFormError('Please select a valid owner.');
       return;
     }
-    if (!isVehicleAsset && (growthRate < 0 || growthRate > 30)) {
-      setFormError('Growth rate must be between 0% and 30%.');
+
+    const growthInput = parseNumber(newAsset.growthRate, getDefaultGrowthRate(category, subCategory));
+    if (!isVehicleAsset({ category, subCategory }) && (growthInput < 0 || growthInput > 30)) {
+      setFormError('Expected growth should be between 0% and 30%.');
       return;
     }
-    if (isVehicleAsset && Math.abs(growthRate) > 30) {
-      setFormError('Depreciation rate must be between 0% and 30%.');
+    if (isVehicleAsset({ category, subCategory }) && Math.abs(growthInput) > 30) {
+      setFormError('Expected depreciation should be between 0% and 30%.');
       return;
     }
-    if (isGoldAsset && grams <= 0) {
-      setFormError('Enter gold quantity in grams to auto-calculate current value.');
+
+    if (category === 'Gold/Silver' && grams <= 0) {
+      setFormError('Enter gold/silver quantity in grams.');
       return;
     }
+
+    const currentValue = category === 'Gold/Silver'
+      ? Math.max(0, grams * goldRatePerGram)
+      : Math.max(0, parseNumber(newAsset.currentValue, 0));
+
+    if (currentValue <= 0) {
+      setFormError('Current value must be greater than 0.');
+      return;
+    }
+
+    const monthlyContribution = hasRegularContribution ? parseNumber(newAsset.monthlyContribution, 0) : 0;
+    const contributionStepUp = hasRegularContribution ? parseNumber(newAsset.contributionStepUp, 0) : 0;
+    const contributionFrequency = hasRegularContribution
+      ? (newAsset.contributionFrequency || 'Monthly') as InvestmentFrequency
+      : 'Monthly';
+    const contributionStartYear = hasRegularContribution ? parseNumber(newAsset.contributionStartYear, currentYear) : undefined;
+    const contributionEndYear = hasRegularContribution ? parseNumber(newAsset.contributionEndYear, currentYear) : undefined;
+
     if (hasRegularContribution && monthlyContribution <= 0) {
       setFormError('Contribution amount must be greater than 0 when regular contribution is enabled.');
-      return;
-    }
-    if (hasRegularContribution && monthlyContribution < 0) {
-      setFormError('Monthly contribution cannot be negative.');
       return;
     }
     if (hasRegularContribution && (contributionStepUp < 0 || contributionStepUp > 30)) {
@@ -126,485 +284,571 @@ const Assets: React.FC<{ state: FinanceState, updateState: (data: Partial<Financ
       return;
     }
     if (hasRegularContribution && contributionStartYear !== undefined && contributionEndYear !== undefined && contributionStartYear > contributionEndYear) {
-      setFormError('Contribution start year must be before end year.');
+      setFormError('Contribution start year cannot be after contribution end year.');
       return;
     }
-    if (currentValue <= 0) {
-      setFormWarning('Current value is 0. Consider entering a positive value.');
-      setNotice('Asset saved with 0 current value. Consider updating for accuracy.');
-      setTimeout(() => setNotice(null), 4000);
-    }
 
-    const asset = {
-      ...newAsset,
-      id: Math.random().toString(36).substr(2, 9),
+    const purchaseYear = parseNumber(newAsset.purchaseYear, currentYear);
+    const availableForGoals = newAsset.availableForGoals !== false;
+    const availableFrom = availableForGoals ? parseNumber(newAsset.availableFrom, currentYear) : undefined;
+
+    const growthRate = isVehicleAsset({ category, subCategory })
+      ? -clampNumber(Math.abs(growthInput), 0, 30)
+      : clampNumber(growthInput, 0, 30);
+
+    const nextAsset: Asset = {
+      id: Math.random().toString(36).slice(2, 11),
+      category,
+      subCategory,
       name,
       owner,
-      purchaseYear: purchaseYear,
-      growthRate: isVehicleAsset ? -clampNumber(Math.abs(growthRate), 0, 30) : clampNumber(growthRate, 0, 30),
-      currentValue: Math.max(0, currentValue),
-      availableFrom: availableFrom,
-      monthlyContribution: Math.max(0, monthlyContribution),
+      currentValue,
+      purchaseYear,
+      growthRate,
+      availableForGoals,
+      availableFrom,
+      monthlyContribution,
       contributionFrequency,
       contributionStepUp: clampNumber(contributionStepUp, 0, 30),
       contributionStartYear,
       contributionEndYear,
-    } as Asset;
-    updateState({ assets: [...state.assets, asset] });
-    setHasRegularContribution(false);
-    setGoldGrams('');
+    };
+
+    updateState({ assets: [...state.assets, nextAsset] });
+    setNotice('Asset added successfully.');
+    setTimeout(() => setNotice(null), 3000);
     setShowAdd(false);
+    resetDraft();
   };
 
   const removeAsset = (id: string) => {
-    updateState({ assets: state.assets.filter(a => a.id !== id) });
+    updateState({ assets: state.assets.filter(asset => asset.id !== id) });
   };
-
-  const getOwnerName = (id: string) => {
-    if (id === 'self') return state.profile.firstName || 'Self';
-    return state.family.find(f => f.id === id)?.name || 'Unknown';
-  };
-
-  const getAssetNamePlaceholder = () => {
-    const category = newAsset.category || 'Equity';
-    const subCategory = newAsset.subCategory || '';
-
-    const bySubCategory: Record<string, string> = {
-      'Savings Account': 'e.g. HDFC Salary Account',
-      'Cash': 'e.g. Emergency Cash Reserve',
-      'Liquid Mutual Funds': 'e.g. Nippon India Liquid Fund',
-      'Overnight Funds': 'e.g. SBI Overnight Fund',
-      'Fixed Deposits': 'e.g. SBI 3Y Fixed Deposit',
-      'Bonds': 'e.g. GOI 2033 Bond',
-      'Corporate Deposits': 'e.g. Bajaj Finance Corporate Deposit',
-      'Debt Mutual Funds': 'e.g. HDFC Corporate Bond Fund',
-      'PPF': 'e.g. PPF Account',
-      'EPF': 'e.g. EPF Corpus',
-      'Direct Equity': 'e.g. Reliance Industries Shares',
-      'Equity MFs': 'e.g. Parag Parikh Flexi Cap Fund',
-      'ELSS (Tax Saver)': 'e.g. Mirae Asset Tax Saver Fund',
-      'Index Funds': 'e.g. Nifty 50 Index Fund',
-      'Small-cap Funds': 'e.g. SBI Small Cap Fund',
-      'Mid-cap Funds': 'e.g. Kotak Emerging Equity Fund',
-      'Residential Property': 'e.g. Apartment - Whitefield',
-      'Commercial Property': 'e.g. Office Unit - BKC',
-      'Land': 'e.g. Plot - Jaipur',
-      'REITs': 'e.g. Embassy Office Parks REIT',
-      'Physical Gold': 'e.g. Gold Jewellery',
-      'Sovereign Gold Bonds': 'e.g. SGB 2028 Series',
-      'Gold ETFs': 'e.g. Nippon Gold ETF',
-      'Silver': 'e.g. Silver Coins',
-      'Vehicle': 'e.g. Hyundai Creta',
-      'Art/Collectibles': 'e.g. Contemporary Art Collection',
-      'Other Personal Assets': 'e.g. Luxury Watch Collection',
-    };
-
-    if (bySubCategory[subCategory]) return bySubCategory[subCategory];
-
-    const byCategory: Record<AssetType, string> = {
-      Liquid: 'e.g. Emergency Fund Account',
-      Debt: 'e.g. Income Instrument',
-      Equity: 'e.g. Growth Portfolio Holding',
-      'Real Estate': 'e.g. Property Holding',
-      'Gold/Silver': 'e.g. Bullion Holding',
-      Personal: 'e.g. Personal Asset',
-    };
-
-    return byCategory[category] || 'e.g. Asset Name';
-  };
-
-  const isAvailableForGoals = newAsset.availableForGoals !== false;
-  const goalAvailabilityHint = isAvailableForGoals
-    ? 'Included in goal funding. Planner can use this asset by redemption/sale/pledge when needed.'
-    : 'Excluded from goal funding. Planner will keep this asset protected and not use it for goals.';
-
-  const totalAssetsValue = state.assets.reduce((sum, a) => sum + a.currentValue, 0);
-
-  const currencyCountry = state.profile.country;
-  const currencySymbol = getCurrencySymbol(currencyCountry);
-  const currencyCode = getCurrencyConfig(currencyCountry).code;
-  const isGoldAsset = newAsset.category === 'Gold/Silver';
-  const goldRatePerGram = GOLD_RATE_PER_GRAM_BY_CURRENCY[currencyCode] ?? GOLD_RATE_PER_GRAM_BY_CURRENCY.INR;
-  const goldGramsValue = parseNumber(goldGrams, 0);
-  const calculatedGoldValue = goldGramsValue > 0 ? goldGramsValue * goldRatePerGram : 0;
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
+    <div className="space-y-10 animate-in fade-in duration-700 pb-24">
       {notice && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-2xl px-6 py-3 text-[10px] font-black uppercase tracking-widest">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl px-6 py-3 text-[10px] font-black uppercase tracking-widest">
           {notice}
         </div>
       )}
-      <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="space-y-1">
-          <h3 className="text-2xl font-black text-slate-900">Step 5: Asset Inventory</h3>
-          <p className="text-sm font-medium text-slate-500">Log holdings with growth assumptions and ownership for planning.</p>
+
+      <div className="surface-dark p-10 md:p-14 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-[340px] h-[340px] bg-teal-600/10 blur-[90px] rounded-full translate-x-1/3 -translate-y-1/3" />
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+          <div className="space-y-3 text-left">
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
+              <Sparkles size={14} /> Asset Inventory
+            </div>
+            <h2 className="text-4xl md:text-5xl font-black tracking-tight">Assets & Investments</h2>
+            <p className="text-slate-300 text-sm md:text-base font-medium max-w-xl">
+              Add core asset details first. Advanced assumptions are optional and can be adjusted later.
+            </p>
+          </div>
+
+          <button
+            onClick={() => {
+              setShowAdd(prev => !prev);
+              if (!showAdd) resetDraft();
+            }}
+            className="px-8 py-5 bg-teal-600 hover:bg-teal-500 text-white rounded-[1.75rem] transition-all flex items-center gap-3 font-black uppercase text-[11px] tracking-[0.2em] shadow-xl"
+          >
+            <Plus size={18} />
+            {showAdd ? 'Close Form' : 'Add Asset'}
+          </button>
         </div>
-        <button 
-          onClick={() => setShowAdd(prev => !prev)}
-          className="px-10 py-6 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase text-xs tracking-widest flex items-center gap-3 hover:bg-emerald-600 transition-all shadow-2xl"
-        >
-          <Plus size={20} /> {showAdd ? 'Close Form' : 'Add Asset'}
-        </button>
       </div>
 
       {showAdd && (
-        <div className="bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-6 sm:p-10 border-b border-slate-100 flex justify-between items-center bg-white/90">
-            <h3 className="text-2xl font-black text-slate-900">Add Holding</h3>
-            <button onClick={() => setShowAdd(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-900">
-              <Plus size={24} className="rotate-45" />
+        <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden">
+          <div className="p-6 sm:p-8 md:p-10 border-b border-slate-100 flex justify-between items-center bg-white/90">
+            <div className="text-left">
+              <h3 className="text-2xl font-black text-slate-900">Add Asset</h3>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Minimum: Type, Value, Owner</p>
+            </div>
+            <button
+              onClick={() => {
+                setShowAdd(false);
+                resetDraft();
+              }}
+              className="p-3 bg-slate-100 rounded-2xl text-slate-400 hover:text-slate-900 transition-colors"
+            >
+              <Plus size={22} className="rotate-45" />
             </button>
           </div>
-          <div className="p-6 sm:p-10 space-y-6">
+
+          <div className="p-6 sm:p-8 md:p-10 space-y-8 text-left">
             {formError && (
               <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold">
                 {formError}
               </div>
             )}
-            {formWarning && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs font-bold">
-                {formWarning}
-              </div>
-            )}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-left space-y-2">
-              <div className="flex items-center gap-2 text-slate-700">
+
+            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
+              <div className="flex items-center gap-2 text-slate-700 mb-2">
                 <Info size={14} />
                 <p className="text-[10px] font-black uppercase tracking-widest">Assistive Guidance</p>
               </div>
-              <p className="text-xs font-semibold text-slate-600">Fill class, type and owner first. For Gold/Silver, enter grams and value is auto-calculated.</p>
-              <p className="text-xs font-semibold text-slate-600">Use “Available For Goals” = Yes only for assets you are comfortable using for future goals.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
-                 <select 
-                   value={newAsset.category}
-                   onChange={e => handleCategoryChange(e.target.value as AssetType)}
-                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
-                 >
-                    {ASSET_CLASSES.map(ac => <option key={ac.name} value={ac.name}>{ac.name}</option>)}
-                 </select>
-                 <p className="text-[10px] font-bold text-slate-500">Choose the broad asset class first.</p>
-              </div>
-              <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sub-Category</label>
-                 <select 
-                   value={newAsset.subCategory}
-                   onChange={e => {
-                     const nextSubCategory = e.target.value;
-                     const currentGrowth = parseNumber(newAsset.growthRate || 0, 0);
-                     const nextGrowthRate =
-                       newAsset.category === 'Personal' && nextSubCategory === 'Vehicle'
-                         ? -(Math.abs(currentGrowth) || 10)
-                         : (currentGrowth <= 0 ? 5 : currentGrowth);
-                     setNewAsset({ ...newAsset, subCategory: nextSubCategory, growthRate: nextGrowthRate });
-                   }}
-                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
-                 >
-                    {ASSET_CLASSES.find(ac => ac.name === newAsset.category)?.subCategories.map(sub => (
-                      <option key={sub} value={sub}>{sub}</option>
-                    ))}
-                 </select>
-                 <p className="text-[10px] font-bold text-slate-500">Pick the closest instrument type for better planning assumptions.</p>
-              </div>
+              <p className="text-xs font-semibold text-slate-600 leading-relaxed">
+                Select asset type first. Category is auto-detected. For gold/silver, enter grams and value is auto-calculated.
+              </p>
             </div>
 
             <div className="space-y-2">
-               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Name (Custom)</label>
-               <input
-                 type="text"
-                 placeholder={getAssetNamePlaceholder()}
-                 value={newAsset.name}
-                 onChange={e => setNewAsset({...newAsset, name: e.target.value})}
-                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold"
-               />
-               <p className="text-[10px] font-bold text-slate-500">Use a name you can recognize instantly in reports (example changes with your selected type).</p>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Type</label>
+              <select
+                value={selectedType}
+                onChange={e => handleAssetTypeChange(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+              >
+                {ASSET_TYPE_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <p className="text-[10px] font-bold text-slate-500">Category auto-detected as <span className="text-slate-900">{newAsset.category}</span>.</p>
             </div>
-
-            <div className="space-y-2">
-               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                 <Percent size={12}/>
-                 {newAsset.category === 'Personal' && newAsset.subCategory === 'Vehicle' ? 'Exp. Depreciation (%)' : 'Exp. Growth (%)'}
-               </label>
-               <input
-                 type="number"
-                 min={0}
-                 max={30}
-                 value={
-                   newAsset.category === 'Personal' && newAsset.subCategory === 'Vehicle'
-                     ? Math.abs(parseNumber(newAsset.growthRate || 0, 0))
-                     : (newAsset.growthRate || '')
-                 }
-                 onChange={e => {
-                   const parsed = parseFloat(e.target.value);
-                   if (newAsset.category === 'Personal' && newAsset.subCategory === 'Vehicle') {
-                     setNewAsset({ ...newAsset, growthRate: Number.isFinite(parsed) ? -Math.abs(parsed) : 0 });
-                     return;
-                   }
-                   setNewAsset({ ...newAsset, growthRate: parsed });
-                 }}
-                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold"
-               />
-               <p className="text-[10px] font-bold text-slate-500">
-                 {newAsset.category === 'Personal' && newAsset.subCategory === 'Vehicle'
-                   ? 'Expected yearly depreciation used in projection (0% to 30%).'
-                   : 'Expected yearly return for projection (0% to 30%).'}
-               </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-               <div className="space-y-2">
-                 {isGoldAsset ? (
-                   <>
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Coins size={12}/> Gold Quantity (grams)</label>
-                     <input
-                       type="number"
-                       min={0}
-                       step="0.01"
-                       value={goldGrams}
-                       onChange={e => setGoldGrams(e.target.value)}
-                       className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold"
-                       placeholder="e.g. 25.5"
-                     />
-                     <p className="text-[10px] font-bold text-slate-500">Enter total grams and planner will auto-calculate current value.</p>
-                   </>
-                 ) : (
-                   <>
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Coins size={12}/> Current Value</label>
-                     <input type="number" value={newAsset.currentValue || ''} onChange={e => setNewAsset({...newAsset, currentValue: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold" placeholder={currencySymbol} />
-                     <p className="text-[10px] font-bold text-slate-500">Enter today’s market value, not original purchase amount.</p>
-                   </>
-                 )}
-               </div>
-               <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12}/> Owner</label>
-                 <select value={newAsset.owner} onChange={e => setNewAsset({...newAsset, owner: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold">
-                    <option value="self">Self</option>
-                    {state.family.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                 </select>
-                 <p className="text-[10px] font-bold text-slate-500">Select who legally owns this asset.</p>
-               </div>
-            </div>
-
-            {isGoldAsset && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Coins size={12}/> Current Value (Auto)</label>
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-black text-slate-900 min-h-[56px] flex items-center">
-                  {goldGramsValue > 0 ? formatCurrency(Math.round(calculatedGoldValue), currencyCountry) : 'Waiting for grams'}
-                </div>
-                <p className="text-[10px] font-bold text-slate-500">
-                  Auto-calculated at reference rate {formatCurrency(goldRatePerGram, currencyCountry)} per gram for planning.
-                </p>
-              </div>
-            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Do You Add To This Asset Regularly?</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Name (Optional)</label>
+                <input
+                  type="text"
+                  placeholder={getAssetNamePlaceholder()}
+                  value={newAsset.name || ''}
+                  onChange={e => setNewAsset(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Users size={12} /> Owner</label>
+                <select
+                  value={newAsset.owner}
+                  onChange={e => setNewAsset(prev => ({ ...prev, owner: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+                >
+                  <option value="self">Self</option>
+                  {state.family.map(member => (
+                    <option key={member.id} value={member.id}>{member.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                {isGoldAsset ? (
+                  <>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Coins size={12} /> Gold / Silver Quantity (grams)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={goldGrams}
+                      onChange={e => setGoldGrams(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+                      placeholder="e.g. 25.5"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Coins size={12} /> Current Value</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={parseNumber(newAsset.currentValue, 0)}
+                      onChange={e => setNewAsset(prev => ({ ...prev, currentValue: parseNumber(e.target.value, 0) }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+                      placeholder={currencySymbol}
+                    />
+                  </>
+                )}
+              </div>
+
+              {isGoldAsset && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Value (Auto)</label>
+                  <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-black text-slate-900 min-h-[56px] flex items-center">
+                    {grams > 0 ? formatCurrency(Math.round(calculatedGoldValue), currencyCountry) : 'Waiting for grams'}
+                  </div>
+                  <p className="text-[10px] font-bold text-slate-500">Reference rate: {formatCurrency(goldRatePerGram, currencyCountry)} per gram.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available For Goals</label>
                 <div className="flex gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      setHasRegularContribution(true);
-                      setNewAsset({
-                        ...newAsset,
-                        contributionFrequency: newAsset.contributionFrequency || 'Monthly',
-                        contributionStartYear: newAsset.contributionStartYear || new Date().getFullYear(),
-                        contributionEndYear: newAsset.contributionEndYear || new Date().getFullYear(),
-                      });
-                    }}
-                    className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${hasRegularContribution ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}
+                    onClick={() => setNewAsset(prev => ({ ...prev, availableForGoals: true, availableFrom: prev.availableFrom || currentYear }))}
+                    className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${isAvailableForGoals ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}
                   >
-                    Yes, I Add Regularly
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewAsset(prev => ({ ...prev, availableForGoals: false, availableFrom: undefined }))}
+                    className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${!isAvailableForGoals ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-400 border-slate-200'}`}
+                  >
+                    No
+                  </button>
+                </div>
+                <p className="text-[10px] font-bold text-slate-500">Yes = planner can redeem/sell/pledge this asset for goals.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Are you adding regularly?</label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setHasRegularContribution(true)}
+                    className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${hasRegularContribution ? 'bg-teal-600 text-white border-teal-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}
+                  >
+                    Yes
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setHasRegularContribution(false);
-                      setNewAsset({
-                        ...newAsset,
+                      setNewAsset(prev => ({
+                        ...prev,
                         monthlyContribution: 0,
                         contributionStepUp: 0,
                         contributionStartYear: undefined,
                         contributionEndYear: undefined,
-                      });
+                      }));
                     }}
                     className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${!hasRegularContribution ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-400 border-slate-200'}`}
                   >
-                    No, One-Time Only
+                    No
                   </button>
                 </div>
-                <p className="text-[10px] font-bold text-slate-500">If yes, we will ask contribution amount, frequency, step-up, and years.</p>
               </div>
             </div>
 
             {hasRegularContribution && (
-              <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution Amount</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={parseNumber(newAsset.monthlyContribution, 0)}
+                    onChange={e => setNewAsset(prev => ({ ...prev, monthlyContribution: parseNumber(e.target.value, 0) }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+                    placeholder={currencySymbol}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution Frequency</label>
+                  <select
+                    value={newAsset.contributionFrequency || 'Monthly'}
+                    onChange={e => setNewAsset(prev => ({ ...prev, contributionFrequency: e.target.value as InvestmentFrequency }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+                  >
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                    <option value="Annually">Annually</option>
+                    <option value="One time">One time</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(prev => !prev)}
+              className="w-full flex items-center justify-between px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-700"
+            >
+              <span className="text-[11px] font-black uppercase tracking-widest">Advanced Inputs (Optional)</span>
+              {showAdvanced ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            </button>
+
+            {showAdvanced && (
+              <div className="space-y-6 p-5 rounded-2xl border border-slate-200 bg-slate-50/70">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution Amount</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      {isVehicleAsset(newAsset) ? 'Expected Depreciation (%)' : 'Expected Growth (%)'}
+                    </label>
                     <input
                       type="number"
-                      value={newAsset.monthlyContribution || ''}
-                      onChange={e => setNewAsset({ ...newAsset, monthlyContribution: parseFloat(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold"
-                      placeholder={currencySymbol}
+                      min={0}
+                      max={30}
+                      value={Math.abs(parseNumber(newAsset.growthRate, getDefaultGrowthRate((newAsset.category || 'Equity') as AssetType, newAsset.subCategory || '')))}
+                      onChange={e => {
+                        const input = parseNumber(e.target.value, 0);
+                        const nextGrowth = isVehicleAsset(newAsset) ? -Math.abs(input) : input;
+                        setNewAsset(prev => ({ ...prev, growthRate: nextGrowth }));
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
                     />
-                    <p className="text-[10px] font-bold text-slate-500">Amount per selected frequency. Must be greater than 0.</p>
                   </div>
+
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution Frequency</label>
-                    <select
-                      value={newAsset.contributionFrequency || 'Monthly'}
-                      onChange={e => setNewAsset({ ...newAsset, contributionFrequency: e.target.value as any })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold outline-none"
-                    >
-                      <option value="Monthly">Monthly</option>
-                      <option value="Quarterly">Quarterly</option>
-                      <option value="Annually">Annually</option>
-                      <option value="One time">One time</option>
-                    </select>
-                    <p className="text-[10px] font-bold text-slate-500">How often this contribution amount is added.</p>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Purchase Year</label>
+                    <input
+                      type="number"
+                      value={parseNumber(newAsset.purchaseYear, currentYear)}
+                      onChange={e => setNewAsset(prev => ({ ...prev, purchaseYear: parseNumber(e.target.value, currentYear) }))}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none"
+                    />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Step-Up %</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available From Year</label>
                     <input
                       type="number"
-                      value={newAsset.contributionStepUp || ''}
-                      onChange={e => setNewAsset({ ...newAsset, contributionStepUp: parseFloat(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold"
+                      disabled={!isAvailableForGoals}
+                      value={parseNumber(newAsset.availableFrom, currentYear)}
+                      onChange={e => setNewAsset(prev => ({ ...prev, availableFrom: parseNumber(e.target.value, currentYear) }))}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none disabled:opacity-50"
                     />
-                    <p className="text-[10px] font-bold text-slate-500">Optional annual increase % in contribution.</p>
                   </div>
+
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution Start Year</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution Step-Up (%)</label>
                     <input
                       type="number"
-                      value={newAsset.contributionStartYear || ''}
-                      onChange={e => setNewAsset({ ...newAsset, contributionStartYear: parseInt(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold"
+                      min={0}
+                      max={30}
+                      disabled={!hasRegularContribution}
+                      value={parseNumber(newAsset.contributionStepUp, 0)}
+                      onChange={e => setNewAsset(prev => ({ ...prev, contributionStepUp: parseNumber(e.target.value, 0) }))}
+                      className="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none disabled:opacity-50"
                     />
-                    <p className="text-[10px] font-bold text-slate-500">Optional start year for recurring contribution.</p>
                   </div>
+
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution End Year</label>
-                    <input
-                      type="number"
-                      value={newAsset.contributionEndYear || ''}
-                      onChange={e => setNewAsset({ ...newAsset, contributionEndYear: parseInt(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold"
-                    />
-                    <p className="text-[10px] font-bold text-slate-500">Optional end year for recurring contribution.</p>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contribution Start/End</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        disabled={!hasRegularContribution}
+                        value={parseNumber(newAsset.contributionStartYear, currentYear)}
+                        onChange={e => setNewAsset(prev => ({ ...prev, contributionStartYear: parseNumber(e.target.value, currentYear) }))}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-3 font-bold outline-none disabled:opacity-50"
+                        placeholder="Start"
+                      />
+                      <input
+                        type="number"
+                        disabled={!hasRegularContribution}
+                        value={parseNumber(newAsset.contributionEndYear, currentYear)}
+                        onChange={e => setNewAsset(prev => ({ ...prev, contributionEndYear: parseNumber(e.target.value, currentYear) }))}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-3 font-bold outline-none disabled:opacity-50"
+                        placeholder="End"
+                      />
+                    </div>
                   </div>
                 </div>
-              </>
+              </div>
             )}
 
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available For Goals</label>
-                <p className="text-[10px] font-bold text-slate-500">
-                  If Yes, this asset can be used to fund goals by withdrawal/sale/pledge.
-                  If No, the planner keeps it excluded.
-                </p>
-                <div className="flex gap-3">
-                  <button type="button" onClick={() => setNewAsset({...newAsset, availableForGoals: true, availableFrom: newAsset.availableFrom || new Date().getFullYear()})} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newAsset.availableForGoals ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
-                    Yes, Use For Goals
-                  </button>
-                  <button type="button" onClick={() => setNewAsset({...newAsset, availableForGoals: false, availableFrom: undefined})} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${newAsset.availableForGoals === false ? 'bg-rose-600 text-white border-rose-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
-                    No, Keep Protected
-                  </button>
-                </div>
-                <div className={`p-3 rounded-xl border text-xs font-semibold leading-relaxed ${isAvailableForGoals ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                  {goalAvailabilityHint}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Available From</label>
-                <input
-                  type="number"
-                  value={newAsset.availableFrom || ''}
-                  onChange={e => setNewAsset({...newAsset, availableFrom: parseInt(e.target.value)})}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                  placeholder="e.g. 2028"
-                  disabled={!isAvailableForGoals}
-                />
-                <p className="text-[10px] font-bold text-slate-500">
-                  {isAvailableForGoals
-                    ? 'Year from which this asset can be used for goals.'
-                    : 'Not required when asset is kept protected.'}
-                </p>
-              </div>
-            </div>
-
-            <button onClick={handleAdd} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black text-lg shadow-xl hover:bg-teal-600 transition-all">Secure Asset Record</button>
+            <button
+              onClick={handleAddAsset}
+              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-[0.15em] hover:bg-teal-600 transition-all"
+            >
+              Add Asset
+            </button>
           </div>
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 flex flex-col justify-center">
-          <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Total Assets</p>
-          <h4 className="text-3xl font-black text-emerald-900">{formatCurrency(totalAssetsValue, currencyCountry)}</h4>
+        <div className="bg-emerald-50 p-6 rounded-[2rem] border border-emerald-100">
+          <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1">Total Assets</p>
+          <h4 className="text-3xl font-black text-emerald-900">{formatCurrency(summary.total, currencyCountry)}</h4>
         </div>
-        {ASSET_CLASSES.map(ac => {
-          const val = state.assets.filter(a => a.category === ac.name).reduce((sum, a) => sum + a.currentValue, 0);
-          return (
-            <div key={ac.name} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col justify-center">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{ac.name}</p>
-              <h4 className="text-lg font-black text-slate-900">{formatCurrency(val, currencyCountry)}</h4>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {state.assets.map((asset) => (
-          <div key={asset.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm group hover:border-emerald-400 transition-all">
-             <div className="flex justify-between items-start mb-6">
-                <div className={`p-4 rounded-2xl bg-slate-50 text-slate-400 group-hover:bg-emerald-600 group-hover:text-white transition-all`}>
-                  {ASSET_CLASSES.find(ac => ac.name === asset.category)?.icon && React.createElement(ASSET_CLASSES.find(ac => ac.name === asset.category)!.icon, { size: 24 })}
-                </div>
-                <div className="flex gap-2">
-                  {asset.availableForGoals ? (
-                    <span className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">For Goals</span>
-                  ) : (
-                    <span className="bg-rose-50 text-rose-600 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border border-rose-100">Personal</span>
-                  )}
-                  <button onClick={() => removeAsset(asset.id)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors">
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-             </div>
-             <div className="space-y-4">
-                <div>
-                  <h4 className="text-lg font-black text-slate-900">{asset.name || asset.subCategory}</h4>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{asset.category} • {asset.subCategory}</p>
-                  <p className="text-[9px] font-bold text-slate-500 uppercase mt-1">Owner: {getOwnerName(asset.owner)}</p>
-                </div>
-                <div className="flex justify-between items-end">
-                   <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase">Current Value</p>
-                      <p className="text-2xl font-black text-slate-900">{formatCurrency(asset.currentValue, currencyCountry)}</p>
-                   </div>
-                   <div className="text-right">
-                      <p className={`text-[10px] font-black uppercase ${asset.category === 'Personal' && asset.subCategory === 'Vehicle' ? 'text-rose-500' : 'text-emerald-500'}`}>
-                        {asset.category === 'Personal' && asset.subCategory === 'Vehicle'
-                          ? `Depreciation: ${Math.abs(asset.growthRate)}%`
-                          : `Growth: ${asset.growthRate}%`}
-                      </p>
-                   </div>
-                </div>
-             </div>
+        {ASSET_CLASSES.map(group => (
+          <div key={group.name} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{group.name}</p>
+            <h4 className="text-lg font-black text-slate-900">{formatCurrency(summary.byCategory[group.name], currencyCountry)}</h4>
           </div>
         ))}
       </div>
 
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between gap-4 mb-8">
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Portfolio Mix</p>
+              <h3 className="text-xl font-black text-slate-900">Portfolio Mix.</h3>
+            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              {assetMixData.length} classes
+            </div>
           </div>
+
+          {assetMixData.length === 0 ? (
+            <p className="text-sm text-slate-500 font-semibold">Add assets to view your mix.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 items-center">
+              <div className="h-[220px] min-h-[220px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
+                  <RePie>
+                    <Pie data={assetMixData} dataKey="value" innerRadius={56} outerRadius={82} paddingAngle={4}>
+                      {assetMixData.map((_, index) => (
+                        <Cell key={`asset-mix-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} stroke="transparent" />
+                      ))}
+                    </Pie>
+                  </RePie>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="space-y-3">
+                {assetMixData.map((item, index) => (
+                  <div key={item.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }} />
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-600">{item.name}</span>
+                    </div>
+                    <span className="text-sm font-black text-slate-900">{formatCurrency(item.value, currencyCountry)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between gap-4 mb-8">
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Net Worth Composition</p>
+              <h3 className="text-xl font-black text-slate-900">Net Worth Composition.</h3>
+            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Net: {formatCurrency(netWorthSummary.netWorth, currencyCountry)}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto no-scrollbar">
+            <table className="w-full min-w-[480px] text-left">
+              <thead>
+                <tr className="bg-slate-50/60">
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Category</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">Value</th>
+                  <th className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest text-right">% of Assets</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {[
+                  { label: 'Financial Assets', value: netWorthSummary.financial },
+                  { label: 'Physical Assets', value: netWorthSummary.physical },
+                  { label: 'Personal Assets', value: netWorthSummary.personal },
+                ].map(row => (
+                  <tr key={row.label}>
+                    <td className="px-4 py-3 text-xs font-black text-slate-900">{row.label}</td>
+                    <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">{formatCurrency(row.value, currencyCountry)}</td>
+                    <td className="px-4 py-3 text-xs font-black text-slate-500 text-right">{netWorthSummary.pct(row.value).toFixed(1)}%</td>
+                  </tr>
+                ))}
+                <tr className="bg-slate-50/60">
+                  <td className="px-4 py-3 text-xs font-black text-slate-900">Total Assets</td>
+                  <td className="px-4 py-3 text-xs font-black text-slate-900 text-right">{formatCurrency(netWorthSummary.totalAssets, currencyCountry)}</td>
+                  <td className="px-4 py-3 text-xs font-black text-slate-500 text-right">100%</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-3 text-xs font-black text-rose-600">Total Liabilities</td>
+                  <td className="px-4 py-3 text-xs font-black text-rose-600 text-right">{formatCurrency(netWorthSummary.liabilities, currencyCountry)}</td>
+                  <td className="px-4 py-3 text-xs font-black text-rose-400 text-right">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div className="surface-dark p-8 md:p-10 rounded-[3rem] border border-white/10 shadow-2xl text-white">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Projected Equity</p>
+            <h3 className="text-2xl font-black tracking-tight">Projected Equity.</h3>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">5-Year Target</p>
+            <p className="text-xl font-black text-emerald-400">
+              {formatCurrency(projectedEquity[projectedEquity.length - 1]?.value || 0, currencyCountry)}
+            </p>
+          </div>
+        </div>
+        <div className="h-[300px] min-h-[300px]">
+          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} debounce={60}>
+            <AreaChart data={projectedEquity}>
+              <defs>
+                <linearGradient id="assetProjectedEquityFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.45} />
+                  <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff12" />
+              <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 900 }} />
+              <YAxis hide />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #1e293b' }}
+                formatter={(value: number) => formatCurrency(value, currencyCountry)}
+              />
+              <Area type="monotone" dataKey="value" stroke="#14b8a6" strokeWidth={3} fill="url(#assetProjectedEquityFill)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {state.assets.length === 0 ? (
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm text-left">
+          <h4 className="text-xl font-black text-slate-900">No assets added yet</h4>
+          <p className="text-sm font-medium text-slate-500 mt-2">
+            Add core holdings first. You can refine assumptions later from this same page.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {state.assets.map(asset => {
+            const Icon = ASSET_CLASSES.find(group => group.name === asset.category)?.icon || Landmark;
+            return (
+              <div key={asset.id} className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm px-6 py-6 sm:px-8 sm:py-7 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:border-teal-300 transition-all">
+                <div className="flex items-start gap-5 min-w-0">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-50 text-slate-500 flex items-center justify-center shrink-0">
+                    <Icon size={24} />
+                  </div>
+                  <div className="space-y-1 min-w-0 text-left">
+                    <h4 className="text-xl font-black text-slate-900 truncate">{asset.name || asset.subCategory}</h4>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{asset.category} • {asset.subCategory}</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Owner: {getOwnerName(asset.owner)}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 md:gap-6">
+                  <div className="text-left md:text-right">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Value</p>
+                    <p className="text-2xl font-black text-slate-900">{formatCurrency(asset.currentValue, currencyCountry)}</p>
+                  </div>
+                  <div className="text-left md:text-right">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{isVehicleAsset(asset) ? 'Depreciation' : 'Growth'}</p>
+                    <p className={`text-sm font-black ${isVehicleAsset(asset) ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      {Math.abs(parseNumber(asset.growthRate, 0)).toFixed(1)}%
+                    </p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${asset.availableForGoals ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                    {asset.availableForGoals ? 'For Goals' : 'Protected'}
+                  </span>
+                  <button
+                    onClick={() => removeAsset(asset.id)}
+                    className="p-3 rounded-2xl bg-rose-50 text-rose-500 hover:bg-rose-600 hover:text-white transition-all"
+                    aria-label={`Remove ${asset.name || asset.subCategory}`}
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 };
 

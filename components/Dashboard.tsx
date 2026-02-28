@@ -1,645 +1,962 @@
-
-import React, { useMemo } from 'react';
-import { 
-  ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis,
-  PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
-  AreaChart, Area, CartesianGrid
-} from 'recharts';
-import { 
-  TrendingUp, Target, Activity, Calculator,
-  Zap, Wallet, Landmark, BrainCircuit,
-  ArrowRight, ShieldCheck, CheckCircle2, 
-  ChevronRight, ArrowUpRight, ShieldAlert, Sparkles,
-  Receipt, Briefcase, AlertCircle, Car, CreditCard,
-  LayoutGrid, ArrowDownRight, Users, ListChecks,
-  PieChart, BarChart3, LineChart, RefreshCw
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  AlertTriangle,
+  CheckCircle2,
+  CreditCard,
+  Eye,
+  EyeOff,
+  Info,
+  Lock,
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
+  Target,
+  TrendingUp,
+  Users,
+  Wallet,
 } from 'lucide-react';
-import { FinanceState, View, Asset, Loan } from '../types';
+import { FinanceState, View } from '../types';
 import { getJourneyProgress } from '../lib/journey';
-import { getRiskReturnAssumption } from '../lib/financeMath';
 import { formatCurrency } from '../lib/currency';
 import { buildReportSnapshot } from '../lib/report';
 import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
-import CommandReport from './CommandReport';
-import Cashflow from './Cashflow';
-import InvestmentPlan from './InvestmentPlan';
+import { AppButton, SectionHeader, SurfaceCard, StatusPill } from './common/ui';
 
 interface DashboardProps {
   state: FinanceState;
   setView: (view: View) => void;
 }
 
-const COLORS = ['#0f766e', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#84cc16'];
+type DashboardMode = 'simple' | 'advanced';
+type WidgetId = 'cashflow' | 'obligations' | 'alerts' | 'insights' | 'allocation';
+
+type AttentionSeverity = 'high' | 'medium' | 'low';
+
+interface AttentionItem {
+  id: string;
+  severity: AttentionSeverity;
+  title: string;
+  description: string;
+  actionLabel: string;
+  actionView: View;
+}
+
+const PREFS_KEY = 'finvantage.dashboard.preferences.v3';
+const ALL_WIDGETS: WidgetId[] = ['cashflow', 'obligations', 'alerts', 'insights', 'allocation'];
+const SIMPLE_WIDGETS: WidgetId[] = ['cashflow', 'obligations', 'alerts', 'insights'];
+
+const WIDGET_META: Record<WidgetId, { title: string; description: string }> = {
+  cashflow: {
+    title: 'Cash Flow Overview',
+    description: 'Income, expenses, and net cash flow in one view.',
+  },
+  obligations: {
+    title: 'Upcoming Liabilities',
+    description: 'EMIs and debt pressure with clear next actions.',
+  },
+  alerts: {
+    title: 'Attention Alerts',
+    description: 'Items that need your attention right now.',
+  },
+  insights: {
+    title: 'Insights & Next Steps',
+    description: 'What this means and what to do next.',
+  },
+  allocation: {
+    title: 'Allocation & Reallocation',
+    description: 'Current mix vs risk-profile target and actions.',
+  },
+};
+
+const clampPct = (value: number) => Math.max(0, Math.min(100, value));
+
+const normalizeWidgetOrder = (input: WidgetId[]): WidgetId[] => {
+  const valid = input.filter((id, idx) => ALL_WIDGETS.includes(id) && input.indexOf(id) === idx);
+  return [...valid, ...ALL_WIDGETS.filter(id => !valid.includes(id))];
+};
+
+const MiniTrend: React.FC<{ values: number[]; positive: boolean }> = ({ values, positive }) => {
+  if (values.length < 2) {
+    return <div className="h-10 rounded-xl bg-slate-100" />;
+  }
+
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = Math.max(1, max - min);
+
+  const points = values.map((value, idx) => {
+    const x = (idx / (values.length - 1)) * 100;
+    const y = 30 - ((value - min) / range) * 30;
+    return { x, y };
+  });
+
+  const path = points.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+  const stroke = positive ? '#16a34a' : '#dc2626';
+
+  return (
+    <svg viewBox="0 0 100 32" className="w-full h-10" preserveAspectRatio="none" aria-hidden="true">
+      <path d={path} fill="none" stroke={stroke} strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+};
 
 const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
-  const calculateTotalMemberIncome = monthlyIncomeFromDetailed;
-
-  const totalAssets = useMemo(() => state.assets.reduce((sum, a) => sum + a.currentValue, 0), [state.assets]);
-  const totalLoans = useMemo(() => state.loans.reduce((sum, l) => sum + l.outstandingAmount, 0), [state.loans]);
-  const netWorth = totalAssets - totalLoans;
-
-  const householdIncome = useMemo(() => {
-    const selfIncome = calculateTotalMemberIncome(state.profile.income);
-    const familyIncome = state.family
-      .filter(f => f.includeIncomeInPlanning !== false)
-      .reduce((sum, f) => sum + calculateTotalMemberIncome(f.income), 0);
-    return selfIncome + familyIncome;
-  }, [state.profile, state.family]);
-
-  const householdExpenses = useMemo(() => {
-    return state.detailedExpenses.reduce((sum, e) => sum + e.amount, 0) || state.profile.monthlyExpenses;
-  }, [state.detailedExpenses, state.profile.monthlyExpenses]);
-
-  const totalMonthlyDebt = state.loans.reduce((sum, l) => sum + l.emi, 0);
-  const surplusValue = householdIncome - householdExpenses - totalMonthlyDebt;
-  const savingsRate = householdIncome > 0 ? (surplusValue / householdIncome) * 100 : 0;
-  const dtiRatio = householdIncome > 0 ? ((totalMonthlyDebt * 12) / (householdIncome * 12)) * 100 : 0;
-
-  // Chart Data: Asset Mix
-  const assetMixData = useMemo(() => {
-    const groups = state.assets.reduce((acc, a) => {
-      acc[a.category] = (acc[a.category] || 0) + a.currentValue;
-      return acc;
-    }, {} as Record<string, number>);
-    return Object.entries(groups).map(([name, value]) => ({ name, value }));
-  }, [state.assets]);
-
-  const netWorthSummary = useMemo(() => {
-    const financialSet = new Set(['Liquid', 'Debt', 'Equity', 'Gold/Silver']);
-    const physicalSet = new Set(['Real Estate']);
-    const personalSet = new Set(['Personal']);
-
-    const financial = state.assets
-      .filter(a => financialSet.has(a.category))
-      .reduce((sum, a) => sum + a.currentValue, 0);
-    const physical = state.assets
-      .filter(a => physicalSet.has(a.category))
-      .reduce((sum, a) => sum + a.currentValue, 0);
-    const personal = state.assets
-      .filter(a => personalSet.has(a.category))
-      .reduce((sum, a) => sum + a.currentValue, 0);
-
-    const total = financial + physical + personal;
-    const liabilities = totalLoans;
-    const net = total - liabilities;
-
-    return {
-      financial,
-      physical,
-      personal,
-      totalAssets: total,
-      liabilities,
-      netWorth: net,
-      pct: (value: number) => (total > 0 ? (value / total) * 100 : 0),
-      pctLiabilities: (value: number) => (liabilities > 0 ? (value / liabilities) * 100 : 0),
-    };
-  }, [state.assets, totalLoans]);
-
-  const statementData = useMemo(() => {
-    const financialSet = new Set(['Liquid', 'Debt', 'Equity', 'Gold/Silver']);
-
-    const isResidentialAsset = (asset: Asset) => {
-      const label = `${asset.subCategory || ''} ${asset.name || ''}`.toLowerCase();
-      return /residential|home|house|apartment|villa|bungalow/.test(label);
-    };
-
-    const formatAssetLabel = (asset: Asset) => {
-      const name = (asset.name || '').trim();
-      const sub = (asset.subCategory || '').trim();
-      if (asset.category === 'Gold/Silver') return name ? `Gold (${name})` : 'Gold / Silver';
-      if (asset.category === 'Equity') return 'Portfolio (Equity & Mutual Fund)';
-      if (asset.category === 'Liquid') return sub ? `Cash in Hand (${sub})` : 'Cash in Hand (Bank Balance)';
-      if (asset.category === 'Debt') {
-        const combo = `${sub} ${name}`.toLowerCase();
-        if (/nps|epf|gpf|dsop/.test(combo)) return 'Other Govt. Schemes (NPS & EPF)';
-        return sub || 'Debt Instruments';
-      }
-      if (asset.category === 'Real Estate') {
-        const label = name || sub || 'Property';
-        return isResidentialAsset(asset) ? `Residential Property (${label})` : `Investment Property (${label})`;
-      }
-      if (asset.category === 'Personal') {
-        const label = name || sub || 'Personal Asset';
-        if (/car|bike|vehicle|two wheeler|two-wheeler/.test(label.toLowerCase())) {
-          return `Car / Two Wheeler (${label})`;
-        }
-        if (/house|home|residential/.test(label.toLowerCase())) {
-          return `Residential Property (${label})`;
-        }
-        return `House Contents (${label})`;
-      }
-      return name || sub || asset.category;
-    };
-
-    const addRow = (map: Record<string, number>, label: string, value: number) => {
-      map[label] = (map[label] || 0) + value;
-    };
-
-    const investmentsMap: Record<string, number> = {};
-    const otherMap: Record<string, number> = {};
-
-    state.assets.forEach(asset => {
-      const label = formatAssetLabel(asset);
-      const isInvestment = financialSet.has(asset.category) || (asset.category === 'Real Estate' && !isResidentialAsset(asset));
-      if (isInvestment) addRow(investmentsMap, label, asset.currentValue);
-      else addRow(otherMap, label, asset.currentValue);
-    });
-
-    const investments = Object.entries(investmentsMap)
-      .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value);
-    const otherAssets = Object.entries(otherMap)
-      .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value);
-
-    const totalInvestments = investments.reduce((sum, a) => sum + a.value, 0);
-    const totalOtherAssets = otherAssets.reduce((sum, a) => sum + a.value, 0);
-    const totalAssets = totalInvestments + totalOtherAssets;
-
-    const liabilities = state.loans
-      .map((loan: Loan) => ({ label: `${loan.owner === 'self' ? state.profile.firstName : 'Member'}'s ${loan.type}`.replace("Self's", `${state.profile.firstName}'s`), value: loan.outstandingAmount }))
-      .filter(l => l.value > 0)
-      .sort((a, b) => b.value - a.value);
-    const totalLiabilities = liabilities.reduce((sum, l) => sum + l.value, 0);
-    const netWorth = totalAssets - totalLiabilities;
-    const debtToAssets = totalAssets > 0 ? totalLiabilities / totalAssets : 0;
-
-    const majorAssets = [...state.assets]
-      .sort((a, b) => b.currentValue - a.currentValue)
-      .slice(0, 3)
-      .map(a => formatAssetLabel(a));
-    const majorLiabilities = [...state.loans]
-      .sort((a, b) => b.outstandingAmount - a.outstandingAmount)
-      .slice(0, 2)
-      .map(l => `${l.type}`);
-
-    return {
-      investments,
-      otherAssets,
-      liabilities,
-      totalInvestments,
-      totalOtherAssets,
-      totalAssets,
-      totalLiabilities,
-      netWorth,
-      debtToAssets,
-      majorAssets,
-      majorLiabilities,
-    };
-  }, [state.assets, state.loans, state.profile.firstName]);
-
-  // Chart Data: Budget Partition
-  const budgetData = useMemo(() => [
-    { name: 'Survival', value: householdExpenses, color: '#f59e0b' },
-    { name: 'Servicing', value: totalMonthlyDebt, color: '#ef4444' },
-    { name: 'Success', value: Math.max(0, surplusValue), color: '#0f766e' }
-  ], [householdExpenses, totalMonthlyDebt, surplusValue]);
-
-  // Chart Data: Wealth Trajectory (5 Years)
-  const trajectoryData = useMemo(() => {
-    const data = [];
-    let currentNW = netWorth;
-    const year = new Date().getFullYear();
-    const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
-    for (let i = 0; i < 6; i++) {
-      data.push({ year: year + i, nw: Math.round(currentNW) });
-      currentNW = (currentNW * (1 + assumedReturn / 100)) + (surplusValue * 12);
-    }
-    return data;
-  }, [netWorth, surplusValue, state.riskProfile?.level]);
+  const [mode, setMode] = useState<DashboardMode>('simple');
+  const [showCustomizer, setShowCustomizer] = useState(false);
+  const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(ALL_WIDGETS);
+  const [hiddenWidgets, setHiddenWidgets] = useState<WidgetId[]>([]);
 
   const journey = useMemo(() => getJourneyProgress(state), [state]);
   const reportSnapshot = useMemo(() => buildReportSnapshot(state), [state]);
-  const stepIcons: Record<string, any> = {
+
+  const totalAssets = useMemo(
+    () => state.assets.reduce((sum, asset) => sum + Number(asset.currentValue || 0), 0),
+    [state.assets],
+  );
+  const totalLiabilities = useMemo(
+    () => state.loans.reduce((sum, loan) => sum + Number(loan.outstandingAmount || 0), 0),
+    [state.loans],
+  );
+  const netWorth = totalAssets - totalLiabilities;
+
+  const monthlyIncome = useMemo(() => {
+    const selfIncome = monthlyIncomeFromDetailed(state.profile.income);
+    const familyIncome = state.family
+      .filter(member => member.includeIncomeInPlanning !== false)
+      .reduce((sum, member) => sum + monthlyIncomeFromDetailed(member.income), 0);
+    return selfIncome + familyIncome;
+  }, [state.profile.income, state.family]);
+
+  const monthlyExpenses = useMemo(
+    () => state.detailedExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0) || state.profile.monthlyExpenses,
+    [state.detailedExpenses, state.profile.monthlyExpenses],
+  );
+
+  const monthlyDebt = useMemo(
+    () => state.loans.reduce((sum, loan) => sum + Number(loan.emi || 0), 0),
+    [state.loans],
+  );
+
+  const monthlyNetCashFlow = monthlyIncome - monthlyExpenses - monthlyDebt;
+  const dtiRatio = monthlyIncome > 0 ? (monthlyDebt / monthlyIncome) * 100 : 0;
+
+  const liquidAssets = useMemo(
+    () => state.assets
+      .filter(asset => ['Liquid', 'Debt'].includes(asset.category))
+      .reduce((sum, asset) => sum + Number(asset.currentValue || 0), 0),
+    [state.assets],
+  );
+
+  const emergencyMonthsCovered = monthlyExpenses > 0 ? liquidAssets / monthlyExpenses : 0;
+
+  const monthlyNetTrend = useMemo(() => {
+    const now = new Date();
+
+    const getMonthNet = (year: number, month: number) => {
+      const periodTransactions = state.transactions.filter(txn => {
+        const date = new Date(txn.date);
+        return date.getFullYear() === year && date.getMonth() === month;
+      });
+
+      if (periodTransactions.length === 0) {
+        return monthlyNetCashFlow;
+      }
+
+      return periodTransactions.reduce((sum, txn) => {
+        const signedAmount = txn.type === 'income' ? Number(txn.amount || 0) : -Number(txn.amount || 0);
+        return sum + signedAmount;
+      }, 0);
+    };
+
+    return Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      return getMonthNet(date.getFullYear(), date.getMonth());
+    });
+  }, [state.transactions, monthlyNetCashFlow]);
+
+  const currentMonthNet = monthlyNetTrend[monthlyNetTrend.length - 1] ?? monthlyNetCashFlow;
+  const previousMonthNet = monthlyNetTrend[monthlyNetTrend.length - 2] ?? monthlyNetCashFlow;
+  const monthChangePct = previousMonthNet === 0 ? 0 : ((currentMonthNet - previousMonthNet) / Math.abs(previousMonthNet)) * 100;
+
+  const currentAllocation = useMemo(() => {
+    const allocationValue = {
+      equity: 0,
+      debt: 0,
+      gold: 0,
+      liquid: 0,
+    };
+
+    state.assets.forEach(asset => {
+      const value = Number(asset.currentValue || 0);
+      if (asset.category === 'Equity') allocationValue.equity += value;
+      if (asset.category === 'Debt') allocationValue.debt += value;
+      if (asset.category === 'Gold/Silver') allocationValue.gold += value;
+      if (asset.category === 'Liquid') allocationValue.liquid += value;
+    });
+
+    const total = allocationValue.equity + allocationValue.debt + allocationValue.gold + allocationValue.liquid;
+
+    return {
+      total,
+      equity: total > 0 ? (allocationValue.equity / total) * 100 : 0,
+      debt: total > 0 ? (allocationValue.debt / total) * 100 : 0,
+      gold: total > 0 ? (allocationValue.gold / total) * 100 : 0,
+      liquid: total > 0 ? (allocationValue.liquid / total) * 100 : 0,
+    };
+  }, [state.assets]);
+
+  const recommendedAllocation = useMemo(() => {
+    if (state.riskProfile?.recommendedAllocation) {
+      return state.riskProfile.recommendedAllocation;
+    }
+    return { equity: 60, debt: 30, gold: 10, liquid: 0 };
+  }, [state.riskProfile]);
+
+  const allocationRows: Array<{ key: 'equity' | 'debt' | 'gold' | 'liquid'; label: string }> = [
+    { key: 'equity', label: 'Equity' },
+    { key: 'debt', label: 'Debt' },
+    { key: 'gold', label: 'Gold' },
+    { key: 'liquid', label: 'Liquid' },
+  ];
+
+  const reallocationActions = useMemo(() => {
+    return allocationRows
+      .map(row => {
+        const current = currentAllocation[row.key];
+        const recommended = recommendedAllocation[row.key];
+        const delta = recommended - current;
+        const amount = (currentAllocation.total * Math.abs(delta)) / 100;
+        return {
+          ...row,
+          current,
+          recommended,
+          delta,
+          amount,
+        };
+      })
+      .filter(item => Math.abs(item.delta) >= 1);
+  }, [allocationRows, currentAllocation, recommendedAllocation]);
+
+  const attentionItems = useMemo<AttentionItem[]>(() => {
+    const items: AttentionItem[] = [];
+
+    if (monthlyNetCashFlow < 0) {
+      items.push({
+        id: 'negative-cashflow',
+        severity: 'high',
+        title: 'Negative monthly cash flow',
+        description: 'Expenses + EMIs are currently higher than monthly income.',
+        actionLabel: 'Review Cash Flow',
+        actionView: 'cashflow',
+      });
+    }
+
+    if (dtiRatio > 40) {
+      items.push({
+        id: 'high-dti',
+        severity: 'high',
+        title: 'Debt pressure is high',
+        description: `Debt service is ${dtiRatio.toFixed(1)}% of income.`,
+        actionLabel: 'Optimize Loans',
+        actionView: 'debt',
+      });
+    }
+
+    if (emergencyMonthsCovered < 6) {
+      items.push({
+        id: 'low-emergency-fund',
+        severity: 'medium',
+        title: 'Emergency reserve is below 6 months',
+        description: `Current liquid buffer covers ${emergencyMonthsCovered.toFixed(1)} months of expenses.`,
+        actionLabel: 'Improve Asset Mix',
+        actionView: 'assets',
+      });
+    }
+
+    if (!state.riskProfile) {
+      items.push({
+        id: 'risk-profile-missing',
+        severity: 'medium',
+        title: 'Risk profile is pending',
+        description: 'Complete risk profile to align allocation and expected returns.',
+        actionLabel: 'Complete Risk Profile',
+        actionView: 'risk-profile',
+      });
+    }
+
+    if (state.notifications && state.notifications.some(notification => !notification.read)) {
+      items.push({
+        id: 'unread-notifications',
+        severity: 'low',
+        title: 'You have unread notifications',
+        description: 'Check system and planning updates in alert center.',
+        actionLabel: 'Open Notifications',
+        actionView: 'notifications',
+      });
+    }
+
+    return items.slice(0, 4);
+  }, [dtiRatio, emergencyMonthsCovered, monthlyNetCashFlow, state.notifications, state.riskProfile]);
+
+  const insights = useMemo(() => {
+    const items: Array<{ id: string; summary: string; action: string; view: View }> = [];
+
+    if (monthChangePct > 5) {
+      items.push({
+        id: 'cashflow-up',
+        summary: `Net cash flow is up ${Math.abs(monthChangePct).toFixed(1)}% vs last month.`,
+        action: 'Lock this improvement into savings automation.',
+        view: 'cashflow',
+      });
+    } else if (monthChangePct < -5) {
+      items.push({
+        id: 'cashflow-down',
+        summary: `Net cash flow is down ${Math.abs(monthChangePct).toFixed(1)}% vs last month.`,
+        action: 'Review recurring expenses and subscription outflows.',
+        view: 'outflow',
+      });
+    }
+
+    if (reportSnapshot.goals.totalGoals > 0) {
+      items.push({
+        id: 'goals-progress',
+        summary: `${reportSnapshot.goals.fundedCount} of ${reportSnapshot.goals.totalGoals} goals are funded.`,
+        action: 'Review goal priority and funding gaps.',
+        view: 'goal-summary',
+      });
+    }
+
+    if (state.loans.length > 0) {
+      items.push({
+        id: 'loan-simulation',
+        summary: 'Loan planning can improve using prepay and restructure simulations.',
+        action: 'Run prepayment and tenure impact scenarios.',
+        view: 'debt',
+      });
+    }
+
+    if (items.length === 0) {
+      items.push({
+        id: 'stable-status',
+        summary: 'Your core indicators look stable this cycle.',
+        action: 'Use advanced view for deeper allocation analysis.',
+        view: 'investment-plan',
+      });
+    }
+
+    return items.slice(0, 3);
+  }, [monthChangePct, reportSnapshot.goals.fundedCount, reportSnapshot.goals.totalGoals, state.loans.length]);
+
+  const lastRefreshLabel = useMemo(() => {
+    const now = new Date();
+    return now.toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  }, [state]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<{
+        mode: DashboardMode;
+        widgetOrder: WidgetId[];
+        hiddenWidgets: WidgetId[];
+      }>;
+
+      if (parsed.mode === 'simple' || parsed.mode === 'advanced') {
+        setMode(parsed.mode);
+      }
+
+      if (Array.isArray(parsed.widgetOrder)) {
+        const validOrder = parsed.widgetOrder.filter((id): id is WidgetId => ALL_WIDGETS.includes(id));
+        setWidgetOrder(normalizeWidgetOrder(validOrder));
+      }
+
+      if (Array.isArray(parsed.hiddenWidgets)) {
+        const validHidden = parsed.hiddenWidgets.filter((id): id is WidgetId => ALL_WIDGETS.includes(id));
+        setHiddenWidgets(validHidden);
+      }
+    } catch {
+      // Use defaults when preference parsing fails.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const payload = {
+        mode,
+        widgetOrder,
+        hiddenWidgets,
+      };
+      localStorage.setItem(PREFS_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore persistence errors in restricted environments.
+    }
+  }, [mode, widgetOrder, hiddenWidgets]);
+
+  const moveWidget = (id: WidgetId, direction: 'up' | 'down') => {
+    setWidgetOrder(prev => {
+      const index = prev.indexOf(id);
+      if (index < 0) return prev;
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
+  const toggleWidgetVisibility = (id: WidgetId) => {
+    setHiddenWidgets(prev => (prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]));
+  };
+
+  const modeScopedOrder = useMemo(() => {
+    if (mode === 'simple') {
+      return widgetOrder.filter(id => SIMPLE_WIDGETS.includes(id));
+    }
+    return widgetOrder;
+  }, [mode, widgetOrder]);
+
+  const visibleWidgets = modeScopedOrder.filter(id => !hiddenWidgets.includes(id));
+
+  const isOnboardingComplete = journey.completionPct === 100;
+  const initializationStepIcons: Record<string, any> = {
     family: Users,
-    inflow: TrendingUp,
-    outflow: ArrowDownRight,
-    assets: Landmark,
+    inflow: Wallet,
+    outflow: ArrowDown,
+    assets: TrendingUp,
     debt: CreditCard,
     goals: Target,
   };
-  const initializationSteps = useMemo(() => (
-    journey.steps.map(step => ({
-      id: step.id,
-      label: step.label,
-      isComplete: step.complete,
-      icon: stepIcons[step.id],
-      view: step.view,
-    }))
-  ), [journey.steps]);
+  const initializationSteps = journey.steps.map(step => ({
+    ...step,
+    icon: initializationStepIcons[step.id] || Target,
+  }));
 
-  const completionPct = journey.completionPct;
-  const isFullyInitialized = completionPct === 100;
-  const gateUnlocked = isFullyInitialized;
-  const financialNodeReadyForRisk = useMemo(() => {
-    const hasHousehold = (state.profile.firstName || '').trim().length > 0 || state.family.length > 0;
-    const hasInflow = householdIncome > 0;
-    const hasOutflow = householdExpenses > 0;
-    const hasAssets = state.assets.length > 0;
-    return hasHousehold && hasInflow && hasOutflow && hasAssets;
-  }, [state.profile.firstName, state.family.length, state.assets.length, householdIncome, householdExpenses]);
-  const shouldPromptRiskProfile = financialNodeReadyForRisk && !state.riskProfile;
+  if (!isOnboardingComplete) {
+    return (
+      <div className="space-y-6 pb-24 animate-in fade-in duration-500">
+        <SurfaceCard padding="none" className="relative overflow-hidden rounded-[3rem] border-slate-200 p-8 md:p-12">
+          <div className="absolute top-0 right-0 w-[340px] h-[340px] bg-teal-50 blur-[90px] rounded-full translate-x-1/3 -translate-y-1/3" />
 
-  const wellnessData = useMemo(() => {
-    const riskScore = state.riskProfile?.score || 20;
-    const insuranceScore = state.insurance.length > 0 ? 80 : 20;
-    const debtScore = totalLoans === 0 && totalAssets > 0 ? 100 : Math.max(0, 100 - (totalLoans / (totalAssets || 1) * 100));
-    const savingsScore = Math.min(100, savingsRate * 3);
-    const goalScore = state.goals.length > 0 ? 85 : 20;
-
-    return [
-      { subject: 'Risk', A: riskScore, fullMark: 100 },
-      { subject: 'Shield', A: insuranceScore, fullMark: 100 },
-      { subject: 'Debt', A: debtScore, fullMark: 100 },
-      { subject: 'Savings', A: savingsScore, fullMark: 100 },
-      { subject: 'Goals', A: goalScore, fullMark: 100 },
-    ];
-  }, [state, totalAssets, totalLoans, savingsRate]);
-
-  const currencyCountry = state.profile.country;
-
-  return (
-    <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700 pb-24">
-      
-      {/* Onboarding Directive */}
-      {!isFullyInitialized && (
-        <div className="bg-white p-8 md:p-12 rounded-[3.5rem] border border-slate-200 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-teal-50 blur-[100px] rounded-full translate-x-1/2 -translate-y-1/2" />
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            <div className="space-y-6">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-teal-50 text-teal-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-teal-100">
-                <Zap size={14} className="animate-pulse"/> Initialization Required
+          <div className="relative z-10 grid grid-cols-1 xl:grid-cols-[1.1fr_1fr] gap-8 items-start">
+            <div className="space-y-5">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full text-[10px] font-black uppercase tracking-widest border border-amber-200">
+                Initialization Required
               </div>
-              <h2 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-tight">Your Strategy Terminal <br/><span className="text-teal-600 underline decoration-teal-100 underline-offset-8">is Offline.</span></h2>
-              <div className="space-y-2 pt-2">
-                 <div className="flex justify-between items-end px-1">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Progress to Synchronization</span>
-                    <span className="text-2xl font-black text-slate-900">{completionPct}%</span>
-                 </div>
-                 <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-50">
-                    <div className="h-full bg-teal-600 transition-all duration-1000" style={{ width: `${completionPct}%` }} />
-                 </div>
+              <h2 className="text-4xl md:text-5xl font-black tracking-tight text-slate-900 leading-tight">
+                Your Strategy Terminal <br />
+                <span className="text-teal-600">is Offline.</span>
+              </h2>
+
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Progress to Synchronization</span>
+                  <span className="text-2xl font-black text-slate-900">{journey.completionPct}%</span>
+                </div>
+                <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                  <div className="h-full bg-teal-600 transition-all duration-700" style={{ width: `${journey.completionPct}%` }} />
+                </div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-               {initializationSteps.map((step) => (
-                 <button 
-                   key={step.id}
-                   onClick={() => setView(step.view)}
-                   className={`flex items-center gap-4 p-4 rounded-3xl transition-all border text-left group ${
-                     step.isComplete 
-                       ? 'bg-emerald-50 border-emerald-100 text-emerald-700' 
-                       : 'bg-slate-50 border-slate-100 text-slate-900 hover:border-teal-300 hover:bg-white'
-                   }`}
-                 >
-                    <div className={`p-2.5 rounded-2xl shrink-0 ${step.isComplete ? 'bg-emerald-500 text-white' : 'bg-white text-slate-300 group-hover:text-teal-600 transition-colors shadow-sm'}`}>
-                       <step.icon size={18} />
+              {initializationSteps.map(step => (
+                <button
+                  key={step.id}
+                  onClick={() => setView(step.view)}
+                  className={`text-left rounded-2xl border px-4 py-4 transition ${
+                    step.complete
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-teal-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${step.complete ? 'bg-emerald-600 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>
+                      <step.icon size={15} />
                     </div>
-                    <div className="flex-1 min-w-0">
-                       <h4 className="text-xs font-black tracking-tight">{step.label}</h4>
-                    </div>
-                    {step.isComplete ? <CheckCircle2 size={16} /> : <ChevronRight size={14} className="text-slate-300 group-hover:translate-x-1" />}
-                 </button>
-               ))}
+                    <p className="text-[10px] font-black uppercase tracking-widest">{step.label}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard padding="none" className="rounded-[2.5rem] border-slate-200 p-6 md:p-8">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-teal-600">Why complete setup</p>
+              <h3 className="text-2xl font-black text-slate-900 mt-1">Benefits of completing your data</h3>
+              <p className="text-sm text-slate-600 font-medium mt-2">
+                Complete all nodes once to unlock personalized planning and accurate recommendations.
+              </p>
+            </div>
+            <div className="hidden sm:flex items-center justify-center px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-[10px] font-black uppercase tracking-widest border border-teal-100">
+              {journey.completionPct}% ready
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
+            {[
+              {
+                title: 'Accurate Goal Funding',
+                detail: 'See realistic goal costs and whether your current assets can fully fund them.',
+                action: { label: 'Complete Mission Targets', view: 'goals' as View },
+              },
+              {
+                title: 'Smarter Investment Mix',
+                detail: 'Get allocation guidance aligned to your risk profile, cash flow, and liabilities.',
+                action: { label: 'Complete Inflow + Assets', view: 'assets' as View },
+              },
+              {
+                title: 'Better Loan Decisions',
+                detail: 'Run prepay/restructure scenarios with monthly impact before taking action.',
+                action: { label: 'Complete Liability Map', view: 'debt' as View },
+              },
+              {
+                title: 'Lower Financial Anxiety',
+                detail: 'Track one clear dashboard with alerts, not scattered data across pages.',
+                action: { label: 'Complete Household Node', view: 'family' as View },
+              },
+            ].map(item => (
+              <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-black text-slate-900">{item.title}</p>
+                <p className="text-xs font-semibold text-slate-600 mt-1 leading-relaxed">{item.detail}</p>
+                <button
+                  onClick={() => setView(item.action.view)}
+                  className="mt-3 inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-teal-700 hover:text-teal-800"
+                >
+                  {item.action.label} <ArrowRight size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </SurfaceCard>
+      </div>
+    );
+  }
+
+  const severityStyle: Record<AttentionSeverity, string> = {
+    high: 'border-rose-200 bg-rose-50 text-rose-700',
+    medium: 'border-amber-200 bg-amber-50 text-amber-700',
+    low: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  };
+
+  const renderWidget = (widgetId: WidgetId) => {
+    if (widgetId === 'cashflow') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Cash Flow Overview"
+            title="Monthly cash position"
+            action={<Wallet size={18} className="text-slate-400 mt-1" />}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Income</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{formatCurrency(monthlyIncome, state.profile.country)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Expenses</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{formatCurrency(monthlyExpenses, state.profile.country)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Net Cash Flow</p>
+              <p className={`text-sm font-black mt-1 ${monthlyNetCashFlow >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {formatCurrency(monthlyNetCashFlow, state.profile.country)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <MiniTrend values={monthlyNetTrend} positive={monthChangePct >= 0} />
+            <p className="text-xs font-semibold text-slate-600 mt-2">
+              {monthChangePct >= 0 ? 'Up' : 'Down'} {Math.abs(monthChangePct).toFixed(1)}% vs last month.
+            </p>
+          </div>
+
+          <p className="text-xs text-slate-500 mt-4">Net cash flow = income minus expenses and EMI obligations.</p>
+
+          <AppButton
+            tone="ghost"
+            size="sm"
+            onClick={() => setView('cashflow')}
+            className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+            trailingIcon={<ArrowRight size={13} />}
+          >
+            Open cash flow details
+          </AppButton>
+        </SurfaceCard>
+      );
+    }
+
+    if (widgetId === 'obligations') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Upcoming Liabilities"
+            title="Loan planning at a glance"
+            action={<CreditCard size={18} className="text-slate-400 mt-1" />}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Monthly EMI</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{formatCurrency(monthlyDebt, state.profile.country)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Outstanding Debt</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{formatCurrency(totalLiabilities, state.profile.country)}</p>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500 mt-4">Debt load = EMI as a share of income. Lower debt load improves flexibility.</p>
+
+          <div className="mt-4 space-y-2">
+            {[
+              'Prepay impact simulation (tenure vs EMI savings)',
+              'Restructure/reschedule what-if preview',
+              'Part-payment and closure estimate',
+            ].map(item => (
+              <p key={item} className="text-xs font-semibold text-slate-600">• {item}</p>
+            ))}
+          </div>
+
+          <AppButton
+            tone="ghost"
+            size="sm"
+            onClick={() => setView('debt')}
+            className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+            trailingIcon={<ArrowRight size={13} />}
+          >
+            Open loan planner
+          </AppButton>
+        </SurfaceCard>
+      );
+    }
+
+    if (widgetId === 'alerts') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Alerts Requiring Attention"
+            title="Priority checks"
+            action={<AlertTriangle size={18} className="text-slate-400 mt-1" />}
+          />
+
+          {attentionItems.length === 0 ? (
+            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-700">
+              <p className="text-sm font-black">No critical alerts right now.</p>
+              <p className="text-xs font-semibold mt-1">System checks are currently stable.</p>
+            </div>
+          ) : (
+            <div className="mt-5 space-y-3">
+              {attentionItems.map(item => (
+                <div key={item.id} className={`rounded-2xl border p-4 ${severityStyle[item.severity]}`}>
+                  <p className="text-xs font-black uppercase tracking-widest">{item.title}</p>
+                  <p className="text-xs font-semibold mt-1">{item.description}</p>
+                  <button
+                    onClick={() => setView(item.actionView)}
+                    className="mt-3 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
+                  >
+                    {item.actionLabel} <ArrowRight size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="text-xs text-slate-500 mt-4">These alerts are prioritized to prevent financial stress and planning drift.</p>
+        </SurfaceCard>
+      );
+    }
+
+    if (widgetId === 'insights') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Insights & Recommendations"
+            title="What this means"
+            action={<Target size={18} className="text-slate-400 mt-1" />}
+          />
+
+          <div className="mt-5 space-y-3">
+            {insights.map(item => (
+              <button
+                key={item.id}
+                onClick={() => setView(item.view)}
+                className="w-full text-left rounded-2xl border border-slate-200 bg-slate-50 p-4 hover:border-slate-300 transition"
+              >
+                <p className="text-sm font-black text-slate-900">{item.summary}</p>
+                <p className="text-xs font-semibold text-slate-600 mt-1">Next: {item.action}</p>
+              </button>
+            ))}
+          </div>
+
+          <p className="text-xs text-slate-500 mt-4">Insights answer: what changed, is it good, and what to do next.</p>
+
+          <AppButton
+            tone="ghost"
+            size="sm"
+            onClick={() => setView('goal-summary')}
+            className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+            trailingIcon={<ArrowRight size={13} />}
+          >
+            Open detailed reports
+          </AppButton>
+        </SurfaceCard>
+      );
+    }
+
+    return (
+      <SurfaceCard padding="lg">
+        <SectionHeader
+          eyebrow="Portfolio Mapping"
+          title="Current vs recommended mix"
+          action={<TrendingUp size={18} className="text-slate-400 mt-1" />}
+        />
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Current Investment Allocation</p>
+            <div className="space-y-3">
+              {allocationRows.map(row => (
+                <div key={`current-${row.key}`}>
+                  <div className="flex justify-between text-xs font-black text-slate-700 mb-1">
+                    <span>{row.label}</span>
+                    <span>{currentAllocation[row.key].toFixed(1)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <div className="h-full bg-slate-700" style={{ width: `${clampPct(currentAllocation[row.key])}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 mb-3">Recommended Allocation (Risk Profile)</p>
+            <div className="space-y-3">
+              {allocationRows.map(row => (
+                <div key={`recommended-${row.key}`}>
+                  <div className="flex justify-between text-xs font-black text-emerald-800 mb-1">
+                    <span>{row.label}</span>
+                    <span>{recommendedAllocation[row.key].toFixed(1)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-emerald-200 overflow-hidden">
+                    <div className="h-full bg-emerald-600" style={{ width: `${clampPct(recommendedAllocation[row.key])}%` }} />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-      )}
 
-      {shouldPromptRiskProfile && (
-        <div className="surface-dark p-8 md:p-12 rounded-[3rem] border border-white/10 shadow-2xl relative overflow-hidden text-white">
-          <div className="absolute top-0 right-0 w-[420px] h-[420px] bg-teal-500/15 blur-[140px] rounded-full translate-x-1/3 -translate-y-1/3 pointer-events-none" />
-          <div className="relative z-10 grid grid-cols-1 xl:grid-cols-2 gap-10 items-start">
-            <div className="space-y-5">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-widest border border-teal-400/20">
-                <BrainCircuit size={14} /> Next Best Action
+        <div className="mt-5 rounded-2xl border border-slate-200 p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Reallocation Actions</p>
+          {reallocationActions.length === 0 ? (
+            <p className="text-sm font-semibold text-emerald-700">Allocation is within tolerance. No immediate action required.</p>
+          ) : (
+            <div className="space-y-2">
+              {reallocationActions.map(action => {
+                const direction = action.delta > 0 ? 'Increase' : 'Reduce';
+                const directionColor = action.delta > 0 ? 'text-emerald-700' : 'text-rose-700';
+                return (
+                  <p key={action.key} className="text-sm font-semibold text-slate-700">
+                    <span className={directionColor}>{direction}</span> {action.label} by {Math.abs(action.delta).toFixed(1)}% (
+                    {formatCurrency(action.amount, state.profile.country)}).
+                  </p>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <p className="text-xs text-slate-500 mt-4">Recommended mix comes from your risk profile and improves return-risk consistency.</p>
+
+        <AppButton
+          tone="ghost"
+          size="sm"
+          onClick={() => setView('investment-plan')}
+          className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+          trailingIcon={<ArrowRight size={13} />}
+        >
+          Open allocation planner
+        </AppButton>
+      </SurfaceCard>
+    );
+  };
+
+  return (
+    <div className="space-y-6 pb-24 animate-in fade-in duration-500">
+      <div>
+        <SurfaceCard variant="dark" padding="none" className="p-5 md:p-6">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+            <div className="space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">Account Summary</p>
+              <div>
+                <p className="text-xs font-semibold text-slate-300">Total Portfolio</p>
+                <h2 className="text-3xl md:text-4xl font-black tracking-tight">{formatCurrency(totalAssets, state.profile.country)}</h2>
+                <p className="text-xs font-semibold text-slate-300 mt-1">Net worth: {formatCurrency(netWorth, state.profile.country)}</p>
               </div>
-              <h3 className="text-3xl md:text-4xl font-black tracking-tight leading-tight">
-                Calculate Your Risk Profile <span className="text-teal-400">Before Investing.</span>
-              </h3>
-              <p className="text-sm md:text-base text-slate-300 font-medium max-w-xl">
-                Your financial node data is ready. Complete Risk DNA now to make better allocation and investment decisions.
-              </p>
+              <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black ${monthChangePct >= 0 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                {monthChangePct >= 0 ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+                {monthChangePct >= 0 ? 'Up' : 'Down'} {Math.abs(monthChangePct).toFixed(1)}% this month
+              </div>
+            </div>
+
+            <div className="space-y-3 min-w-[250px]">
+              <div className="rounded-2xl border border-slate-700 bg-slate-800/70 p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Data Source</p>
+                <p className="text-xs font-semibold text-slate-200 mt-1">Synced from profile, assets, liabilities, and planner inputs.</p>
+                <p className="text-[11px] font-semibold text-slate-400 mt-2 inline-flex items-center gap-1"><RefreshCw size={12} /> Updated {lastRefreshLabel}</p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <StatusPill tone="neutral" className="border-slate-700 bg-slate-800 text-slate-200">
+                  <Lock size={12} /> Encrypted
+                </StatusPill>
+                <StatusPill tone="neutral" className="border-slate-700 bg-slate-800 text-slate-200">
+                  <ShieldCheck size={12} /> Secure Sync
+                </StatusPill>
+                <StatusPill tone="neutral" className="border-slate-700 bg-slate-800 text-slate-200">
+                  <Info size={12} /> Audit Ready
+                </StatusPill>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 pt-4 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="inline-flex rounded-xl bg-slate-800 p-1 border border-slate-700">
               <button
-                onClick={() => setView('risk-profile')}
-                className="inline-flex items-center gap-2 px-6 py-4 bg-teal-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-500 transition-all shadow-xl"
+                onClick={() => setMode('simple')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${mode === 'simple' ? 'bg-white text-slate-900' : 'text-slate-300'}`}
               >
-                Calculate Risk Profile <ArrowRight size={14} />
+                Simple View
+              </button>
+              <button
+                onClick={() => setMode('advanced')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${mode === 'advanced' ? 'bg-white text-slate-900' : 'text-slate-300'}`}
+              >
+                Advanced View
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { icon: PieChart, title: 'Better Allocation Fit', detail: 'Get equity, debt, gold, and liquid mix aligned to your risk capacity.' },
-                { icon: LineChart, title: 'Smarter Return Assumptions', detail: 'Use realistic portfolio return assumptions in planning and projections.' },
-                { icon: ShieldAlert, title: 'Lower Decision Stress', detail: 'Reduce panic moves during market volatility with a defined risk framework.' },
-                { icon: Sparkles, title: 'Sharper Investment Decisions', detail: 'Choose instruments and rebalancing actions with clear risk guardrails.' },
-              ].map((benefit) => (
-                <div key={benefit.title} className="p-4 rounded-2xl bg-white/5 border border-white/10">
-                  <div className="w-9 h-9 rounded-xl bg-teal-500/15 text-teal-300 flex items-center justify-center mb-3">
-                    <benefit.icon size={16} />
-                  </div>
-                  <p className="text-[11px] font-black uppercase tracking-widest text-white mb-1">{benefit.title}</p>
-                  <p className="text-xs text-slate-300 leading-relaxed">{benefit.detail}</p>
-                </div>
-              ))}
+            <div className="flex items-center gap-2">
+              <AppButton
+                onClick={() => setShowCustomizer(prev => !prev)}
+                tone="dark"
+                size="md"
+                className="border-slate-700 bg-slate-800 text-slate-200"
+                leadingIcon={<Settings2 size={13} />}
+              >
+                Customize Widgets
+              </AppButton>
+              <AppButton
+                onClick={() => setView('settings')}
+                tone="dark"
+                size="md"
+                className="border-slate-700 bg-slate-800 text-slate-200"
+                leadingIcon={<ShieldCheck size={13} />}
+              >
+                Data Security
+              </AppButton>
             </div>
           </div>
+        </SurfaceCard>
+      </div>
+
+      {showCustomizer && (
+        <SurfaceCard padding="none" className="border-slate-200 p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <SlidersHorizontal size={16} className="text-slate-500" />
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-700">Widget Controls</h3>
+          </div>
+
+          <div className="space-y-3">
+            {(mode === 'simple' ? SIMPLE_WIDGETS : widgetOrder).map(widgetId => {
+              const index = widgetOrder.indexOf(widgetId);
+              const isHidden = hiddenWidgets.includes(widgetId);
+
+              return (
+                <div key={`customizer-${widgetId}`} className="rounded-2xl border border-slate-200 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-black text-slate-900">{WIDGET_META[widgetId].title}</p>
+                    <p className="text-xs text-slate-500">{WIDGET_META[widgetId].description}</p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => toggleWidgetVisibility(widgetId)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700"
+                    >
+                      {isHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                      {isHidden ? 'Show' : 'Hide'}
+                    </button>
+                    <button
+                      onClick={() => moveWidget(widgetId, 'up')}
+                      disabled={index <= 0}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 disabled:opacity-40"
+                    >
+                      Up
+                    </button>
+                    <button
+                      onClick={() => moveWidget(widgetId, 'down')}
+                      disabled={index < 0 || index === widgetOrder.length - 1}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-700 disabled:opacity-40"
+                    >
+                      Down
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SurfaceCard>
+      )}
+
+      {visibleWidgets.length === 0 ? (
+        <SurfaceCard padding="none" className="border-slate-200 p-8 text-center">
+          <p className="text-lg font-black text-slate-900">No widgets visible</p>
+          <p className="text-sm text-slate-500 mt-2">Use Customize Widgets to show at least one section.</p>
+          <AppButton
+            onClick={() => setHiddenWidgets([])}
+            tone="dark"
+            size="md"
+            className="mt-4 border-slate-800 bg-slate-900 text-white"
+          >
+            Show All Widgets
+          </AppButton>
+        </SurfaceCard>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 md:gap-6">
+          {visibleWidgets.map(widgetId => (
+            <div key={`widget-${widgetId}`}>
+              {renderWidget(widgetId)}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Main Stats Node */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { label: 'Household Equity', value: formatCurrency(netWorth, currencyCountry), sub: 'Net Worth Node', icon: Landmark, color: 'teal' },
-          { label: 'Net Monthly Surplus', value: formatCurrency(surplusValue, currencyCountry), sub: `${Math.round(savingsRate)}% Savings Rate`, icon: Wallet, color: 'emerald' },
-          { label: 'Debt Service Load', value: `${dtiRatio.toFixed(1)}%`, sub: 'Income-to-Debt Ratio', icon: CreditCard, color: dtiRatio > 40 ? 'rose' : 'slate' },
-          { label: 'Asset Capacity', value: formatCurrency(totalAssets, currencyCountry), sub: 'Total Capital Holdings', icon: TrendingUp, color: 'amber' }
-        ].map((stat, i) => (
-          <div key={i} className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm hover:shadow-xl transition-all group relative overflow-hidden">
-            <div className={`w-12 h-12 mb-6 rounded-2xl flex items-center justify-center bg-${stat.color}-50 text-${stat.color}-600 group-hover:bg-${stat.color}-600 group-hover:text-white transition-all`}>
-              <stat.icon size={22}/>
-            </div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{stat.label}</p>
-            <h4 className="text-2xl font-black text-slate-900 tracking-tight">{stat.value}</h4>
-            <p className="text-[9px] font-bold text-slate-400 mt-2 uppercase flex items-center gap-1.5">
-               <span className={`w-1 h-1 rounded-full bg-${stat.color}-500`} /> {stat.sub}
+      <SurfaceCard variant="muted" padding="none" className="p-4 md:p-5">
+        <div className="flex items-start gap-3">
+          <CheckCircle2 size={18} className="text-emerald-600 mt-0.5" />
+          <div>
+            <p className="text-sm font-black text-slate-900">Quick understanding in under 10 seconds</p>
+            <p className="text-xs text-slate-600 mt-1">
+              Focus on portfolio total, monthly cash flow status, debt pressure, and top alerts. Open each card for deep dive only when needed.
             </p>
           </div>
-        ))}
-      </div>
-
-      {state.riskProfile && (
-        <button
-          type="button"
-          onClick={() => setView('risk-profile')}
-          className="w-full text-left surface-dark p-8 md:p-10 rounded-[3rem] border border-white/10 shadow-2xl relative overflow-hidden"
-        >
-          <div className="absolute top-0 right-0 w-[420px] h-[420px] bg-teal-600/15 blur-[140px] rounded-full translate-x-1/3 -translate-y-1/3 pointer-events-none" />
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-4 gap-8 items-center">
-            <div className="lg:col-span-2 space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-widest border border-teal-400/20">
-                <BrainCircuit size={14} /> Risk Profile Active
-              </div>
-              <h3 className="text-3xl md:text-4xl font-black text-white tracking-tight leading-tight">
-                {state.riskProfile.level} <span className="text-teal-400">Risk DNA</span>
-              </h3>
-              <p className="text-sm text-slate-300 font-medium">
-                Score {state.riskProfile.score}/100. Click to view answered questions, impact on goals/returns, and full profile comparison report.
-              </p>
-            </div>
-            <div className="lg:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { label: 'Equity', value: state.riskProfile.recommendedAllocation.equity },
-                { label: 'Debt', value: state.riskProfile.recommendedAllocation.debt },
-                { label: 'Gold', value: state.riskProfile.recommendedAllocation.gold },
-                { label: 'Liquid', value: state.riskProfile.recommendedAllocation.liquid },
-              ].map(item => (
-                <div key={item.label} className="p-3 rounded-2xl bg-white/5 border border-white/10">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</p>
-                  <p className="text-xl font-black text-white mt-1">{item.value}%</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </button>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Trajectory Insight */}
-        <div className="lg:col-span-2 surface-dark p-10 md:p-14 rounded-[4rem] text-white relative overflow-hidden shadow-2xl border border-white/5">
-           <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4 pointer-events-none" />
-           <div className="relative z-10 flex flex-col h-full space-y-10">
-              <div className="flex justify-between items-start">
-                 <div className="space-y-4">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/5 text-teal-400 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10">
-                       <LineChart size={14}/> Wealth Velocity
-                    </div>
-                    <h3 className="text-4xl font-black tracking-tight">Projected <span className="text-teal-500">Equity.</span></h3>
-                 </div>
-                 <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">5-Year Target</p>
-                    <p className="text-2xl font-black text-emerald-400">{formatCurrency(trajectoryData[trajectoryData.length-1].nw, currencyCountry)}</p>
-                 </div>
-              </div>
-
-              <div className="flex-1 min-h-[300px] w-full">
-                 <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trajectoryData}>
-                       <defs>
-                          <linearGradient id="nwGradient" x1="0" y1="0" x2="0" y2="1">
-                             <stop offset="5%" stopColor="#0f766e" stopOpacity={0.3}/>
-                             <stop offset="95%" stopColor="#0f766e" stopOpacity={0}/>
-                          </linearGradient>
-                       </defs>
-                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
-                       <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 10, fontWeight: 900}} />
-                       <YAxis hide />
-                       <Tooltip 
-                          contentStyle={{ backgroundColor: '#0f172a', borderRadius: '16px', border: '1px solid #1e293b', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)', padding: '12px', fontWeight: 'bold' }}
-                          formatter={(val: number) => formatCurrency(val, currencyCountry)}
-                       />
-                       <Area type="monotone" dataKey="nw" stroke="#0f766e" strokeWidth={4} fillOpacity={1} fill="url(#nwGradient)" />
-                    </AreaChart>
-                 </ResponsiveContainer>
-              </div>
-           </div>
         </div>
-
-        {/* Holistic Wellness Radar */}
-        <div className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-sm flex flex-col justify-between h-full">
-           <div className="space-y-2">
-              <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl w-fit"><BrainCircuit size={24}/></div>
-              <h3 className="text-xl font-black text-slate-900 tracking-tight italic">Node Health.</h3>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Actuarial Calibration</p>
-           </div>
-
-           <div className="w-full h-64 flex items-center justify-center">
-              <ResponsiveContainer width="100%" height="100%">
-                 <RadarChart cx="50%" cy="50%" outerRadius="80%" data={wellnessData}>
-                   <PolarGrid stroke="#f1f5f9" />
-                   <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 900 }} />
-                   <Radar name="Status" dataKey="A" stroke="#0f766e" strokeWidth={3} fill="#0f766e" fillOpacity={0.15} />
-                 </RadarChart>
-              </ResponsiveContainer>
-           </div>
-
-           <button
-             onClick={() => setView('risk-profile')}
-             className="w-full py-5 bg-slate-50 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all"
-           >
-              {state.riskProfile ? 'Open Risk Profile' : 'Complete Risk DNA'}
-           </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-         
-         {/* Portfolio Asset Mix Report */}
-         <div className="bg-white p-10 md:p-12 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden">
-            <div className="flex justify-between items-center mb-10">
-               <div className="flex items-center gap-4">
-                  <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl"><PieChart size={24}/></div>
-                  <div>
-                     <h3 className="text-xl font-black text-slate-900 tracking-tight">Portfolio Mix.</h3>
-                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Classification</p>
-                  </div>
-               </div>
-            </div>
-
-            <div className="flex flex-col md:flex-row items-center gap-8">
-               <div className="w-56 h-56 shrink-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                     <RePie data={assetMixData} innerRadius={60} outerRadius={85} paddingAngle={5} dataKey="value">
-                        {assetMixData.map((entry, index) => (
-                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="transparent" />
-                        ))}
-                     </RePie>
-                  </ResponsiveContainer>
-               </div>
-               <div className="flex-1 space-y-4 w-full">
-                  {assetMixData.length > 0 ? assetMixData.map((item, i) => (
-                     <div key={item.name} className="flex items-center justify-between group">
-                        <div className="flex items-center gap-3">
-                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                           <span className="text-xs font-bold text-slate-600 uppercase tracking-tight">{item.name}</span>
-                        </div>
-                        <span className="text-sm font-black text-slate-900">{formatCurrency(item.value, currencyCountry)}</span>
-                     </div>
-                  )) : (
-                     <p className="text-xs text-slate-400 italic">No assets registered to display mix.</p>
-                  )}
-               </div>
-            </div>
-         </div>
-
-         {/* Net Worth Summary */}
-         <div className="bg-white p-10 md:p-12 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden">
-            <div className="flex justify-between items-center mb-8">
-               <div className="flex items-center gap-4">
-                  <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl"><Landmark size={24}/></div>
-                  <div>
-                     <h3 className="text-xl font-black text-slate-900 tracking-tight">Net Worth Composition.</h3>
-                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Financial vs Physical vs Personal</p>
-                  </div>
-               </div>
-               <div className="bg-slate-50 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500">
-                 Net Worth: {formatCurrency(netWorthSummary.netWorth, currencyCountry)}
-               </div>
-            </div>
-
-            <div className="overflow-x-auto no-scrollbar">
-               <table className="w-full text-left min-w-[520px]">
-                  <thead>
-                    <tr className="bg-slate-50/50">
-                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Category</th>
-                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Value</th>
-                       <th className="px-6 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">% of Assets</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {[
-                      { label: 'Financial Assets', value: netWorthSummary.financial },
-                      { label: 'Physical Assets', value: netWorthSummary.physical },
-                      { label: 'Personal Assets', value: netWorthSummary.personal },
-                    ].map(row => (
-                      <tr key={row.label}>
-                        <td className="px-6 py-4 text-xs font-black text-slate-900">{row.label}</td>
-                        <td className="px-6 py-4 text-right text-xs font-black text-slate-900">{formatCurrency(row.value, currencyCountry)}</td>
-                        <td className="px-6 py-4 text-right text-xs font-black text-slate-500">{netWorthSummary.pct(row.value).toFixed(1)}%</td>
-                      </tr>
-                    ))}
-                    <tr className="bg-slate-50/60">
-                      <td className="px-6 py-4 text-xs font-black text-slate-900">Total Assets</td>
-                      <td className="px-6 py-4 text-right text-xs font-black text-slate-900">{formatCurrency(netWorthSummary.totalAssets, currencyCountry)}</td>
-                      <td className="px-6 py-4 text-right text-xs font-black text-slate-500">100%</td>
-                    </tr>
-                    <tr>
-                      <td className="px-6 py-4 text-xs font-black text-rose-600">Total Liabilities</td>
-                      <td className="px-6 py-4 text-right text-xs font-black text-rose-600">{formatCurrency(netWorthSummary.liabilities, currencyCountry)}</td>
-                      <td className="px-6 py-4 text-right text-xs font-black text-rose-400">—</td>
-                    </tr>
-                  </tbody>
-               </table>
-            </div>
-         </div>
-
-         {/* Strategic Action Feed */}
-         <div className="bg-white p-10 md:p-12 rounded-[4rem] border border-slate-200 shadow-sm relative overflow-hidden flex flex-col justify-between">
-            <div className="flex justify-between items-center mb-10">
-               <div className="flex items-center gap-4">
-                  <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl"><RefreshCw size={24}/></div>
-                  <div>
-                     <h3 className="text-xl font-black text-slate-900 tracking-tight italic">Rebalancing Alert.</h3>
-                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Strategy Corrections</p>
-                  </div>
-               </div>
-            </div>
-
-            <div className="flex-1 space-y-4">
-               <div className="p-6 bg-amber-50 border border-amber-100 rounded-[2.5rem] flex items-start gap-4">
-                  <AlertCircle size={20} className="text-amber-500 shrink-0 mt-1"/>
-                  <div>
-                    <h4 className="text-sm font-black text-slate-900">Asset Drift Detected</h4>
-                    <p className="text-xs font-medium text-slate-600 mt-1">Your Equity allocation has drifted 8.2% above your target Moderate risk profile. Suggested: Liquidate {formatCurrency(1420000, currencyCountry)} and migrate to Debt Core.</p>
-                  </div>
-               </div>
-               <div className="p-6 bg-emerald-50 border border-emerald-100 rounded-[2.5rem] flex items-start gap-4">
-                  <ShieldCheck size={20} className="text-emerald-500 shrink-0 mt-1"/>
-                  <div>
-                    <h4 className="text-sm font-black text-slate-900">Priority Goal Funding</h4>
-                    <p className="text-xs font-medium text-slate-600 mt-1">Goal #1 (Retirement) is 74% funded. Redirecting current monthly surplus to this mission is advised.</p>
-                  </div>
-               </div>
-            </div>
-
-            <button onClick={() => setView('investment-plan')} className="mt-8 py-5 bg-slate-900 text-white rounded-3xl font-black text-[10px] uppercase tracking-widest hover:bg-teal-600 transition-all flex items-center justify-center gap-2">
-               Execute Portfolio Rebalance <ArrowRight size={14}/>
-            </button>
-         </div>
-
-      </div>
-
-      <CommandReport snapshot={reportSnapshot} onOpen={setView} />
-
-      {gateUnlocked && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Wealth Radar</p>
-              <h3 className="text-2xl font-black text-slate-900">Cashflow + Projection Grid</h3>
-            </div>
-            <button
-              onClick={() => setView('cashflow')}
-              className="px-4 py-2 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition"
-            >
-              Open Full View
-            </button>
-          </div>
-          <Cashflow state={state} />
-        </div>
-      )}
-
-      {gateUnlocked && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Portfolio Map</p>
-              <h3 className="text-2xl font-black text-slate-900">Current vs Recommended Allocation</h3>
-            </div>
-            <button
-              onClick={() => setView('investment-plan')}
-              className="px-4 py-2 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition"
-            >
-              Open Full View
-            </button>
-          </div>
-          <InvestmentPlan state={state} />
-        </div>
-      )}
-
+      </SurfaceCard>
     </div>
   );
 };

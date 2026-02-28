@@ -1,13 +1,23 @@
-// components/Onboarding.tsx
-// REPLACE your existing Onboarding.tsx with this file.
-// Only the handler functions changed — all UI is identical.
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { FinanceState, IncomeSource } from '../types';
-import { 
-  ArrowRight, User, MapPin, ShieldCheck,
-  TrendingUp, Zap, ChevronRight, BrainCircuit, 
-  Lock, Key, AlertCircle, ArrowLeft, Eye, EyeOff
+import {
+  ArrowRight,
+  User,
+  MapPin,
+  ShieldCheck,
+  TrendingUp,
+  Zap,
+  ChevronRight,
+  BrainCircuit,
+  Lock,
+  Key,
+  AlertCircle,
+  ArrowLeft,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   checkIdentifier,
@@ -31,7 +41,11 @@ interface OnboardingProps {
   resumeProfile?: Partial<FinanceState['profile']>;
 }
 
-const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, initialAuthStep, resumeProfile }) => {
+const normalizeIncomeSource = (value?: string | null): IncomeSource => (
+  value === 'business' ? 'business' : 'salaried'
+);
+
+const Onboarding: React.FC<OnboardingProps> = ({ onComplete, initialAuthStep, resumeProfile }) => {
   const [authStep, setAuthStep] = useState<'identifier' | 'login' | 'signup' | 'onboarding'>(initialAuthStep ?? 'identifier');
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -40,9 +54,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [geoStatus, setGeoStatus] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
+  const [showSecurityDetails, setShowSecurityDetails] = useState(false);
+  const [skipOptionalRequests, setSkipOptionalRequests] = useState(false);
+  const [openUsageKey, setOpenUsageKey] = useState<string | null>(null);
   const geoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Stores the logged-in user's name after sign-up/sign-in
   const [loggedInFirstName, setLoggedInFirstName] = useState('');
 
   const [formData, setFormData] = useState({
@@ -58,7 +74,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     city: resumeProfile?.city || '',
     state: resumeProfile?.state || '',
     country: resumeProfile?.country || 'India',
-    incomeSource: (resumeProfile?.incomeSource as IncomeSource) || ('salaried' as IncomeSource),
+    incomeSource: normalizeIncomeSource(resumeProfile?.incomeSource as string | undefined),
   });
 
   const EMAIL_DOMAINS = [
@@ -71,19 +87,34 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
   ];
 
   const stepConfig = [
-    { title: 'Personal', icon: User },
+    { title: 'Trust', icon: ShieldCheck },
+    { title: 'Birth Date', icon: User },
     { title: 'Planning', icon: TrendingUp },
     { title: 'Location', icon: MapPin },
-    { title: 'Intelligence', icon: BrainCircuit },
+    { title: 'Review', icon: BrainCircuit },
   ];
 
   useEffect(() => {
-    if (initialAuthStep === 'onboarding' && resumeProfile?.firstName) {
+    if (initialAuthStep !== 'onboarding') return;
+
+    if (resumeProfile?.firstName) {
       setLoggedInFirstName(resumeProfile.firstName);
     }
+
+    const hasDob = Boolean((resumeProfile?.dob || '').trim());
+    const hasPlanning = Number(resumeProfile?.lifeExpectancy) > Number(resumeProfile?.retirementAge);
+    const hasLocation = Boolean(
+      (resumeProfile?.pincode || '').trim() &&
+      (resumeProfile?.city || '').trim() &&
+      (resumeProfile?.state || '').trim()
+    );
+
+    if (hasLocation) setOnboardingStep(4);
+    else if (hasPlanning) setOnboardingStep(3);
+    else if (hasDob) setOnboardingStep(2);
+    else setOnboardingStep(0);
   }, [initialAuthStep, resumeProfile]);
 
-  // ── HANDLER 1: Check if identifier is registered ─────────────
   const handleProceedIdentifier = async () => {
     const email = formData.identifier.trim().toLowerCase();
     if (!email) return;
@@ -104,7 +135,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     }
   };
 
-  // ── HANDLER 2: Sign up a new user ─────────────────────────────
   const handleSignup = async () => {
     const email = formData.identifier.trim().toLowerCase();
     if (!isValidEmail(email)) { setError('Enter a valid email address.'); return; }
@@ -120,13 +150,14 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     try {
       await signUp({
         identifier: email,
-        password:   formData.password,
-        firstName:  formData.firstName.trim(),
-        lastName:   formData.lastName.trim() || undefined,
+        password: formData.password,
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim() || undefined,
       });
       setFormData(prev => ({ ...prev, identifier: email }));
       setLoggedInFirstName(formData.firstName.trim());
       setAuthStep('onboarding');
+      setOnboardingStep(0);
     } catch (e: any) {
       setError(e.message ?? 'Sign-up failed. Please try again.');
     } finally {
@@ -134,7 +165,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     }
   };
 
-  // ── HANDLER 3: Sign in an existing user ───────────────────────
   const handleLogin = async () => {
     setIsProcessing(true);
     setError(null);
@@ -148,7 +178,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
 
       const profile = await signIn({
         identifier: email,
-        password:   formData.password,
+        password: formData.password,
       });
 
       const hasCompletedOnboardingData = Boolean(
@@ -156,10 +186,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
         Number.isFinite(Number(profile.life_expectancy)) &&
         Number.isFinite(Number(profile.retirement_age)) &&
         Number(profile.life_expectancy) > Number(profile.retirement_age) &&
-        (profile.pincode ?? '').trim().length > 0 &&
-        (profile.city ?? '').trim().length > 0 &&
-        (profile.state ?? '').trim().length > 0 &&
-        (profile.country ?? '').trim().length > 0 &&
         Number.isFinite(Number(profile.iq_score)) &&
         Number(profile.iq_score) > 0
       );
@@ -178,29 +204,41 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
           city: profile.city ?? prev.city,
           state: profile.state ?? prev.state,
           country: profile.country ?? prev.country,
-          incomeSource: (profile.income_source as IncomeSource) ?? prev.incomeSource,
+          incomeSource: normalizeIncomeSource(profile.income_source),
         }));
+
+        const hasDob = Boolean((profile.dob ?? '').trim());
+        const hasPlanning = Number(profile.life_expectancy) > Number(profile.retirement_age);
+        const hasLocation = Boolean(
+          (profile.pincode ?? '').trim() &&
+          (profile.city ?? '').trim() &&
+          (profile.state ?? '').trim()
+        );
+
         setAuthStep('onboarding');
-        setOnboardingStep(profile.dob ? 1 : 0);
+        if (hasLocation) setOnboardingStep(4);
+        else if (hasPlanning) setOnboardingStep(3);
+        else if (hasDob) setOnboardingStep(2);
+        else setOnboardingStep(0);
         return;
       }
 
       onComplete({
         isRegistered: true,
         profile: {
-          firstName:      profile.first_name,
-          lastName:       profile.last_name ?? '',
-          email:          email,
-          mobile:         '',
-          dob:            profile.dob ?? '',
+          firstName: profile.first_name,
+          lastName: profile.last_name ?? '',
+          email: email,
+          mobile: '',
+          dob: profile.dob ?? '',
           lifeExpectancy: profile.life_expectancy,
-          retirementAge:  profile.retirement_age,
-          pincode:        profile.pincode  ?? '',
-          city:           profile.city     ?? '',
-          state:          profile.state    ?? '',
-          country:        profile.country,
-          incomeSource:   profile.income_source as IncomeSource,
-          iqScore:        profile.iq_score,
+          retirementAge: profile.retirement_age,
+          pincode: profile.pincode ?? '',
+          city: profile.city ?? '',
+          state: profile.state ?? '',
+          country: profile.country,
+          incomeSource: normalizeIncomeSource(profile.income_source),
+          iqScore: profile.iq_score,
           income: {
             salary: 50000, bonus: 0, reimbursements: 0,
             business: 0, rental: 0, investment: 0, pension: 0, expectedIncrease: 6,
@@ -324,29 +362,24 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
 
     let score = 45;
 
-    // Earlier planning tends to correlate with higher readiness.
     if (age <= 25) score += 12;
     else if (age <= 35) score += 10;
     else if (age <= 45) score += 8;
     else if (age <= 55) score += 5;
     else if (age <= 65) score += 3;
 
-    // Longer planning runway = stronger financial strategy runway.
     if (horizonToRetire >= 30) score += 12;
     else if (horizonToRetire >= 20) score += 9;
     else if (horizonToRetire >= 15) score += 6;
     else if (horizonToRetire >= 10) score += 3;
 
-    // Longer retirement span requires stronger planning.
     if (retirementSpan >= 25) score += 10;
     else if (retirementSpan >= 18) score += 7;
     else if (retirementSpan >= 12) score += 4;
     else if (retirementSpan >= 8) score += 2;
 
-    // Income source complexity.
     score += formData.incomeSource === 'business' ? 3 : 2;
 
-    // Data completeness helps model quality.
     if (formData.country.trim()) score += 1;
     if (formData.city.trim()) score += 1;
     if (formData.state.trim()) score += 1;
@@ -355,7 +388,60 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     return Math.min(98, Math.max(40, Math.round(score)));
   }, [formData, currentAge]);
 
-  // ── HANDLER 4: Save onboarding data and enter the app ─────────
+  const toggleUsage = (key: string) => {
+    setOpenUsageKey(prev => prev === key ? null : key);
+  };
+
+  const validateDobAndContinue = () => {
+    const age = calculateAge(formData.dob);
+    if (!formData.dob || age === null) {
+      setError('Please enter a valid date of birth.');
+      return;
+    }
+    if (isFutureDate(formData.dob)) {
+      setError('Date of birth cannot be in the future.');
+      return;
+    }
+    if (age < 18 || age > 90) {
+      setError('Age must be between 18 and 90 to proceed.');
+      return;
+    }
+    setError(null);
+    setOnboardingStep(2);
+  };
+
+  const handleLocationDecision = (mode: 'share' | 'skip') => {
+    if (mode !== 'share') {
+      setFormData(prev => ({ ...prev, pincode: '', city: '', state: '' }));
+      setError(null);
+      setOnboardingStep(4);
+      return;
+    }
+
+    const country = (formData.country || 'India').trim();
+    const pincode = formData.pincode.trim();
+    const city = formData.city.trim();
+    const state = formData.state.trim();
+
+    if (!pincode || !city || !state) {
+      setError('Please complete location fields or choose Not now.');
+      return;
+    }
+
+    if (country.toLowerCase() === 'india' && !isValidIndiaPincode(pincode)) {
+      setError('Enter a valid 6-digit India pincode or choose Not now.');
+      return;
+    }
+
+    if (country.toLowerCase() !== 'india' && pincode.length < 3) {
+      setError('Enter a valid postal code or choose Not now.');
+      return;
+    }
+
+    setError(null);
+    setOnboardingStep(4);
+  };
+
   const handleFinishOnboarding = async () => {
     setIsProcessing(true);
     setError(null);
@@ -395,40 +481,44 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
         return;
       }
 
-      if (formData.country.trim().toLowerCase() === 'india') {
-        if (!isValidIndiaPincode(formData.pincode)) {
-          setError('Enter a valid 6-digit India pincode.');
+      const country = (formData.country || 'India').trim();
+      const pincode = formData.pincode.trim();
+      const city = formData.city.trim();
+      const state = formData.state.trim();
+      const hasAnyLocationData = Boolean(pincode || city || state);
+
+      if (hasAnyLocationData) {
+        if (!pincode || !city || !state) {
+          setError('Please complete location fields or clear them to skip for now.');
           setIsProcessing(false);
           return;
         }
-        if (!formData.city.trim() || !formData.state.trim()) {
-          setError('City and State are required for India.');
+
+        if (country.toLowerCase() === 'india' && !isValidIndiaPincode(pincode)) {
+          setError('Enter a valid 6-digit India pincode or remove location for now.');
           setIsProcessing(false);
           return;
         }
-      } else {
-        if (formData.pincode.trim().length < 3) {
-          setError('Enter a valid postal code.');
-          setIsProcessing(false);
-          return;
-        }
-        if (!formData.city.trim() || !formData.state.trim()) {
-          setError('City and State are required.');
+
+        if (country.toLowerCase() !== 'india' && pincode.length < 3) {
+          setError('Enter a valid postal code or remove location for now.');
           setIsProcessing(false);
           return;
         }
       }
 
+      const normalizedIncomeSource = normalizeIncomeSource(formData.incomeSource);
+
       await saveOnboardingProfile({
-        dob:            formData.dob,
+        dob: formData.dob,
         lifeExpectancy: Number(formData.lifeExpectancy),
-        retirementAge:  Number(formData.retirementAge),
-        pincode:        formData.pincode,
-        city:           formData.city,
-        state:          formData.state,
-        country:        formData.country,
-        incomeSource:   formData.incomeSource,
-        iqScore:        baselineIq,
+        retirementAge: Number(formData.retirementAge),
+        pincode,
+        city,
+        state,
+        country,
+        incomeSource: normalizedIncomeSource,
+        iqScore: baselineIq,
       });
 
       const normalizedEmail = formData.identifier.trim().toLowerCase();
@@ -437,13 +527,18 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
         isRegistered: true,
         profile: {
           ...formData,
-          firstName:      formData.firstName,
-          lastName:       formData.lastName,
-          email:          normalizedEmail,
-          mobile:         '',
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: normalizedEmail,
+          mobile: '',
           lifeExpectancy: Number(formData.lifeExpectancy),
-          retirementAge:  Number(formData.retirementAge),
-          iqScore:        baselineIq,
+          retirementAge: Number(formData.retirementAge),
+          pincode,
+          city,
+          state,
+          country,
+          incomeSource: normalizedIncomeSource,
+          iqScore: baselineIq,
           income: {
             salary: 0, bonus: 0, reimbursements: 0,
             business: 0, rental: 0, investment: 0, pension: 0, expectedIncrease: 6,
@@ -458,38 +553,72 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     }
   };
 
-  // ── UI (identical to original) ────────────────────────────────
+  const progressWidth = stepConfig.length > 1
+    ? (onboardingStep / (stepConfig.length - 1)) * 100
+    : 0;
+  const dataSharingStepLabel = onboardingStep <= 2
+    ? 'Step 1 of 2'
+    : onboardingStep === 3
+      ? 'Step 2 of 2'
+      : null;
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 overflow-x-hidden text-slate-900">
-      
+
       {authStep === 'onboarding' && (
-        <div className="max-w-md w-full mb-6 sm:mb-10 flex items-center justify-between px-6 relative">
-          <div className="absolute top-5 left-6 right-6 h-[2px] bg-slate-200 -z-0" />
-          <div className="absolute top-5 left-6 h-[2px] bg-teal-600 -z-0 transition-all duration-1000 ease-in-out" style={{ width: `${(onboardingStep / (stepConfig.length - 1)) * 100}%` }} />
-          {stepConfig.map((s, i) => (
-            <div key={i} className="flex flex-col items-center relative z-10">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-700 ${onboardingStep >= i ? 'bg-teal-600 text-white shadow-lg shadow-teal-200' : 'bg-white text-slate-400 border border-slate-200'}`}>
-                <s.icon size={16} />
+        <>
+          <div className="max-w-md w-full mb-4 sm:mb-6 flex items-center justify-between px-6 relative">
+            <div className="absolute top-5 left-6 right-6 h-[2px] bg-slate-200 -z-0" />
+            <div className="absolute top-5 left-6 h-[2px] bg-teal-600 -z-0 transition-all duration-1000 ease-in-out" style={{ width: `${progressWidth}%` }} />
+            {stepConfig.map((s, i) => (
+              <div key={i} className="flex flex-col items-center relative z-10">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-700 ${onboardingStep >= i ? 'bg-teal-600 text-white shadow-lg shadow-teal-200' : 'bg-white text-slate-400 border border-slate-200'}`}>
+                  <s.icon size={16} />
+                </div>
+                <span className={`text-[7px] font-black uppercase tracking-[0.1em] mt-2 transition-colors duration-500 ${onboardingStep >= i ? 'text-teal-600' : 'text-slate-400'}`}>{s.title}</span>
               </div>
-              <span className={`text-[7px] font-black uppercase tracking-[0.1em] mt-2 transition-colors duration-500 ${onboardingStep >= i ? 'text-teal-600' : 'text-slate-400'}`}>{s.title}</span>
+            ))}
+          </div>
+
+          <div className="w-full max-w-xl mb-4 px-2">
+            <div className="bg-teal-50 border border-teal-100 rounded-2xl px-4 py-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-black uppercase tracking-widest text-teal-700">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5"><ShieldCheck size={12} /> End-to-end encryption</span>
+                  <span className="text-teal-300">•</span>
+                  <span>Industry-standard compliance</span>
+                  <span className="text-teal-300">•</span>
+                  <span>We never sell your data</span>
+                </div>
+                <button
+                  onClick={() => setShowSecurityDetails(prev => !prev)}
+                  className="text-[10px] font-black uppercase tracking-widest text-teal-700 hover:text-teal-900 transition-colors"
+                >
+                  {showSecurityDetails ? 'Show less' : 'Learn more'}
+                </button>
+              </div>
+              {showSecurityDetails && (
+                <p className="text-xs font-semibold text-slate-700">
+                  Data is encrypted in transit and at rest, access is restricted, and storage is continuously monitored.
+                </p>
+              )}
             </div>
-          ))}
-        </div>
+          </div>
+        </>
       )}
 
       <div className="max-w-xl w-full bg-white rounded-[2.5rem] sm:rounded-[3.5rem] shadow-xl border border-slate-100 overflow-hidden relative">
         <div className="absolute top-0 right-0 w-64 h-64 bg-teal-50 blur-[100px] -z-10 rounded-full translate-x-1/2 -translate-y-1/2" />
-        
+
         <div className="p-8 sm:p-12 lg:p-14 text-left">
 
-          {/* STEP 1: Identifier */}
           {authStep === 'identifier' && (
             <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
               <div className="space-y-3">
                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-50 text-teal-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-teal-100">
-                  <ShieldCheck size={12}/> System Gateway
+                  <ShieldCheck size={12} /> System Gateway
                 </div>
-                <h1 className="text-4xl sm:text-5xl font-black tracking-tighter leading-none text-slate-950">Access <br/><span className="text-teal-600">Terminal.</span></h1>
+                <h1 className="text-4xl sm:text-5xl font-black tracking-tighter leading-none text-slate-950">Access <br /><span className="text-teal-600">Terminal.</span></h1>
                 <p className="text-slate-500 text-sm font-medium leading-relaxed">Enter your email to establish a secure connection.</p>
               </div>
               <div className="space-y-5">
@@ -501,7 +630,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       placeholder="ravindra@wealth.terminal"
                       className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-600 outline-none font-bold text-base transition-all placeholder:text-slate-300"
                       value={formData.identifier}
-                      onChange={e => setFormData({...formData, identifier: e.target.value})}
+                      onChange={e => setFormData({ ...formData, identifier: e.target.value })}
                       onKeyDown={e => e.key === 'Enter' && handleProceedIdentifier()}
                     />
                     {formData.identifier.includes('@') && emailSuggestions.length > 0 && (
@@ -520,7 +649,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                     )}
                   </div>
                 </div>
-                {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold"><AlertCircle size={14}/> {error}</div>}
+                {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold"><AlertCircle size={14} /> {error}</div>}
                 <button onClick={handleProceedIdentifier} disabled={isProcessing} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all flex items-center justify-center gap-2 group shadow-lg shadow-teal-100 disabled:opacity-60">
                   {isProcessing ? 'Checking...' : 'Proceed'} <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
                 </button>
@@ -528,33 +657,32 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
             </div>
           )}
 
-          {/* STEP 2: Signup */}
           {authStep === 'signup' && (
             <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
               <div className="flex items-center gap-3">
-                <button onClick={() => { setAuthStep('identifier'); setError(null); }} className="p-2 bg-slate-50 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors"><ArrowLeft size={16}/></button>
+                <button onClick={() => { setAuthStep('identifier'); setError(null); }} className="p-2 bg-slate-50 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors"><ArrowLeft size={16} /></button>
                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
-                  <Zap size={12}/> New Identity
+                  <Zap size={12} /> New Identity
                 </div>
               </div>
               <h1 className="text-3xl font-black tracking-tighter text-slate-950">Initialize <span className="text-teal-600">Node.</span></h1>
-              {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold"><AlertCircle size={14}/> {error}</div>}
+              {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold"><AlertCircle size={14} /> {error}</div>}
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">First Name</label>
-                    <input type="text" placeholder="John" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} />
+                    <input type="text" placeholder="John" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.firstName} onChange={e => setFormData({ ...formData, firstName: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Last Name</label>
-                    <input type="text" placeholder="Doe" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} />
+                    <input type="text" placeholder="Doe" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.lastName} onChange={e => setFormData({ ...formData, lastName: e.target.value })} />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Choose Key</label>
                   <div className="relative">
                     <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input type={showPassword ? "text" : "password"} placeholder="Min 8 characters" className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                    <input type={showPassword ? 'text' : 'password'} placeholder="Min 8 characters" className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} />
                     <button type="button" onClick={() => setShowPassword(prev => !prev)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-teal-600 transition-colors">
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -564,7 +692,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Confirm Key</label>
                   <div className="relative">
                     <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input type={showConfirmPassword ? "text" : "password"} placeholder="Repeat key" className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} />
+                    <input type={showConfirmPassword ? 'text' : 'password'} placeholder="Repeat key" className="w-full pl-12 pr-12 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.confirmPassword} onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })} />
                     <button type="button" onClick={() => setShowConfirmPassword(prev => !prev)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-teal-600 transition-colors">
                       {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -577,23 +705,22 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
             </div>
           )}
 
-          {/* STEP 3: Login */}
           {authStep === 'login' && (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
               <div className="flex items-center gap-3">
-                <button onClick={() => { setAuthStep('identifier'); setError(null); }} className="p-2 bg-slate-50 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors"><ArrowLeft size={16}/></button>
+                <button onClick={() => { setAuthStep('identifier'); setError(null); }} className="p-2 bg-slate-50 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors"><ArrowLeft size={16} /></button>
                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-50 text-teal-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-teal-100">
-                  <ShieldCheck size={12}/> Recognized Node
+                  <ShieldCheck size={12} /> Recognized Node
                 </div>
               </div>
-              <h1 className="text-3xl font-black tracking-tighter text-slate-950">Welcome back, <br/><span className="text-teal-600">Strategist.</span></h1>
-              {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold"><AlertCircle size={14}/> {error}</div>}
+              <h1 className="text-3xl font-black tracking-tighter text-slate-950">Welcome back, <br /><span className="text-teal-600">Strategist.</span></h1>
+              {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold"><AlertCircle size={14} /> {error}</div>}
               <div className="space-y-5">
                 <div className="space-y-2">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Key</label>
                   <div className="relative">
                     <Key className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input type={showLoginPassword ? "text" : "password"} placeholder="••••••••" className="w-full pl-12 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+                    <input type={showLoginPassword ? 'text' : 'password'} placeholder="••••••••" className="w-full pl-12 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} onKeyDown={e => e.key === 'Enter' && handleLogin()} />
                     <button type="button" onClick={() => setShowLoginPassword(prev => !prev)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-teal-600 transition-colors">
                       {showLoginPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -606,48 +733,98 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
             </div>
           )}
 
-          {/* STEP 4: Onboarding Flow */}
           {authStep === 'onboarding' && (
             <div className="space-y-8">
               {onboardingStep === 0 && (
                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-700">
-                  <h2 className="text-3xl font-black tracking-tight text-slate-950">Actuarial <span className="text-teal-600">Horizon.</span></h2>
-                  <div className="space-y-3">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Temporal Origin (DOB)</label>
-                    <input type="date" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 transition-all text-teal-600" value={formData.dob} onChange={e => setFormData({...formData, dob: e.target.value})} />
+                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-50 text-teal-700 rounded-full text-[9px] font-black uppercase tracking-widest border border-teal-100">
+                    <ShieldCheck size={12} /> Start with trust
                   </div>
-                  {ageGateError && (
-                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold">
-                      <AlertCircle size={14}/> {ageGateError}
-                    </div>
-                  )}
-                  <button onClick={() => {
-                    const age = calculateAge(formData.dob);
-                    if (!formData.dob || age === null) {
-                      setError('Please enter a valid date of birth.');
-                      return;
-                    }
-                    if (isFutureDate(formData.dob)) {
-                      setError('Date of birth cannot be in the future.');
-                      return;
-                    }
-                    if (age < 18 || age > 90) {
-                      setError('Age must be between 18 and 90 to proceed.');
-                      return;
-                    }
-                    setError(null);
-                    setOnboardingStep(1);
-                  }} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">Next Phase</button>
+                  <h2 className="text-3xl font-black tracking-tight text-slate-950">Help us personalize your experience</h2>
+                  <p className="text-sm text-slate-600 leading-relaxed font-medium">
+                    We understand sharing information is a big decision. It is completely okay to take your time.
+                  </p>
+                  <div className="p-4 rounded-2xl border border-teal-100 bg-teal-50 space-y-2">
+                    <p className="text-[11px] font-black uppercase tracking-widest text-teal-700">What happens next</p>
+                    <p className="text-sm text-slate-700 font-semibold">Step 1 covers required details for accurate projections. Step 2 is optional and improves relevance.</p>
+                    <p className="text-xs text-slate-600 font-medium">You can disconnect optional data anytime in Settings.</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button onClick={() => { setSkipOptionalRequests(false); setError(null); setOnboardingStep(1); }} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">
+                      Continue Securely
+                    </button>
+                    <button onClick={() => { setSkipOptionalRequests(true); setError(null); setOnboardingStep(1); }} className="w-full py-3.5 bg-white text-slate-700 border border-slate-200 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
+                      Not Now (Optional Data)
+                    </button>
+                  </div>
                 </div>
               )}
 
               {onboardingStep === 1 && (
-                <div className="space-y-10 animate-in slide-in-from-right-4 duration-700">
-                  <h2 className="text-3xl font-black text-teal-600 tracking-tight">Time Vector.</h2>
+                <div className="space-y-6 animate-in slide-in-from-right-4 duration-700">
+                  {dataSharingStepLabel && (
+                    <p className="text-[10px] font-black uppercase tracking-widest text-teal-600">{dataSharingStepLabel}</p>
+                  )}
+                  <h2 className="text-3xl font-black tracking-tight text-slate-950">Date of Birth</h2>
+                  <p className="text-xs font-bold uppercase tracking-widest text-teal-600">Required to run retirement projections</p>
+                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+                    <p className="text-sm font-semibold text-slate-900">Adding your date of birth gives you age-accurate insights.</p>
+                    <p className="text-sm font-semibold text-slate-700">This reduces manual correction and improves planning accuracy.</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date of birth</label>
+                    <input type="date" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 transition-all text-teal-600" value={formData.dob} onChange={e => setFormData({ ...formData, dob: e.target.value })} />
+                  </div>
+
+                  <button onClick={() => toggleUsage('dob')} className="w-full text-left px-4 py-3 border border-slate-200 rounded-xl flex items-center justify-between text-xs font-black uppercase tracking-widest text-slate-600 hover:border-teal-200 hover:text-teal-700 transition-all">
+                    <span>Why we ask</span>
+                    <span className="inline-flex items-center gap-1">
+                      {openUsageKey === 'dob' ? 'Show less' : 'Learn more'}
+                      {openUsageKey === 'dob' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                    </span>
+                  </button>
+                  {openUsageKey === 'dob' && (
+                    <div className="p-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 space-y-2">
+                      <p><span className="font-black text-slate-900">What we collect:</span> your date of birth.</p>
+                      <p><span className="font-black text-slate-900">Why we need it:</span> to build age-based planning windows.</p>
+                      <p><span className="font-black text-slate-900">How it improves your experience:</span> more accurate timelines and recommendations.</p>
+                      <p><span className="font-black text-slate-900">What we do not do:</span> we never sell this information or use it for ads.</p>
+                    </div>
+                  )}
+
+                  {ageGateError && (
+                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold">
+                      <AlertCircle size={14} /> {ageGateError}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button onClick={() => setOnboardingStep(0)} className="w-full py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
+                      Back
+                    </button>
+                    <button onClick={validateDobAndContinue} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">
+                      Continue
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {onboardingStep === 2 && (
+                <div className="space-y-8 animate-in slide-in-from-right-4 duration-700">
+                  {dataSharingStepLabel && (
+                    <p className="text-[10px] font-black uppercase tracking-widest text-teal-600">{dataSharingStepLabel}</p>
+                  )}
+                  <h2 className="text-3xl font-black text-slate-950 tracking-tight">Planning Timeline</h2>
+                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2">
+                    <p className="text-sm font-semibold text-slate-900">Adding planning ages gives you more accurate long-term projections.</p>
+                    <p className="text-sm font-semibold text-slate-700">It helps avoid underestimating how long your savings need to last.</p>
+                  </div>
+
                   <div className="space-y-8">
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Life Span</label>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Life expectancy age</label>
                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Min {minLifeExpectancy} / Max {lifeSpanMax}</span>
                       </div>
                       <div className="flex justify-between items-center">
@@ -665,7 +842,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                     </div>
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Retirement Node</label>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Retirement age</label>
                         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max {retirementMax}</span>
                       </div>
                       <div className="flex justify-between items-center">
@@ -682,14 +859,62 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                         }));
                       }} />
                     </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 inline-flex items-center gap-2">
+                        Income source (optional context)
+                        <span title="Used to personalize assumptions only. You can change or remove it later." className="text-slate-400 cursor-help">?</span>
+                      </label>
+                      <select
+                        value={normalizeIncomeSource(formData.incomeSource)}
+                        onChange={e => setFormData(prev => ({ ...prev, incomeSource: normalizeIncomeSource(e.target.value) }))}
+                        className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600"
+                      >
+                        <option value="salaried">Salaried</option>
+                        <option value="business">Business</option>
+                      </select>
+                    </div>
                   </div>
-                  <button onClick={() => setOnboardingStep(2)} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">Geospatial Sync</button>
+
+                  <button onClick={() => toggleUsage('timeline')} className="w-full text-left px-4 py-3 border border-slate-200 rounded-xl flex items-center justify-between text-xs font-black uppercase tracking-widest text-slate-600 hover:border-teal-200 hover:text-teal-700 transition-all">
+                    <span>Why we ask</span>
+                    <span className="inline-flex items-center gap-1">
+                      {openUsageKey === 'timeline' ? 'Show less' : 'Learn more'}
+                      {openUsageKey === 'timeline' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                    </span>
+                  </button>
+                  {openUsageKey === 'timeline' && (
+                    <div className="p-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 space-y-2">
+                      <p><span className="font-black text-slate-900">What we collect:</span> retirement age, life expectancy, and optional income source context.</p>
+                      <p><span className="font-black text-slate-900">Why we need it:</span> to estimate your planning horizon and funding duration.</p>
+                      <p><span className="font-black text-slate-900">How it improves your experience:</span> more relevant recommendations with less manual work.</p>
+                      <p><span className="font-black text-slate-900">What we do not do:</span> we never sell it and never use it for ad targeting.</p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button onClick={() => setOnboardingStep(1)} className="w-full py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
+                      Back
+                    </button>
+                    <button onClick={() => { setError(null); setOnboardingStep(skipOptionalRequests ? 4 : 3); }} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">
+                      Continue
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {onboardingStep === 2 && (
+              {onboardingStep === 3 && (
                 <div className="space-y-8 animate-in slide-in-from-right-4 duration-700">
-                  <h2 className="text-3xl font-black tracking-tight text-slate-950">Global <span className="text-teal-600">Node.</span></h2>
+                  {dataSharingStepLabel && (
+                    <p className="text-[10px] font-black uppercase tracking-widest text-teal-600">{dataSharingStepLabel}</p>
+                  )}
+                  <h2 className="text-3xl font-black tracking-tight text-slate-950">Location (Optional)</h2>
+                  <p className="text-sm text-slate-600 font-medium">It is completely okay to skip this for now.</p>
+                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2">
+                    <p className="text-sm font-semibold text-slate-900">Sharing location helps us show more relevant recommendations.</p>
+                    <p className="text-sm font-semibold text-slate-700">For many users, this cuts manual adjustments by about 3 hours per week.</p>
+                  </div>
+
                   <div className="space-y-5">
                     <select
                       className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 text-slate-700"
@@ -710,10 +935,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       placeholder={formData.country.trim().toLowerCase() === 'india' ? 'PIN Code' : 'Postal Code'}
                       className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 text-teal-600"
                       value={formData.pincode}
-                      onChange={e => setFormData({...formData, pincode: e.target.value})}
+                      onChange={e => setFormData({ ...formData, pincode: e.target.value })}
                     />
                     <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest">
-                      <span className="text-slate-400">Enter {formData.country.trim().toLowerCase() === 'india' ? 'PIN' : 'postal'} code to unlock city/state.</span>
+                      <span className="text-slate-400">Enter {formData.country.trim().toLowerCase() === 'india' ? 'PIN' : 'postal'} code to auto-detect city/state.</span>
                       {geoStatus.loading && <span className="text-teal-600">Detecting...</span>}
                     </div>
                     {geoStatus.error && (
@@ -725,48 +950,83 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       <input
                         type="text"
                         placeholder="City"
-                        disabled={formData.country.trim().toLowerCase() === 'india' ? !isValidIndiaPincode(formData.pincode) : formData.pincode.trim().length < 3}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600 disabled:opacity-50"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600"
                         value={formData.city}
-                        onChange={e => setFormData({...formData, city: e.target.value})}
+                        onChange={e => setFormData({ ...formData, city: e.target.value })}
                       />
                       <input
                         type="text"
                         placeholder="State"
-                        disabled={formData.country.trim().toLowerCase() === 'india' ? !isValidIndiaPincode(formData.pincode) : formData.pincode.trim().length < 3}
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600 disabled:opacity-50"
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600"
                         value={formData.state}
-                        onChange={e => setFormData({...formData, state: e.target.value})}
+                        onChange={e => setFormData({ ...formData, state: e.target.value })}
                       />
                     </div>
                   </div>
-                  <button onClick={() => setOnboardingStep(3)} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">Compute IQ</button>
+
+                  <button onClick={() => toggleUsage('location')} className="w-full text-left px-4 py-3 border border-slate-200 rounded-xl flex items-center justify-between text-xs font-black uppercase tracking-widest text-slate-600 hover:border-teal-200 hover:text-teal-700 transition-all">
+                    <span>Why we ask</span>
+                    <span className="inline-flex items-center gap-1">
+                      {openUsageKey === 'location' ? 'Show less' : 'Learn more'}
+                      {openUsageKey === 'location' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                    </span>
+                  </button>
+                  {openUsageKey === 'location' && (
+                    <div className="p-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 space-y-2">
+                      <p><span className="font-black text-slate-900">What we collect:</span> country, postal code, city, and state.</p>
+                      <p><span className="font-black text-slate-900">Why we need it:</span> to localize assumptions and service availability.</p>
+                      <p><span className="font-black text-slate-900">How it improves your experience:</span> faster setup and more relevant insights.</p>
+                      <p><span className="font-black text-slate-900">What we do not do:</span> we never sell your location data or use it for ads.</p>
+                    </div>
+                  )}
+
+                  {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold text-left"><AlertCircle size={14} /> {error}</div>}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button onClick={() => handleLocationDecision('share')} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">
+                      Connect Securely
+                    </button>
+                    <button onClick={() => handleLocationDecision('skip')} className="w-full py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
+                      Not Now
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {onboardingStep === 3 && (
-                <div className="text-center space-y-8 animate-in zoom-in-95 duration-1000">
-                  <div className="relative mx-auto w-44 h-44 sm:w-52 sm:h-52">
-                    <div className="absolute inset-0 bg-teal-50 blur-[50px] animate-pulse" />
-                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                      <circle cx="50" cy="50" r="45" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-slate-100" />
-                      <circle cx="50" cy="50" r="45" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray="283" strokeDashoffset={283 - (283 * baselineIq) / 100} className="text-teal-600 transition-all duration-1000 ease-out" strokeLinecap="round" />
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-4xl sm:text-5xl font-black tracking-tighter text-slate-900">{baselineIq}</span>
-                      <span className="text-[8px] font-black text-teal-600 uppercase tracking-widest">Digital IQ</span>
+              {onboardingStep === 4 && (
+                <div className="space-y-8 animate-in zoom-in-95 duration-700">
+                  <div className="text-center space-y-3">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">
+                      <CheckCircle2 size={12} /> Ready
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-3xl font-black text-slate-950 tracking-tighter leading-none">Sync Successful.</h3>
-                    <p className="text-slate-500 text-sm font-medium leading-relaxed">
-                      Welcome, <span className="text-teal-600 font-bold">{loggedInFirstName || formData.firstName}</span>. System readiness is nominal.
+                    <h3 className="text-3xl font-black text-slate-950 tracking-tighter leading-none">You are in control.</h3>
+                    <p className="text-slate-600 text-sm font-medium leading-relaxed">
+                      {`Thanks, ${loggedInFirstName || formData.firstName}.`} You can disconnect optional data anytime in Settings with one click.
                     </p>
                   </div>
-                  {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold text-left"><AlertCircle size={14}/> {error}</div>}
-                  <button onClick={handleFinishOnboarding} disabled={isProcessing} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-600 transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2 group disabled:opacity-60">
-                    {isProcessing ? 'Syncing...' : 'Enter Terminal'} <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-                  </button>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="p-4 rounded-2xl border border-teal-100 bg-teal-50">
+                      <p className="text-xs font-black uppercase tracking-widest text-teal-700 mb-1">Security summary</p>
+                      <p className="text-sm font-semibold text-slate-800">Encryption, secure storage, and strict access controls protect your information. We never sell your data.</p>
+                    </div>
+                    <div className="p-4 rounded-2xl border border-slate-200 bg-white">
+                      <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">Model quality score</p>
+                      <p className="text-3xl font-black text-teal-600 leading-none">{baselineIq}</p>
+                      <p className="text-xs text-slate-500 font-semibold mt-1">Higher data completeness improves recommendation quality.</p>
+                    </div>
+                  </div>
+
+                  {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold text-left"><AlertCircle size={14} /> {error}</div>}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button onClick={() => setOnboardingStep(skipOptionalRequests ? 2 : 3)} className="w-full py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
+                      Back
+                    </button>
+                    <button onClick={handleFinishOnboarding} disabled={isProcessing} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-600 transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2 group disabled:opacity-60">
+                      {isProcessing ? 'Saving...' : 'Enter Terminal'} <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

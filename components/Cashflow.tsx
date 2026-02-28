@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   BarChart, Bar, Legend, Cell, LineChart, Line 
 } from 'recharts';
 import { 
@@ -14,6 +14,7 @@ import { formatCurrency } from '../lib/currency';
 import { annualizeAmount, buildBucketDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
 import { inferTenureMonths } from '../lib/loanMath';
 import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
+import SafeResponsiveContainer from './common/SafeResponsiveContainer';
 
 interface CashflowProps {
   state: FinanceState;
@@ -324,8 +325,8 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
             </div>
          </div>
 
-         <div className="flex-1 min-h-[450px]">
-            <ResponsiveContainer width="100%" height="100%">
+         <div className="h-[450px]">
+            <SafeResponsiveContainer>
                <BarChart data={projectionData.slice(0, 15)}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis dataKey="year" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 900}} />
@@ -344,7 +345,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                   <Bar dataKey="debt" stackId="a" fill="#f43f5e" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="committed" stackId="a" fill="#0f766e" radius={[10, 10, 0, 0]} />
                </BarChart>
-            </ResponsiveContainer>
+            </SafeResponsiveContainer>
          </div>
       </div>
 
@@ -358,15 +359,15 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                </div>
                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl"><User size={20}/></div>
             </div>
-            <div className="flex-1 min-h-[300px]">
-               <ResponsiveContainer width="100%" height="100%">
+            <div className="h-[300px]">
+               <SafeResponsiveContainer>
                   <BarChart data={personalData.bar} layout="vertical" margin={{ left: 20 }}>
                      <XAxis type="number" hide />
                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 11, fontWeight: 900}} />
                      <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', fontWeight: 'bold' }} />
                      <Bar dataKey="value" radius={[0, 16, 16, 0]} barSize={40} />
                   </BarChart>
-               </ResponsiveContainer>
+               </SafeResponsiveContainer>
             </div>
          </div>
 
@@ -378,8 +379,8 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                </div>
                <div className="p-3 bg-teal-50 text-teal-600 rounded-2xl"><Activity size={20}/></div>
             </div>
-            <div className="flex-1 min-h-[300px]">
-               <ResponsiveContainer width="100%" height="100%">
+            <div className="h-[300px]">
+               <SafeResponsiveContainer>
                   <LineChart data={personalData.netFlowHistory}>
                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                      <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11, fontWeight: 900}} />
@@ -387,7 +388,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                      <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', fontWeight: 'bold' }} />
                      <Line type="monotone" dataKey="flow" stroke="#0f766e" strokeWidth={5} dot={{ r: 6, fill: '#0f766e', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 10, strokeWidth: 0 }} />
                   </LineChart>
-               </ResponsiveContainer>
+               </SafeResponsiveContainer>
             </div>
          </div>
       </div>
@@ -398,8 +399,8 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
             <h3 className="text-2xl font-black text-slate-900 tracking-tight text-left">Aggregated Net Annual Surplus</h3>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Growth Forecast: 6% CAGR</p>
          </div>
-         <div className="flex-1 min-h-[350px]">
-            <ResponsiveContainer width="100%" height="100%">
+         <div className="h-[350px]">
+            <SafeResponsiveContainer>
                <AreaChart data={projectionData}>
                   <defs>
                      <linearGradient id="colorSurplus" x1="0" y1="0" x2="0" y2="1">
@@ -412,7 +413,7 @@ const Cashflow: React.FC<CashflowProps> = ({ state }) => {
                   <Area type="monotone" dataKey="surplus" stroke="#10b981" strokeWidth={5} fillOpacity={1} fill="url(#colorSurplus)" />
                   <Area type="monotone" dataKey="pvSurplus" stroke="#0f766e" strokeWidth={3} fillOpacity={0} strokeDasharray="6 6" />
                </AreaChart>
-            </ResponsiveContainer>
+            </SafeResponsiveContainer>
          </div>
       </div>
     </div>

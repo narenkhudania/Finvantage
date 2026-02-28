@@ -6,11 +6,13 @@ import {
   Layers, CheckCircle2, Circle, ArrowRight, Wallet,
   PieChart, RefreshCw, Zap, Activity, ShieldCheck, Edit3
 } from 'lucide-react';
-import { FinanceState, Goal, RelativeDate } from '../types';
+import { FinanceState, Goal, RelativeDate, View } from '../types';
 import { formatCurrency } from '../lib/currency';
 import { buildBucketDiscountFactors, getGoalIntervalYears, getLifeExpectancyYear, getRiskReturnAssumption, inflateByBuckets } from '../lib/financeMath';
+import { buildReportSnapshot } from '../lib/report';
+import CommandReport from './CommandReport';
 
-const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
+const GoalSummary: React.FC<{ state: FinanceState; setView: (view: View) => void }> = ({ state, setView }) => {
   const [hoveredGoalId, setHoveredGoalId] = useState<string | null>(null);
   
   const currentYear = new Date().getFullYear();
@@ -160,6 +162,7 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
   ) / 100;
 
   const currencyCountry = state.profile.country;
+  const reportSnapshot = useMemo(() => buildReportSnapshot(state), [state]);
 
   return (
     <div className="space-y-12 animate-in fade-in duration-1000 pb-24">
@@ -182,6 +185,8 @@ const GoalSummary: React.FC<{ state: FinanceState }> = ({ state }) => {
           </div>
         </div>
       </div>
+
+      <CommandReport snapshot={reportSnapshot} onOpen={setView} />
 
       <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-8 md:p-10 border-b border-slate-100">
