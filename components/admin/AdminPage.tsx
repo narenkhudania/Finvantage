@@ -9,7 +9,6 @@ import {
   ChevronRight,
   CircleDollarSign,
   CreditCard,
-  Download,
   Eye,
   EyeOff,
   Flag,
@@ -53,6 +52,7 @@ import {
   getAdminTwoFactorStatus,
   getAdminWorkspaceId,
   exportCustomersCsv,
+  createCrmComplaintTicket,
   forceCustomerLogout,
   confirmAdminTwoFactorSetup,
   disableAdminTwoFactor,
@@ -139,7 +139,17 @@ import {
   type BlogStatus,
 } from '../../services/blogService';
 import SafeResponsiveContainer from '../common/SafeResponsiveContainer';
+import AdminAccessModule from './modules/AdminAccessModule';
+import AdminAnalyticsModule from './modules/AdminAnalyticsModule';
+import AdminAuditModule from './modules/AdminAuditModule';
+import AdminComplianceModule from './modules/AdminComplianceModule';
+import AdminCustomersModule from './modules/AdminCustomersModule';
+import AdminFraudModule from './modules/AdminFraudModule';
+import AdminPaymentsModule from './modules/AdminPaymentsModule';
 import AdminOverviewModule from './modules/AdminOverviewModule';
+import AdminPortfolioModule from './modules/AdminPortfolioModule';
+import AdminSupportModule from './modules/AdminSupportModule';
+import AdminUsageModule from './modules/AdminUsageModule';
 
 type LoginState = {
   email: string;
@@ -563,6 +573,17 @@ const AdminPage: React.FC = () => {
     score: 50,
     propertiesJson: '{}',
   });
+
+  const [crmComplaintForm, setCrmComplaintForm] = useState({
+    userId: '',
+    subject: '',
+    description: '',
+    priority: 'medium',
+    assignedTo: '',
+    tags: '',
+  });
+  const [crmComplaintStatusFilter, setCrmComplaintStatusFilter] = useState('all');
+  const [crmComplaintPriorityFilter, setCrmComplaintPriorityFilter] = useState('all');
 
   const selectedCustomerList = useMemo(
     () => customers.filter((customer) => selectedCustomerIds[customer.user_id]),
@@ -1381,1054 +1402,345 @@ const AdminPage: React.FC = () => {
   };
 
   const renderCustomers = () => (
-    <div className="space-y-5">
-      <div className={`${cardClass} p-4`}>
-        <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
-          <div className="flex flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-            <Search size={16} className="text-slate-400" />
-            <input
-              className="w-full bg-transparent text-sm font-semibold text-slate-700 outline-none"
-              placeholder="Search by email, name, or UUID"
-              value={customerSearch}
-              onChange={(event) => setCustomerSearch(event.target.value)}
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <select
-              value={customerKycFilter}
-              onChange={(event) => setCustomerKycFilter(event.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
-            >
-              <option value="">All KYC</option>
-              <option value="not_started">Not Started</option>
-              <option value="pending">Pending</option>
-              <option value="under_review">Under Review</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-
-            <button onClick={loadCustomers} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>
-              Apply
-            </button>
-
-            <button onClick={() => exportCustomersCsv(customers)} className={`${buttonBase} border-slate-200 bg-white text-slate-700 inline-flex items-center gap-1.5`}>
-              <Download size={13} /> CSV
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className={`${cardClass} overflow-hidden`}>
-        <div className="overflow-auto">
-          <table className="min-w-[1050px] w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-3 py-2.5 text-left">
-                  <input
-                    type="checkbox"
-                    checked={customers.length > 0 && selectedCustomerList.length === customers.length}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      const map: Record<string, boolean> = {};
-                      if (checked) customers.forEach((item) => (map[item.user_id] = true));
-                      setSelectedCustomerIds(map);
-                    }}
-                  />
-                </th>
-                {['Customer', 'Country', 'Risk', 'KYC', 'Plan', 'Blocked', 'Updated', 'Actions'].map((header) => (
-                  <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {customers.map((customer) => (
-                <tr key={customer.user_id} className="border-t border-slate-100 hover:bg-teal-50/35">
-                  <td className="px-3 py-3">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(selectedCustomerIds[customer.user_id])}
-                      onChange={(event) => {
-                        const checked = event.target.checked;
-                        setSelectedCustomerIds((prev) => {
-                          const next = { ...prev };
-                          if (checked) next[customer.user_id] = true;
-                          else delete next[customer.user_id];
-                          return next;
-                        });
-                      }}
-                    />
-                  </td>
-                  <td className="px-3 py-3">
-                    <p className="font-black text-slate-800 text-sm">{customer.first_name} {customer.last_name || ''}</p>
-                    <p className="text-xs text-slate-500">{customer.email}</p>
-                  </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{customer.country || '-'}</td>
-                  <td className="px-3 py-3">{renderPill(customer.risk_level || 'unknown')}</td>
-                  <td className="px-3 py-3">{renderPill(customer.kyc_status || 'not_started')}</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{customer.plan_code || '-'}</td>
-                  <td className="px-3 py-3">{renderPill(customer.blocked ? 'blocked' : 'active')}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{formatDate(customer.updated_at)}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={() => openTimeline(customer)}
-                        className={`${buttonBase} border-slate-200 bg-white text-slate-700 !px-2.5 !py-1.5`}
-                      >
-                        Timeline
-                      </button>
-                      <button
-                        onClick={() =>
-                          handleCustomerAction(
-                            customer.blocked ? 'unblock' : 'block',
-                            [customer.user_id],
-                            customer.blocked ? undefined : 'Manual risk action'
-                          )
-                        }
-                        className={`${buttonBase} !px-2.5 !py-1.5 ${customer.blocked ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}
-                      >
-                        {customer.blocked ? 'Unblock' : 'Block'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className={`${cardClass} p-4`}> 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            disabled={!selectedCustomerList.length || busy}
-            onClick={() => handleCustomerAction('block', selectedCustomerList.map((item) => item.user_id), 'Bulk risk action')}
-            className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700`}
-          >
-            Block ({selectedCustomerList.length})
-          </button>
-          <button
-            disabled={!selectedCustomerList.length || busy}
-            onClick={() => handleCustomerAction('unblock', selectedCustomerList.map((item) => item.user_id))}
-            className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700`}
-          >
-            Unblock
-          </button>
-          <button
-            disabled={!selectedCustomerList.length || busy}
-            onClick={() => handleCustomerAction('force_logout', selectedCustomerList.map((item) => item.user_id), 'Bulk admin reset')}
-            className={`${buttonBase} border-amber-200 bg-amber-50 text-amber-700`}
-          >
-            Force Logout
-          </button>
-        </div>
-      </div>
-    </div>
+    <AdminCustomersModule
+      customers={customers}
+      customerSearch={customerSearch}
+      customerKycFilter={customerKycFilter}
+      selectedCustomerIds={selectedCustomerIds}
+      selectedCustomerList={selectedCustomerList}
+      busy={busy}
+      setCustomerSearch={setCustomerSearch}
+      setCustomerKycFilter={setCustomerKycFilter}
+      setSelectedCustomerIds={setSelectedCustomerIds}
+      onLoadCustomers={loadCustomers}
+      onExportCustomersCsv={() => exportCustomersCsv(customers)}
+      onOpenTimeline={openTimeline}
+      onCustomerAction={handleCustomerAction}
+      renderPill={renderPill}
+      formatDate={formatDate}
+    />
   );
 
   const renderPortfolio = () => (
-    <div className="space-y-5">
-      <div className={`${cardClass} p-4`}>
-        <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-          <Search size={16} className="text-slate-400" />
-          <input
-            className="w-full bg-transparent text-sm font-semibold text-slate-700 outline-none"
-            placeholder="Search household by email/name"
-            value={portfolioSearch}
-            onChange={(event) => setPortfolioSearch(event.target.value)}
-          />
-          <button onClick={loadPortfolio} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700 !py-1.5`}>
-            Search
-          </button>
-        </div>
-      </div>
-
-      <div className={`${cardClass} overflow-hidden`}>
-        <div className="overflow-auto">
-          <table className="min-w-[1100px] w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                {['Customer', 'Assets', 'Liabilities', 'Net Worth', 'Goals', 'Txns', 'Risk', 'KYC', 'Last Txn', 'Actions'].map((header) => (
-                  <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {portfolioRows.map((row) => (
-                <tr key={row.userId} className="border-t border-slate-100 hover:bg-teal-50/35">
-                  <td className="px-3 py-3">
-                    <p className="font-black text-slate-800 text-sm">{row.name}</p>
-                    <p className="text-xs text-slate-500">{row.email}</p>
-                  </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-700">{formatCurrency(row.totalAssets)}</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-700">{formatCurrency(row.totalLiabilities)}</td>
-                  <td className="px-3 py-3 text-sm font-black text-teal-700">{formatCurrency(row.netWorth)}</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{formatNumber(row.goalsCount)}</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{formatNumber(row.transactionsCount)}</td>
-                  <td className="px-3 py-3">{renderPill(row.riskLevel || 'unknown')}</td>
-                  <td className="px-3 py-3">{renderPill(row.kycStatus || 'not_started')}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{formatDate(row.lastTransactionAt)}</td>
-                  <td className="px-3 py-3">
-                    <button
-                      onClick={() => openPortfolioDetail(row)}
-                      className={`${buttonBase} border-slate-200 bg-white text-slate-700 !px-2.5 !py-1.5`}
-                    >
-                      Drilldown
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <AdminPortfolioModule
+      portfolioRows={portfolioRows}
+      portfolioSearch={portfolioSearch}
+      setPortfolioSearch={setPortfolioSearch}
+      onLoadPortfolio={loadPortfolio}
+      onOpenPortfolioDetail={openPortfolioDetail}
+      renderPill={renderPill}
+      formatCurrency={formatCurrency}
+      formatNumber={formatNumber}
+      formatDate={formatDate}
+    />
   );
 
-  const renderPayments = () => {
-    const failedPayments = payments.filter((payment) => ['failed', 'declined'].includes(payment.status.toLowerCase()));
-
-    return (
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
-        <div className={`${cardClass} p-5`}>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-black tracking-tight text-slate-900">Payments Ledger</h3>
-            <span className="text-xs font-black uppercase tracking-wider text-slate-500">{payments.length} records</span>
-          </div>
-          <div className="max-h-[560px] overflow-auto space-y-2 pr-1">
-            {payments.map((payment) => (
-              <div key={payment.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-black text-slate-800">{formatCurrency(payment.amount)} {payment.currency}</p>
-                    <p className="text-xs text-slate-500 mt-1">User: {payment.user_id}</p>
-                  </div>
-                  {renderPill(payment.status)}
-                </div>
-                <p className="text-xs text-slate-500 mt-2">Provider: {payment.provider} • Attempted: {formatDate(payment.attempted_at)}</p>
-                {payment.failure_reason && <p className="text-xs font-semibold text-rose-600 mt-2">Failure: {payment.failure_reason}</p>}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-5">
-          <div className={`${cardClass} p-5`}>
-            <h3 className="text-lg font-black tracking-tight text-slate-900">Payments Risk Snapshot</h3>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Failures</p>
-                <p className="text-xl font-black text-rose-600 mt-2">{formatNumber(failedPayments.length)}</p>
-              </div>
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Subscriptions</p>
-                <p className="text-xl font-black text-slate-900 mt-2">{formatNumber(subscriptions.length)}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className={`${cardClass} p-5`}>
-            <h3 className="text-lg font-black tracking-tight text-slate-900">Subscription Monitoring</h3>
-            <div className="max-h-[420px] overflow-auto mt-4 space-y-2 pr-1">
-              {subscriptions.map((subscription) => (
-                <div key={subscription.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-black text-slate-800">{subscription.plan_code}</p>
-                    {renderPill(subscription.status)}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">{subscription.user_id}</p>
-                  <p className="text-xs font-semibold text-slate-600 mt-2">
-                    {formatCurrency(subscription.amount)} {subscription.currency} / {subscription.billing_cycle}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const renderPayments = () => (
+    <AdminPaymentsModule
+      payments={payments}
+      subscriptions={subscriptions}
+      renderPill={renderPill}
+      formatCurrency={formatCurrency}
+      formatNumber={formatNumber}
+      formatDate={formatDate}
+    />
+  );
 
   const renderCompliance = () => (
-    <div className={`${cardClass} p-5`}>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-black tracking-tight text-slate-900">KYC Review Queue</h3>
-        <span className="text-xs font-black uppercase tracking-wider text-slate-500">{kycQueue.length} records</span>
-      </div>
-
-      <div className="overflow-auto">
-        <table className="min-w-[920px] w-full text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              {['Customer', 'Status', 'Risk Score', 'Risk Band', 'Updated', 'Actions'].map((header) => (
-                <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {kycQueue.map((item) => (
-              <tr key={item.user_id} className="border-t border-slate-100">
-                <td className="px-3 py-3">
-                  <p className="font-black text-slate-800">{item.email || item.user_id}</p>
-                  <p className="text-xs text-slate-500">{item.user_id}</p>
-                </td>
-                <td className="px-3 py-3">{renderPill(item.status)}</td>
-                <td className="px-3 py-3 text-xs font-semibold text-slate-700">{item.risk_score}</td>
-                <td className="px-3 py-3 text-xs font-semibold text-slate-700">{item.risk_band || '-'}</td>
-                <td className="px-3 py-3 text-xs text-slate-500">{formatDate(item.updated_at)}</td>
-                <td className="px-3 py-3">
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await reviewKyc({ userId: item.user_id, status: 'approved', riskScore: item.risk_score, notes: 'Approved by admin' });
-                          setSuccess('KYC approved.');
-                          await loadCompliance();
-                        } catch (err) {
-                          setError((err as Error).message || 'KYC approve failed.');
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700 !px-2.5 !py-1.5`}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await reviewKyc({ userId: item.user_id, status: 'rejected', riskScore: item.risk_score, notes: 'Rejected by admin' });
-                          setSuccess('KYC rejected.');
-                          await loadCompliance();
-                        } catch (err) {
-                          setError((err as Error).message || 'KYC rejection failed.');
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700 !px-2.5 !py-1.5`}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <AdminComplianceModule
+      kycQueue={kycQueue}
+      renderPill={renderPill}
+      formatDate={formatDate}
+      onApprove={async (item) => {
+        setBusy(true);
+        try {
+          await reviewKyc({ userId: item.user_id, status: 'approved', riskScore: item.risk_score, notes: 'Approved by admin' });
+          setSuccess('KYC approved.');
+          await loadCompliance();
+        } catch (err) {
+          setError((err as Error).message || 'KYC approve failed.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onReject={async (item) => {
+        setBusy(true);
+        try {
+          await reviewKyc({ userId: item.user_id, status: 'rejected', riskScore: item.risk_score, notes: 'Rejected by admin' });
+          setSuccess('KYC rejected.');
+          await loadCompliance();
+        } catch (err) {
+          setError((err as Error).message || 'KYC rejection failed.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+    />
   );
 
   const renderFraud = () => (
-    <div className={`${cardClass} p-5`}>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-black tracking-tight text-slate-900">Fraud Monitoring Queue</h3>
-        <span className="text-xs font-black uppercase tracking-wider text-slate-500">{fraudQueue.length} flags</span>
-      </div>
-
-      <div className="overflow-auto">
-        <table className="min-w-[980px] w-full text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              {['Severity', 'Customer', 'Rule', 'Amount', 'Status', 'Actions'].map((header) => (
-                <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {fraudQueue.map((flag) => (
-              <tr key={flag.id} className="border-t border-slate-100">
-                <td className="px-3 py-3">{renderPill(flag.severity)}</td>
-                <td className="px-3 py-3">
-                  <p className="font-black text-slate-800">{flag.email || flag.user_id}</p>
-                  <p className="text-xs text-slate-500">{flag.user_id}</p>
-                </td>
-                <td className="px-3 py-3 text-xs font-semibold text-slate-700">{flag.rule_key}</td>
-                <td className="px-3 py-3 text-xs font-semibold text-slate-700">{flag.amount ? formatCurrency(flag.amount) : '-'}</td>
-                <td className="px-3 py-3">{renderPill(flag.status)}</td>
-                <td className="px-3 py-3">
-                  <button
-                    onClick={async () => {
-                      setBusy(true);
-                      try {
-                        await resolveFraudFlag(flag.id, 'resolved', 'Resolved via admin queue');
-                        setSuccess('Fraud flag resolved.');
-                        await loadFraud();
-                      } catch (err) {
-                        setError((err as Error).message || 'Could not resolve fraud flag.');
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                    className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700 !px-2.5 !py-1.5`}
-                  >
-                    Resolve
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <AdminFraudModule
+      fraudQueue={fraudQueue}
+      renderPill={renderPill}
+      formatCurrency={formatCurrency}
+      onResolve={async (flag) => {
+        setBusy(true);
+        try {
+          await resolveFraudFlag(flag.id, 'resolved', 'Resolved via admin queue');
+          setSuccess('Fraud flag resolved.');
+          await loadFraud();
+        } catch (err) {
+          setError((err as Error).message || 'Could not resolve fraud flag.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+    />
   );
 
   const renderSupport = () => (
-    <div className="space-y-5">
-      <div className={`${cardClass} p-4 flex flex-wrap items-center gap-2`}> 
-        <select
-          value={supportStatusFilter}
-          onChange={(event) => setSupportStatusFilter(event.target.value)}
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
-        >
-          <option value="all">All Tickets</option>
-          <option value="open">Open</option>
-          <option value="in_progress">In Progress</option>
-          <option value="waiting_user">Waiting User</option>
-          <option value="resolved">Resolved</option>
-          <option value="closed">Closed</option>
-        </select>
-        <button onClick={loadSupport} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>Refresh Tickets</button>
-      </div>
-
-      <div className={`${cardClass} overflow-hidden`}>
-        <div className="overflow-auto">
-          <table className="min-w-[1080px] w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                {['Ticket', 'Customer', 'Category', 'Priority', 'Status', 'Updated', 'Actions'].map((header) => (
-                  <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {supportTickets.map((ticket) => (
-                <tr key={ticket.id} className="border-t border-slate-100">
-                  <td className="px-3 py-3">
-                    <p className="font-black text-slate-800">#{ticket.ticketNumber}</p>
-                    <p className="text-xs text-slate-500">{ticket.subject}</p>
-                  </td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{ticket.userId || '-'}</td>
-                  <td className="px-3 py-3">{renderPill(ticket.category)}</td>
-                  <td className="px-3 py-3">{renderPill(ticket.priority)}</td>
-                  <td className="px-3 py-3">{renderPill(ticket.status)}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{formatDate(ticket.updatedAt)}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={async () => {
-                          setBusy(true);
-                          try {
-                            await updateSupportTicket(ticket.id, { status: 'in_progress' });
-                            setSuccess('Ticket moved to in_progress.');
-                            await loadSupport();
-                          } catch (err) {
-                            setError((err as Error).message || 'Could not update ticket.');
-                          } finally {
-                            setBusy(false);
-                          }
-                        }}
-                        className={`${buttonBase} border-amber-200 bg-amber-50 text-amber-700 !px-2.5 !py-1.5`}
-                      >
-                        In Progress
-                      </button>
-                      <button
-                        onClick={async () => {
-                          setBusy(true);
-                          try {
-                            await updateSupportTicket(ticket.id, { status: 'resolved', resolutionNote: 'Resolved in admin panel' });
-                            setSuccess('Ticket resolved.');
-                            await loadSupport();
-                          } catch (err) {
-                            setError((err as Error).message || 'Could not resolve ticket.');
-                          } finally {
-                            setBusy(false);
-                          }
-                        }}
-                        className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700 !px-2.5 !py-1.5`}
-                      >
-                        Resolve
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <AdminSupportModule
+      supportStatusFilter={supportStatusFilter}
+      supportTickets={supportTickets}
+      setSupportStatusFilter={setSupportStatusFilter}
+      onRefreshSupport={loadSupport}
+      onMoveInProgress={async (ticket) => {
+        setBusy(true);
+        try {
+          await updateSupportTicket(ticket.id, { status: 'in_progress' });
+          setSuccess('Ticket moved to in_progress.');
+          await loadSupport();
+        } catch (err) {
+          setError((err as Error).message || 'Could not update ticket.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onResolveTicket={async (ticket) => {
+        setBusy(true);
+        try {
+          await updateSupportTicket(ticket.id, { status: 'resolved', resolutionNote: 'Resolved in admin panel' });
+          setSuccess('Ticket resolved.');
+          await loadSupport();
+        } catch (err) {
+          setError((err as Error).message || 'Could not resolve ticket.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      renderPill={renderPill}
+      formatDate={formatDate}
+    />
   );
 
   const renderAccess = () => (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5">
-        <div className={`${cardClass} p-5`}>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-black tracking-tight text-slate-900">Workspace Users & Roles</h3>
-            <span className="text-xs font-black uppercase tracking-wider text-slate-500">{adminUsers.length} members</span>
-          </div>
+    <AdminAccessModule
+      busy={busy}
+      adminUsers={adminUsers}
+      adminRoles={adminRoles}
+      adminPermissions={adminPermissions}
+      adminForm={adminForm}
+      setAdminForm={setAdminForm}
+      twoFactorStatus={twoFactorStatus}
+      twoFactorSetup={twoFactorSetup}
+      totpCode={totpCode}
+      setTotpCode={setTotpCode}
+      secondFactorCode={secondFactorCode}
+      setSecondFactorCode={setSecondFactorCode}
+      recoveryCodesDraft={recoveryCodesDraft}
+      setRecoveryCodesDraft={setRecoveryCodesDraft}
+      sessionTargetUserId={sessionTargetUserId}
+      setSessionTargetUserId={setSessionTargetUserId}
+      securitySessions={securitySessions}
+      renderPill={renderPill}
+      formatDate={formatDate}
+      formatNumber={formatNumber}
+      onToggleActive={async (admin) => {
+        setBusy(true);
+        try {
+          await upsertAdminUserAccount({
+            userId: admin.userId,
+            roleId: admin.roleId,
+            isActive: !admin.isActive,
+            twoFactorRequired: admin.twoFactorRequired,
+            reason: admin.isActive ? 'manual_deactivate' : 'manual_activate',
+          });
+          setSuccess(`User ${admin.isActive ? 'deactivated' : 'activated'}.`);
+          await loadAccessModule();
+        } catch (err) {
+          setError((err as Error).message || 'Could not update user.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onToggleTwoFactorRequirement={async (admin) => {
+        setBusy(true);
+        try {
+          await upsertAdminUserAccount({
+            userId: admin.userId,
+            roleId: admin.roleId,
+            isActive: admin.isActive,
+            twoFactorRequired: !admin.twoFactorRequired,
+            reason: 'toggle_2fa_requirement',
+          });
+          setSuccess(`2FA requirement ${admin.twoFactorRequired ? 'removed' : 'enabled'} for user.`);
+          await loadAccessModule();
+        } catch (err) {
+          setError((err as Error).message || 'Could not update 2FA requirement.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onSaveMembership={async () => {
+        if (!adminForm.userId.trim() || !adminForm.roleId) {
+          setError('User UUID and role are required.');
+          return;
+        }
 
-          <div className="overflow-auto">
-            <table className="min-w-[980px] w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  {['User', 'Role', '2FA Required', '2FA Enabled', 'Active', 'Last Login', 'Actions'].map((header) => (
-                    <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {adminUsers.map((admin) => (
-                  <tr key={admin.userId} className="border-t border-slate-100">
-                    <td className="px-3 py-3">
-                      <p className="font-black text-slate-800">{admin.name || admin.email}</p>
-                      <p className="text-xs text-slate-500">{admin.email}</p>
-                    </td>
-                    <td className="px-3 py-3">{renderPill(admin.roleName)}</td>
-                    <td className="px-3 py-3">{renderPill(admin.twoFactorRequired ? 'required' : 'optional')}</td>
-                    <td className="px-3 py-3">{renderPill(admin.twoFactorEnabled ? 'enabled' : 'disabled')}</td>
-                    <td className="px-3 py-3">{renderPill(admin.isActive ? 'active' : 'inactive')}</td>
-                    <td className="px-3 py-3 text-xs text-slate-500">{formatDate(admin.lastLoginAt)}</td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        <button
-                          onClick={async () => {
-                            setBusy(true);
-                            try {
-                              await upsertAdminUserAccount({
-                                userId: admin.userId,
-                                roleId: admin.roleId,
-                                isActive: !admin.isActive,
-                                twoFactorRequired: admin.twoFactorRequired,
-                                reason: admin.isActive ? 'manual_deactivate' : 'manual_activate',
-                              });
-                              setSuccess(`User ${admin.isActive ? 'deactivated' : 'activated'}.`);
-                              await loadAccessModule();
-                            } catch (err) {
-                              setError((err as Error).message || 'Could not update user.');
-                            } finally {
-                              setBusy(false);
-                            }
-                          }}
-                          className={`${buttonBase} ${admin.isActive ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'} !px-2.5 !py-1.5`}
-                        >
-                          {admin.isActive ? 'Deactivate' : 'Activate'}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            setBusy(true);
-                            try {
-                              await upsertAdminUserAccount({
-                                userId: admin.userId,
-                                roleId: admin.roleId,
-                                isActive: admin.isActive,
-                                twoFactorRequired: !admin.twoFactorRequired,
-                                reason: 'toggle_2fa_requirement',
-                              });
-                              setSuccess(`2FA requirement ${admin.twoFactorRequired ? 'removed' : 'enabled'} for user.`);
-                              await loadAccessModule();
-                            } catch (err) {
-                              setError((err as Error).message || 'Could not update 2FA requirement.');
-                            } finally {
-                              setBusy(false);
-                            }
-                          }}
-                          className={`${buttonBase} border-slate-200 bg-white text-slate-700 !px-2.5 !py-1.5`}
-                        >
-                          {admin.twoFactorRequired ? 'Make Optional' : 'Require 2FA'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className={`${cardClass} p-5 h-fit`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900">Add / Update Workspace User</h3>
-          <p className="mt-2 text-xs text-slate-500 font-semibold">Assign one of: Admin, Manager, Analyst, Support.</p>
-
-          <div className="mt-4 space-y-3">
-            <input
-              value={adminForm.userId}
-              onChange={(event) => setAdminForm((prev) => ({ ...prev, userId: event.target.value }))}
-              placeholder="Workspace User UUID"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-            <select
-              value={adminForm.roleId}
-              onChange={(event) => setAdminForm((prev) => ({ ...prev, roleId: event.target.value }))}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            >
-              {adminRoles.map((role) => (
-                <option key={role.id} value={role.id}>{role.displayName}</option>
-              ))}
-            </select>
-            <label className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-600">
-              <input
-                type="checkbox"
-                checked={adminForm.isActive}
-                onChange={(event) => setAdminForm((prev) => ({ ...prev, isActive: event.target.checked }))}
-              />
-              Active
-            </label>
-            <label className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-600">
-              <input
-                type="checkbox"
-                checked={adminForm.twoFactorRequired}
-                onChange={(event) =>
-                  setAdminForm((prev) => ({ ...prev, twoFactorRequired: event.target.checked, twoFactorEnabled: event.target.checked }))
-                }
-              />
-              Require 2FA
-            </label>
-          </div>
-
-          <button
-            onClick={async () => {
-              if (!adminForm.userId.trim() || !adminForm.roleId) {
-                setError('User UUID and role are required.');
-                return;
-              }
-
-              setBusy(true);
-              try {
-                await upsertAdminUserAccount({
-                  userId: adminForm.userId.trim(),
-                  roleId: adminForm.roleId,
-                  isActive: adminForm.isActive,
-                  twoFactorRequired: adminForm.twoFactorRequired,
-                });
-                setSuccess('Workspace user saved.');
-                setAdminForm((prev) => ({ ...prev, userId: '' }));
-                await loadAccessModule();
-              } catch (err) {
-                setError((err as Error).message || 'Could not save workspace user.');
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className={`${buttonBase} mt-4 border-teal-200 bg-teal-50 text-teal-700`}
-          >
-            Save Membership
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900">Role Permission Matrix</h3>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Route + service/data layer checks use this workspace mapping.</p>
-          <div className="mt-4 space-y-3">
-            {adminRoles.map((role) => (
-              <div key={role.roleKey} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-black text-slate-900">{role.displayName}</p>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                    {(role.permissionKeys || []).length} permissions
-                  </span>
-                </div>
-                <p className="mt-1 text-xs font-semibold text-slate-500">{role.description || 'No description'}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {(role.permissionKeys || []).slice(0, 10).map((permission) => (
-                    <span key={`${role.roleKey}-${permission}`} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600">
-                      {permission}
-                    </span>
-                  ))}
-                  {(role.permissionKeys || []).length > 10 && (
-                    <span className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-500">
-                      +{(role.permissionKeys || []).length - 10} more
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-            {!adminRoles.length && (
-              <p className="text-xs font-semibold text-slate-500">No role data available.</p>
-            )}
-          </div>
-          <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-3">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Defined Permissions</p>
-            <p className="mt-1 text-lg font-black text-slate-900">{formatNumber(adminPermissions.length)}</p>
-          </div>
-        </div>
-
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900">Security Settings (Your Account)</h3>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">2FA Status</p>
-              <p className="mt-1 text-sm font-black text-slate-900">{twoFactorStatus?.status || 'disabled'}</p>
-            </div>
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Recovery Codes Left</p>
-              <p className="mt-1 text-sm font-black text-slate-900">{formatNumber(twoFactorStatus?.recoveryCodesRemaining || 0)}</p>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  const setup = await startAdminTwoFactorSetup();
-                  setTwoFactorSetup(setup);
-                  setRecoveryCodesDraft(setup.recoveryCodes.join('\n'));
-                  setTotpCode('');
-                  setSuccess('TOTP setup generated. Save recovery codes before verifying.');
-                  const status = await getAdminTwoFactorStatus();
-                  setTwoFactorStatus(status);
-                } catch (err) {
-                  setError((err as Error).message || 'Could not start 2FA setup.');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}
-            >
-              Generate TOTP Setup
-            </button>
-            <button
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await disableAdminTwoFactor('manual_disable_from_admin_panel');
-                  setTwoFactorSetup(null);
-                  setRecoveryCodesDraft('');
-                  setTotpCode('');
-                  setSecondFactorCode('');
-                  setTwoFactorStatus(await getAdminTwoFactorStatus());
-                  setSuccess('2FA disabled for current admin.');
-                } catch (err) {
-                  setError((err as Error).message || 'Could not disable 2FA.');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700`}
-            >
-              Disable 2FA
-            </button>
-          </div>
-
-          {twoFactorSetup && (
-            <div className="mt-4 rounded-2xl border border-teal-100 bg-teal-50 p-3 space-y-2">
-              <p className="text-[10px] font-black uppercase tracking-widest text-teal-700">TOTP Secret</p>
-              <p className="text-sm font-black text-teal-900 break-all">{twoFactorSetup.secret}</p>
-              <a href={twoFactorSetup.otpAuthUrl} className="text-xs font-semibold text-teal-700 underline">
-                Open in authenticator URI handler
-              </a>
-            </div>
-          )}
-
-          <div className="mt-4 space-y-2">
-            <input
-              value={totpCode}
-              onChange={(event) => setTotpCode(event.target.value)}
-              placeholder="Enter 6-digit code to enable 2FA"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-            <button
-              onClick={async () => {
-                if (!totpCode.trim()) {
-                  setError('Enter the TOTP code to enable 2FA.');
-                  return;
-                }
-                setBusy(true);
-                try {
-                  const status = await confirmAdminTwoFactorSetup(totpCode.trim());
-                  setTwoFactorStatus(status);
-                  setTotpCode('');
-                  setSuccess('2FA enabled successfully.');
-                  await loadAccessModule();
-                } catch (err) {
-                  setError((err as Error).message || 'Could not confirm 2FA setup.');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700`}
-            >
-              Verify & Enable 2FA
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <input
-              value={secondFactorCode}
-              onChange={(event) => setSecondFactorCode(event.target.value)}
-              placeholder="Verify current session using TOTP or recovery code"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-            <button
-              onClick={async () => {
-                if (!secondFactorCode.trim()) {
-                  setError('Enter a TOTP or recovery code.');
-                  return;
-                }
-                setBusy(true);
-                try {
-                  const status = await verifyAdminSecondFactor(secondFactorCode.trim());
-                  setTwoFactorStatus(status);
-                  setSecondFactorCode('');
-                  setSuccess('Session verified with second factor.');
-                } catch (err) {
-                  setError((err as Error).message || 'Could not verify second factor.');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className={`${buttonBase} border-slate-200 bg-white text-slate-700`}
-            >
-              Verify Current Session
-            </button>
-          </div>
-
-          <div className="mt-4">
-            <textarea
-              value={recoveryCodesDraft}
-              onChange={(event) => setRecoveryCodesDraft(event.target.value)}
-              rows={5}
-              placeholder="Recovery codes (one per line)"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-            />
-            <button
-              onClick={async () => {
-                const codes = recoveryCodesDraft
-                  .split('\n')
-                  .map((row) => row.trim())
-                  .filter(Boolean);
-                if (codes.length < 4) {
-                  setError('Enter at least 4 recovery codes.');
-                  return;
-                }
-                setBusy(true);
-                try {
-                  await regenerateAdminRecoveryCodes(codes);
-                  setTwoFactorStatus(await getAdminTwoFactorStatus());
-                  setSuccess('Recovery codes rotated.');
-                } catch (err) {
-                  setError((err as Error).message || 'Could not rotate recovery codes.');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className={`${buttonBase} mt-2 border-slate-200 bg-white text-slate-700`}
-            >
-              Save Recovery Codes
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className={`${cardClass} p-5`}>
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
-          <h3 className="text-lg font-black tracking-tight text-slate-900">Session Monitoring</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={sessionTargetUserId}
-              onChange={(event) => setSessionTargetUserId(event.target.value)}
-              placeholder="Filter by user UUID (optional)"
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 min-w-[280px]"
-            />
-            <button onClick={loadAccessModule} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>
-              Refresh Sessions
-            </button>
-          </div>
-        </div>
-        <div className="overflow-auto">
-          <table className="min-w-[1080px] w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                {['User', 'Role', 'Device', 'IP', 'Started', 'Last Seen', '2FA Verified', 'State', 'Actions'].map((header) => (
-                  <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {securitySessions.map((session) => (
-                <tr key={session.id} className="border-t border-slate-100">
-                  <td className="px-3 py-3">
-                    <p className="font-black text-slate-800">{session.fullName || session.email || session.userId}</p>
-                    <p className="text-xs text-slate-500">{session.email || session.userId}</p>
-                  </td>
-                  <td className="px-3 py-3">{renderPill(session.roleKey || '-')}</td>
-                  <td className="px-3 py-3 text-xs text-slate-600">{session.deviceName || '-'}</td>
-                  <td className="px-3 py-3 text-xs text-slate-600">{session.ipAddress || '-'}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{formatDate(session.startedAt)}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{formatDate(session.lastSeenAt)}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{formatDate(session.twoFactorVerifiedAt)}</td>
-                  <td className="px-3 py-3">{renderPill(session.revokedAt ? 'revoked' : 'active')}</td>
-                  <td className="px-3 py-3">
-                    <button
-                      disabled={Boolean(session.revokedAt)}
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await revokeAdminSecuritySession(session.id, 'manual_revoke_from_access_panel');
-                          setSuccess('Session revoked.');
-                          await loadAccessModule();
-                        } catch (err) {
-                          setError((err as Error).message || 'Could not revoke session.');
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700 !px-2.5 !py-1.5`}
-                    >
-                      Revoke
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+        setBusy(true);
+        try {
+          await upsertAdminUserAccount({
+            userId: adminForm.userId.trim(),
+            roleId: adminForm.roleId,
+            isActive: adminForm.isActive,
+            twoFactorRequired: adminForm.twoFactorRequired,
+          });
+          setSuccess('Workspace user saved.');
+          setAdminForm((prev) => ({ ...prev, userId: '' }));
+          await loadAccessModule();
+        } catch (err) {
+          setError((err as Error).message || 'Could not save workspace user.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onGenerateTotpSetup={async () => {
+        setBusy(true);
+        try {
+          const setup = await startAdminTwoFactorSetup();
+          setTwoFactorSetup(setup);
+          setRecoveryCodesDraft(setup.recoveryCodes.join('\n'));
+          setTotpCode('');
+          setSuccess('TOTP setup generated. Save recovery codes before verifying.');
+          const status = await getAdminTwoFactorStatus();
+          setTwoFactorStatus(status);
+        } catch (err) {
+          setError((err as Error).message || 'Could not start 2FA setup.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onDisableTwoFactor={async () => {
+        setBusy(true);
+        try {
+          await disableAdminTwoFactor('manual_disable_from_admin_panel');
+          setTwoFactorSetup(null);
+          setRecoveryCodesDraft('');
+          setTotpCode('');
+          setSecondFactorCode('');
+          setTwoFactorStatus(await getAdminTwoFactorStatus());
+          setSuccess('2FA disabled for current admin.');
+        } catch (err) {
+          setError((err as Error).message || 'Could not disable 2FA.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onVerifyEnableTwoFactor={async () => {
+        if (!totpCode.trim()) {
+          setError('Enter the TOTP code to enable 2FA.');
+          return;
+        }
+        setBusy(true);
+        try {
+          const status = await confirmAdminTwoFactorSetup(totpCode.trim());
+          setTwoFactorStatus(status);
+          setTotpCode('');
+          setSuccess('2FA enabled successfully.');
+          await loadAccessModule();
+        } catch (err) {
+          setError((err as Error).message || 'Could not confirm 2FA setup.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onVerifyCurrentSession={async () => {
+        if (!secondFactorCode.trim()) {
+          setError('Enter a TOTP or recovery code.');
+          return;
+        }
+        setBusy(true);
+        try {
+          const status = await verifyAdminSecondFactor(secondFactorCode.trim());
+          setTwoFactorStatus(status);
+          setSecondFactorCode('');
+          setSuccess('Session verified with second factor.');
+        } catch (err) {
+          setError((err as Error).message || 'Could not verify second factor.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onSaveRecoveryCodes={async () => {
+        const codes = recoveryCodesDraft
+          .split('\n')
+          .map((row) => row.trim())
+          .filter(Boolean);
+        if (codes.length < 4) {
+          setError('Enter at least 4 recovery codes.');
+          return;
+        }
+        setBusy(true);
+        try {
+          await regenerateAdminRecoveryCodes(codes);
+          setTwoFactorStatus(await getAdminTwoFactorStatus());
+          setSuccess('Recovery codes rotated.');
+        } catch (err) {
+          setError((err as Error).message || 'Could not rotate recovery codes.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onRefreshSessions={loadAccessModule}
+      onRevokeSession={async (session) => {
+        setBusy(true);
+        try {
+          await revokeAdminSecuritySession(session.id, 'manual_revoke_from_access_panel');
+          setSuccess('Session revoked.');
+          await loadAccessModule();
+        } catch (err) {
+          setError((err as Error).message || 'Could not revoke session.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+    />
   );
 
   const renderAudit = () => (
-    <div className="space-y-5">
-      <div className={`${cardClass} p-4 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between`}>
-        <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 w-full sm:max-w-md">
-          <Search size={16} className="text-slate-400" />
-          <input
-            className="w-full bg-transparent text-sm font-semibold text-slate-700 outline-none"
-            placeholder="Filter by action"
-            value={auditActionFilter}
-            onChange={(event) => setAuditActionFilter(event.target.value)}
-          />
-        </div>
-        <button onClick={loadAudit} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>
-          Apply Filter
-        </button>
-      </div>
-
-      <div className={`${cardClass} overflow-hidden`}>
-        <div className="overflow-auto">
-          <table className="min-w-[1080px] w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                {['Timestamp', 'Action', 'Entity', 'Entity Id', 'Admin User', 'Reason'].map((header) => (
-                  <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {auditLogs.map((log) => (
-                <tr key={log.id} className="border-t border-slate-100">
-                  <td className="px-3 py-3 text-xs text-slate-500">{formatDate(log.createdAt)}</td>
-                  <td className="px-3 py-3">{renderPill(log.action)}</td>
-                  <td className="px-3 py-3 text-xs font-semibold text-slate-600">{log.entityType}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{log.entityId || '-'}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{log.adminUserId}</td>
-                  <td className="px-3 py-3 text-xs text-slate-500">{log.reason || '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <AdminAuditModule
+      auditActionFilter={auditActionFilter}
+      setAuditActionFilter={setAuditActionFilter}
+      auditLogs={auditLogs}
+      loadAudit={loadAudit}
+      renderPill={renderPill}
+      formatDate={formatDate}
+    />
   );
 
   const renderAnalytics = () => (
-    <div className="space-y-5">
-      <div className={`${cardClass} p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Window</label>
-          <select
-            value={analyticsDays}
-            onChange={(event) => setAnalyticsDays(Number(event.target.value || 365))}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
-          >
-            <option value={30}>30 Days</option>
-            <option value={60}>60 Days</option>
-            <option value={90}>90 Days</option>
-            <option value={180}>180 Days</option>
-            <option value={365}>365 Days</option>
-          </select>
-          <button onClick={loadAnalytics} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>
-            Refresh Analytics
-          </button>
-        </div>
-        <p className="text-xs font-semibold text-slate-500">Growth deltas compare latest 30 days vs previous 30 days.</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">New Users</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(analytics?.totals.newUsers || 0)}</p>
-        </div>
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Transactions</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(analytics?.totals.txnCount || 0)}</p>
-        </div>
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Volume</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(analytics?.totals.txnAmount || 0)}</p>
-        </div>
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Revenue</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(analytics?.totals.revenue || 0)}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className={`rounded-3xl border p-4 ${toneClass(toneFromDelta(analyticsGrowth?.deltas.newUsersPct ?? null))}`}>
-          <p className="text-[10px] font-black uppercase tracking-widest">Acquisition Delta</p>
-          <p className="mt-2 text-2xl font-black">{formatDeltaPct(analyticsGrowth?.deltas.newUsersPct ?? null)}</p>
-          <p className="mt-2 text-xs font-semibold opacity-90">
-            {analyticsGrowth ? `${formatNumber(analyticsGrowth.current.newUsers)} vs ${formatNumber(analyticsGrowth.previous.newUsers)} users` : 'No baseline yet'}
-          </p>
-        </div>
-        <div className={`rounded-3xl border p-4 ${toneClass(toneFromDelta(analyticsGrowth?.deltas.revenuePct ?? null))}`}>
-          <p className="text-[10px] font-black uppercase tracking-widest">Revenue Delta</p>
-          <p className="mt-2 text-2xl font-black">{formatDeltaPct(analyticsGrowth?.deltas.revenuePct ?? null)}</p>
-          <p className="mt-2 text-xs font-semibold opacity-90">
-            {analyticsGrowth ? `${formatCurrency(analyticsGrowth.current.revenue)} vs ${formatCurrency(analyticsGrowth.previous.revenue)}` : 'No baseline yet'}
-          </p>
-        </div>
-        <div className={`rounded-3xl border p-4 ${toneClass(toneFromDelta(analyticsGrowth?.deltas.dauPct ?? null))}`}>
-          <p className="text-[10px] font-black uppercase tracking-widest">Avg DAU Delta</p>
-          <p className="mt-2 text-2xl font-black">{formatDeltaPct(analyticsGrowth?.deltas.dauPct ?? null)}</p>
-          <p className="mt-2 text-xs font-semibold opacity-90">
-            {analyticsGrowth ? `${formatNumber(round(analyticsGrowth.current.avgDau, 0))} vs ${formatNumber(round(analyticsGrowth.previous.avgDau, 0))}` : 'No baseline yet'}
-          </p>
-        </div>
-        <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-slate-700">
-          <p className="text-[10px] font-black uppercase tracking-widest">Revenue Efficiency</p>
-          <p className="mt-2 text-xl font-black">{formatCurrency(analyticsGrowth?.efficiency.revenuePerTxn || 0)} / txn</p>
-          <p className="mt-2 text-xs font-semibold">{formatCurrency(analyticsGrowth?.efficiency.revenuePerDailyActive || 0)} per avg daily active user</p>
-        </div>
-      </div>
-
-      <div className={`${cardClass} p-5`}>
-        <h3 className="text-lg font-black tracking-tight text-slate-900 mb-4">Growth Curves</h3>
-        <div className="h-80 w-full">
-          <SafeResponsiveContainer>
-            <LineChart data={analytics?.series || []} margin={{ top: 10, right: 12, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#64748b' }} />
-              <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
-              <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="newUsers" stroke="#0d9488" strokeWidth={2.3} dot={false} name="New Users" />
-              <Line type="monotone" dataKey="txnCount" stroke="#f43f5e" strokeWidth={2.3} dot={false} name="Transactions" />
-              <Line type="monotone" dataKey="dau" stroke="#6366f1" strokeWidth={2.2} dot={false} name="DAU" />
-              <Line type="monotone" dataKey="revenue" stroke="#eab308" strokeWidth={2.2} dot={false} name="Revenue" />
-            </LineChart>
-          </SafeResponsiveContainer>
-        </div>
-      </div>
-    </div>
+    <AdminAnalyticsModule
+      analyticsDays={analyticsDays}
+      setAnalyticsDays={setAnalyticsDays}
+      analytics={analytics}
+      analyticsGrowth={analyticsGrowth}
+      loadAnalytics={loadAnalytics}
+      toneClass={toneClass}
+      toneFromDelta={toneFromDelta}
+      formatDeltaPct={formatDeltaPct}
+      formatNumber={formatNumber}
+      formatCurrency={formatCurrency}
+    />
   );
 
   const blogSeo = useMemo(
@@ -2458,243 +1770,19 @@ const AdminPage: React.FC = () => {
   );
 
   const renderUsage = () => (
-    <div className="space-y-5">
-      <div className={`${cardClass} p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Window</label>
-          <select
-            value={usageDays}
-            onChange={(event) => setUsageDays(Number(event.target.value || 30))}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
-          >
-            <option value={7}>7 Days</option>
-            <option value={30}>30 Days</option>
-            <option value={60}>60 Days</option>
-            <option value={90}>90 Days</option>
-            <option value={180}>180 Days</option>
-            <option value={365}>365 Days</option>
-          </select>
-          <button onClick={loadUsage} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>
-            Refresh Usage
-          </button>
-        </div>
-        <p className="text-xs font-semibold text-slate-500">Last refreshed: {formatDate(usageReport?.generatedAt)}</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Events</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(usageReport?.totals.totalEvents || 0)}</p>
-        </div>
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Unique Users</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(usageReport?.totals.uniqueUsers || 0)}</p>
-        </div>
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Avg Events / User</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">{(usageReport?.totals.avgEventsPerUser || 0).toFixed(2)}</p>
-        </div>
-        <div className={`${cardClass} p-4`}>
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Goal + Asset Actions</p>
-          <p className="mt-2 text-2xl font-black text-slate-900">
-            {formatNumber((usageReport?.totals.goalCreates || 0) + (usageReport?.totals.assetAdds || 0))}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className={`rounded-3xl border p-4 ${
-          usageGrowth?.activationRatePct == null
-            ? toneClass('flat')
-            : usageGrowth.activationRatePct >= 35
-            ? toneClass('up')
-            : usageGrowth.activationRatePct < 20
-            ? toneClass('down')
-            : toneClass('flat')
-        }`}>
-          <p className="text-[10px] font-black uppercase tracking-widest">Activation Rate</p>
-          <p className="mt-2 text-2xl font-black">
-            {usageGrowth?.activationRatePct == null ? 'N/A' : `${round(usageGrowth.activationRatePct, 1).toFixed(1)}%`}
-          </p>
-          <p className="mt-2 text-xs font-semibold opacity-90">
-            {usageGrowth
-              ? `${formatNumber(usageGrowth.goalUsers)} goal creators from ${formatNumber(usageGrowth.onboardingUsers)} onboarded users`
-              : 'No activation baseline yet'}
-          </p>
-        </div>
-        <div className={`rounded-3xl border p-4 ${
-          usageGrowth?.assetAdoptionRatePct == null
-            ? toneClass('flat')
-            : usageGrowth.assetAdoptionRatePct >= 25
-            ? toneClass('up')
-            : usageGrowth.assetAdoptionRatePct < 10
-            ? toneClass('down')
-            : toneClass('flat')
-        }`}>
-          <p className="text-[10px] font-black uppercase tracking-widest">Asset Adoption</p>
-          <p className="mt-2 text-2xl font-black">
-            {usageGrowth?.assetAdoptionRatePct == null ? 'N/A' : `${round(usageGrowth.assetAdoptionRatePct, 1).toFixed(1)}%`}
-          </p>
-          <p className="mt-2 text-xs font-semibold opacity-90">
-            {usageGrowth
-              ? `${formatNumber(usageGrowth.assetUsers)} users added assets`
-              : 'No adoption baseline yet'}
-          </p>
-        </div>
-        <div className={`rounded-3xl border p-4 ${toneClass(toneFromDelta(usageGrowth?.activeUsersMomentumPct ?? null))}`}>
-          <p className="text-[10px] font-black uppercase tracking-widest">Weekly Active Trend</p>
-          <p className="mt-2 text-2xl font-black">{formatDeltaPct(usageGrowth?.activeUsersMomentumPct ?? null)}</p>
-          <p className="mt-2 text-xs font-semibold opacity-90">
-            {usageGrowth
-              ? `${round(usageGrowth.currentAvgUsers7d, 1).toFixed(1)} avg users/day vs ${round(usageGrowth.previousAvgUsers7d, 1).toFixed(1)}`
-              : 'Need two weeks of trend data'}
-          </p>
-        </div>
-        <div className={`rounded-3xl border p-4 ${
-          usageGrowth
-            ? usageGrowth.powerUserConcentrationPct <= 35
-              ? toneClass('up')
-              : usageGrowth.powerUserConcentrationPct >= 60
-              ? toneClass('down')
-              : toneClass('flat')
-            : toneClass('flat')
-        }`}>
-          <p className="text-[10px] font-black uppercase tracking-widest">Power User Concentration</p>
-          <p className="mt-2 text-2xl font-black">
-            {usageGrowth ? `${round(usageGrowth.powerUserConcentrationPct, 1).toFixed(1)}%` : 'N/A'}
-          </p>
-          <p className="mt-2 text-xs font-semibold opacity-90">Event share generated by the top 5 active users</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5">
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900 mb-4">Daily Feature Activity</h3>
-          <div className="h-80 w-full">
-            <SafeResponsiveContainer>
-              <LineChart data={usageReport?.trends || []} margin={{ top: 10, right: 12, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#64748b' }} />
-                <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#64748b' }} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#64748b' }} />
-                <Tooltip />
-                <Legend />
-                <Line yAxisId="left" type="monotone" dataKey="events" stroke="#0d9488" strokeWidth={2.4} dot={false} name="Events" />
-                <Line yAxisId="right" type="monotone" dataKey="users" stroke="#6366f1" strokeWidth={2.2} dot={false} name="Active Users" />
-              </LineChart>
-            </SafeResponsiveContainer>
-          </div>
-        </div>
-
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900">Goal Funnel Signals</h3>
-          <div className="mt-4 space-y-2.5">
-            {(usageReport?.funnel || []).map((row) => (
-              <div key={row.step} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <p className="text-xs font-black uppercase tracking-widest text-slate-600">{row.step}</p>
-                <p className="mt-1 text-xl font-black text-slate-900">{formatNumber(row.users)}</p>
-              </div>
-            ))}
-            {!(usageReport?.funnel || []).length && (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm font-semibold text-slate-500">
-                No funnel events captured yet.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900 mb-3">Top Features Used</h3>
-          <div className="h-72 w-full">
-            <SafeResponsiveContainer>
-              <BarChart data={(usageReport?.topEvents || []).slice(0, 10)} margin={{ top: 10, right: 12, left: -8, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="eventName" tick={{ fontSize: 9, fill: '#64748b' }} angle={-20} textAnchor="end" height={60} />
-                <YAxis tick={{ fontSize: 10, fill: '#64748b' }} />
-                <Tooltip />
-                <Bar dataKey="events" fill="#0d9488" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </SafeResponsiveContainer>
-          </div>
-        </div>
-
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900 mb-3">Module Opens (View-level)</h3>
-          <div className="max-h-72 overflow-auto space-y-2 pr-1">
-            {(usageReport?.moduleUsage || []).map((row) => (
-              <div key={row.module} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-black text-slate-800">{row.module}</p>
-                  <p className="text-xs font-semibold text-slate-500">{row.avgPerUser.toFixed(2)} / user</p>
-                </div>
-                <p className="mt-1 text-xs font-semibold text-slate-600">
-                  {formatNumber(row.opens)} opens • {formatNumber(row.users)} users
-                </p>
-              </div>
-            ))}
-            {!(usageReport?.moduleUsage || []).length && (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm font-semibold text-slate-500">
-                Module activity will appear once events are captured.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900 mb-3">Power Users</h3>
-          <div className="overflow-auto">
-            <table className="min-w-[640px] w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  {['User', 'Events', 'Top Action', 'Last Seen'].map((header) => (
-                    <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(usageReport?.powerUsers || []).map((row) => (
-                  <tr key={row.userId} className="border-t border-slate-100">
-                    <td className="px-3 py-3">
-                      <p className="font-black text-slate-800 text-sm">{row.name || row.email}</p>
-                      <p className="text-xs text-slate-500">{row.email}</p>
-                    </td>
-                    <td className="px-3 py-3 text-xs font-semibold text-slate-700">{formatNumber(row.events)}</td>
-                    <td className="px-3 py-3 text-xs font-semibold text-slate-700">{row.topEvent || '-'}</td>
-                    <td className="px-3 py-3 text-xs text-slate-500">{formatDate(row.lastEventAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900 mb-3">Recent Customer Events</h3>
-          <div className="max-h-80 overflow-auto space-y-2 pr-1">
-            {(usageReport?.recentActivity || []).map((row, idx) => (
-              <div key={`${row.eventTime}-${idx}`} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-black text-slate-800">{row.eventName}</p>
-                    <p className="text-xs text-slate-500">{row.email || row.userId || 'Unknown user'}</p>
-                  </div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{formatDate(row.eventTime)}</span>
-                </div>
-              </div>
-            ))}
-            {!(usageReport?.recentActivity || []).length && (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm font-semibold text-slate-500">
-                No events yet.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+    <AdminUsageModule
+      usageDays={usageDays}
+      setUsageDays={setUsageDays}
+      usageReport={usageReport}
+      usageGrowth={usageGrowth}
+      loadUsage={loadUsage}
+      toneClass={toneClass}
+      toneFromDelta={toneFromDelta}
+      formatDeltaPct={formatDeltaPct}
+      formatNumber={formatNumber}
+      formatDate={formatDate}
+      round={round}
+    />
   );
 
   const renderBehavior = () => {
@@ -2736,7 +1824,7 @@ const AdminPage: React.FC = () => {
           <p className="text-xs font-semibold text-slate-500">Generated: {formatDate(behaviorReport.generatedAt)}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-5 gap-4">
           <div className={`${cardClass} p-4`}>
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Events</p>
             <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(behaviorReport.kpis.totalEvents)}</p>
@@ -2761,11 +1849,11 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Behavioral Cohorts</h3>
             <div className="overflow-auto mt-3">
-              <table className="min-w-[700px] w-full text-sm">
+              <table className="min-w-[620px] lg:min-w-[700px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Cohort', 'Users', 'W1', 'W4', 'Churn'].map((header) => (
@@ -2804,11 +1892,11 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Path Analysis</h3>
             <div className="overflow-auto mt-3">
-              <table className="min-w-[700px] w-full text-sm">
+              <table className="min-w-[620px] lg:min-w-[700px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Path', 'Users', 'Share', 'Gap (min)'].map((header) => (
@@ -2847,11 +1935,11 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Audience & Traffic</h3>
             <div className="overflow-auto mt-3">
-              <table className="min-w-[700px] w-full text-sm">
+              <table className="min-w-[620px] lg:min-w-[700px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Source', 'Sessions', 'Users', 'Conversion', 'Bounce Risk'].map((header) => (
@@ -2877,7 +1965,7 @@ const AdminPage: React.FC = () => {
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Cross-Platform + A/B Impact</h3>
             <div className="overflow-auto mt-3">
-              <table className="min-w-[760px] w-full text-sm">
+              <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Metric', 'Users', 'Events/Sample', 'Conversion', 'Extra'].map((header) => (
@@ -2910,11 +1998,11 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_0.9fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_0.9fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Heatmaps, Session Replay, Issues</h3>
             <div className="overflow-auto mt-3">
-              <table className="min-w-[880px] w-full text-sm">
+              <table className="min-w-[620px] xl:min-w-[820px] 2xl:min-w-[880px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Type', 'Label', 'Metric 1', 'Metric 2', 'Metric 3'].map((header) => (
@@ -3007,6 +2095,13 @@ const AdminPage: React.FC = () => {
     }
 
     const pipelineStages = ['new', 'qualified', 'discovery', 'proposal', 'negotiation', 'won', 'lost'];
+    const complaintStatusOptions = ['open', 'in_progress', 'waiting_user', 'resolved', 'closed'];
+    const complaintPriorityOptions = ['low', 'medium', 'high', 'urgent'];
+    const filteredComplaints = crmReport.complaints.filter((ticket) => {
+      if (crmComplaintStatusFilter !== 'all' && ticket.status !== crmComplaintStatusFilter) return false;
+      if (crmComplaintPriorityFilter !== 'all' && ticket.priority !== crmComplaintPriorityFilter) return false;
+      return true;
+    });
 
     return (
       <div className="space-y-5">
@@ -3031,18 +2126,20 @@ const AdminPage: React.FC = () => {
           <p className="text-xs font-semibold text-slate-500">Generated: {formatDate(crmReport.generatedAt)}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-8 gap-4">
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Contacts</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.contacts)}</p></div>
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Leads</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.leads)}</p></div>
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Deals</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.deals)}</p></div>
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Pipeline</p><p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(crmReport.kpis.openPipelineValue)}</p></div>
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Email Open</p><p className="mt-2 text-2xl font-black text-slate-900">{formatPct(crmReport.kpis.emailOpenRatePct)}</p></div>
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Automations</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.workflowsActive)}</p></div>
+          <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Open Complaints</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.openComplaints)}</p><p className="mt-1 text-xs text-slate-500">{formatNumber(crmReport.kpis.complaintTickets)} total</p></div>
+          <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">High Priority</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.highPriorityComplaints)}</p><p className="mt-1 text-xs text-slate-500">{formatNumber(crmReport.kpis.resolvedComplaints)} resolved</p></div>
         </div>
 
         <div className={`${cardClass} p-5`}>
           <h3 className="text-lg font-black tracking-tight text-slate-900">Deal Pipeline Board</h3>
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-3">
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 2xl:grid-cols-7 gap-3">
             {pipelineStages.map((stage) => {
               const deals = crmReport.deals.filter((deal) => deal.stage.toLowerCase() === stage).slice(0, 4);
               return (
@@ -3083,10 +2180,98 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Quick Actions</h3>
             <div className="mt-3 space-y-3">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Create Customer Complaint Ticket</p>
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <input
+                    value={crmComplaintForm.userId}
+                    onChange={(event) => setCrmComplaintForm((prev) => ({ ...prev, userId: event.target.value }))}
+                    placeholder="Customer user UUID"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                  />
+                  <input
+                    value={crmComplaintForm.subject}
+                    onChange={(event) => setCrmComplaintForm((prev) => ({ ...prev, subject: event.target.value }))}
+                    placeholder="Complaint subject"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                  />
+                  <select
+                    value={crmComplaintForm.priority}
+                    onChange={(event) => setCrmComplaintForm((prev) => ({ ...prev, priority: event.target.value }))}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                  >
+                    {complaintPriorityOptions.map((priority) => (
+                      <option key={priority} value={priority}>
+                        {priority}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={crmComplaintForm.assignedTo}
+                    onChange={(event) => setCrmComplaintForm((prev) => ({ ...prev, assignedTo: event.target.value }))}
+                    placeholder="Assign to (admin UUID, optional)"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                  />
+                </div>
+                <textarea
+                  value={crmComplaintForm.description}
+                  onChange={(event) => setCrmComplaintForm((prev) => ({ ...prev, description: event.target.value }))}
+                  placeholder="Complaint details / customer statement"
+                  rows={3}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                />
+                <input
+                  value={crmComplaintForm.tags}
+                  onChange={(event) => setCrmComplaintForm((prev) => ({ ...prev, tags: event.target.value }))}
+                  placeholder="Tags (comma separated): billing, delay, service"
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                />
+                <button
+                  onClick={async () => {
+                    if (!crmComplaintForm.userId.trim()) {
+                      setError('Customer user UUID is required.');
+                      return;
+                    }
+                    if (!crmComplaintForm.subject.trim()) {
+                      setError('Complaint subject is required.');
+                      return;
+                    }
+                    setBusy(true);
+                    try {
+                      await createCrmComplaintTicket({
+                        userId: crmComplaintForm.userId.trim(),
+                        subject: crmComplaintForm.subject.trim(),
+                        description: crmComplaintForm.description.trim(),
+                        priority: crmComplaintForm.priority,
+                        assignedTo: crmComplaintForm.assignedTo.trim() || null,
+                        tags: crmComplaintForm.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+                      });
+                      setSuccess('Complaint ticket created.');
+                      setCrmComplaintForm({
+                        userId: '',
+                        subject: '',
+                        description: '',
+                        priority: 'medium',
+                        assignedTo: '',
+                        tags: '',
+                      });
+                      await loadCrm();
+                    } catch (err) {
+                      setError((err as Error).message || 'Could not create complaint ticket.');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className={`${buttonBase} mt-2 border-teal-200 bg-teal-50 text-teal-700`}
+                >
+                  Create Complaint Ticket
+                </button>
+              </div>
+
               <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Create Lead</p>
                 <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -3292,11 +2477,161 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+        <div className={`${cardClass} p-5`}>
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-black tracking-tight text-slate-900">Customer Complaint Tracker</h3>
+              <p className="text-xs font-semibold text-slate-500 mt-1">
+                Track complaint lifecycle from registration to closure in CRM.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={crmComplaintStatusFilter}
+                onChange={(event) => setCrmComplaintStatusFilter(event.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
+              >
+                <option value="all">All Status</option>
+                {complaintStatusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={crmComplaintPriorityFilter}
+                onChange={(event) => setCrmComplaintPriorityFilter(event.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
+              >
+                <option value="all">All Priority</option>
+                {complaintPriorityOptions.map((priority) => (
+                  <option key={priority} value={priority}>
+                    {priority}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-auto mt-3">
+            <table className="min-w-[700px] xl:min-w-[960px] 2xl:min-w-[1260px] w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  {['Ticket', 'Customer', 'Subject', 'Priority', 'Status', 'Assigned', 'Updated', 'Actions'].map((header) => (
+                    <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredComplaints.map((ticket) => (
+                  <tr key={ticket.id} className="border-t border-slate-100">
+                    <td className="px-3 py-3">
+                      <p className="text-sm font-black text-slate-800">#{ticket.ticketNumber}</p>
+                      <p className="text-xs text-slate-500">{ticket.userId || '-'}</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <p className="text-sm font-black text-slate-800">{ticket.customerName || 'Unknown User'}</p>
+                      <p className="text-xs text-slate-500">{ticket.customerEmail || '-'}</p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <p className="text-sm font-semibold text-slate-700">{ticket.subject}</p>
+                      <p className="text-xs text-slate-500 line-clamp-2">{ticket.description || '-'}</p>
+                    </td>
+                    <td className="px-3 py-3">{renderPill(ticket.priority)}</td>
+                    <td className="px-3 py-3">{renderPill(ticket.status)}</td>
+                    <td className="px-3 py-3 text-xs text-slate-600">{ticket.assignedTo || '-'}</td>
+                    <td className="px-3 py-3 text-xs text-slate-500">{formatDate(ticket.updatedAt)}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        <select
+                          value={ticket.status}
+                          onChange={async (event) => {
+                            setBusy(true);
+                            try {
+                              await updateSupportTicket(ticket.id, { status: event.target.value });
+                              setSuccess('Complaint status updated.');
+                              await loadCrm();
+                            } catch (err) {
+                              setError((err as Error).message || 'Could not update complaint status.');
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600"
+                        >
+                          {complaintStatusOptions.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={ticket.priority}
+                          onChange={async (event) => {
+                            setBusy(true);
+                            try {
+                              await updateSupportTicket(ticket.id, { priority: event.target.value });
+                              setSuccess('Complaint priority updated.');
+                              await loadCrm();
+                            } catch (err) {
+                              setError((err as Error).message || 'Could not update complaint priority.');
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600"
+                        >
+                          {complaintPriorityOptions.map((priority) => (
+                            <option key={priority} value={priority}>
+                              {priority}
+                            </option>
+                          ))}
+                        </select>
+                        {!['resolved', 'closed'].includes(ticket.status) && (
+                          <button
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
+                                await updateSupportTicket(ticket.id, {
+                                  status: 'resolved',
+                                  resolutionNote: 'Resolved from CRM complaint tracker.',
+                                });
+                                setSuccess('Complaint marked resolved.');
+                                await loadCrm();
+                              } catch (err) {
+                                setError((err as Error).message || 'Could not resolve complaint.');
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                            className={`${buttonBase} !px-2.5 !py-1.5 border-emerald-200 bg-emerald-50 text-emerald-700`}
+                          >
+                            Resolve
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!filteredComplaints.length && (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
+                      No complaint tickets for selected filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Contacts & Lead Scoring</h3>
             <div className="overflow-auto mt-3">
-              <table className="min-w-[840px] w-full text-sm">
+              <table className="min-w-[620px] xl:min-w-[780px] 2xl:min-w-[840px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Contact', 'Stage', 'Lead Score', 'Tags', 'Last Activity'].map((header) => (
@@ -3388,7 +2723,7 @@ const AdminPage: React.FC = () => {
           <p className="text-xs font-semibold text-slate-500">Generated: {formatDate(growthReport.generatedAt)}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-5 gap-4">
           <div className={`${cardClass} p-4`}>
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Campaign Reach</p>
             <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(growthReport.kpis.campaignReachUsers)}</p>
@@ -3420,7 +2755,7 @@ const AdminPage: React.FC = () => {
 
         <div className={`${cardClass} p-5`}>
           <h3 className="text-lg font-black tracking-tight text-slate-900">Capability Readiness (Marketing Executive View)</h3>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
             {growthReport.capabilities.map((capability) => (
               <div key={capability.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
                 <div className="flex items-start justify-between gap-2">
@@ -3452,11 +2787,11 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1.2fr_0.8fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Cross-Channel Engagement Performance</h3>
             <div className="overflow-auto mt-4">
-              <table className="min-w-[860px] w-full text-sm">
+              <table className="min-w-[620px] xl:min-w-[800px] 2xl:min-w-[860px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Channel', 'Sent', 'Delivered', 'Opened', 'Clicked', 'Conversions', 'Revenue', 'Fail Rate'].map((header) => (
@@ -3505,11 +2840,11 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Audience Segmentation & Predictive Signals</h3>
             <div className="overflow-auto mt-4">
-              <table className="min-w-[760px] w-full text-sm">
+              <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Segment', 'Users', 'Criteria', 'Conversion Rate', 'Churn Risk'].map((header) => (
@@ -3550,7 +2885,7 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5 space-y-4`}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
@@ -3669,7 +3004,7 @@ const AdminPage: React.FC = () => {
             </div>
 
             <div className="overflow-auto">
-              <table className="min-w-[680px] w-full text-sm">
+              <table className="min-w-[560px] lg:min-w-[680px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Journey', 'Status', 'Trigger', 'Audience', 'Conversion'].map((header) => (
@@ -3695,7 +3030,7 @@ const AdminPage: React.FC = () => {
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">A/B & Optimization Experiments</h3>
             <div className="overflow-auto mt-4">
-              <table className="min-w-[680px] w-full text-sm">
+              <table className="min-w-[560px] lg:min-w-[680px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Experiment', 'Status', 'Coverage', 'Conversion', 'Uplift'].map((header) => (
@@ -3719,11 +3054,11 @@ const AdminPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_0.9fr] gap-5">
+        <div className="grid grid-cols-1 2xl:grid-cols-[1fr_0.9fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Integrations & Connectivity</h3>
             <div className="overflow-auto mt-4">
-              <table className="min-w-[760px] w-full text-sm">
+              <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Integration', 'Type', 'Status', 'Throughput (24h)', 'Error Rate', 'Last Sync'].map((header) => (
@@ -3778,7 +3113,7 @@ const AdminPage: React.FC = () => {
   };
 
   const renderBlogs = () => (
-    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+    <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[0.95fr_1.05fr]">
       <div className="space-y-5">
         <div className={`${cardClass} p-4`}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -4133,7 +3468,7 @@ const AdminPage: React.FC = () => {
   );
 
   const renderOperations = () => (
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-5">
+    <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
       <div className="space-y-5">
         <div className={`${cardClass} p-5`}>
           <h3 className="text-lg font-black tracking-tight text-slate-900">Feature Flags</h3>
@@ -4516,9 +3851,9 @@ const AdminPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen px-4 md:px-8 py-6 md:py-8">
-      <div className="max-w-[1700px] mx-auto grid grid-cols-1 xl:grid-cols-[290px_1fr] gap-5">
-        <aside className={`${cardClass} p-5 h-fit xl:sticky xl:top-6`}>
+    <div className="min-h-screen px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-4 sm:py-5 lg:py-6 2xl:py-8">
+      <div className="max-w-[1700px] mx-auto grid grid-cols-1 xl:grid-cols-[250px_1fr] 2xl:grid-cols-[290px_1fr] gap-4 lg:gap-5">
+        <aside className={`${cardClass} p-4 xl:p-5 h-fit 2xl:sticky 2xl:top-6 2xl:max-h-[calc(100vh-3rem)] 2xl:overflow-auto`}>
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-600">FinVantage</p>
           <h2 className="mt-2 text-xl font-black tracking-tight text-slate-900">Admin Control Plane</h2>
           <p className="mt-1 text-xs font-semibold text-slate-500">Role: {access.roleName || access.roleKey || 'Unknown'}</p>
@@ -4543,7 +3878,7 @@ const AdminPage: React.FC = () => {
             </div>
           )}
 
-          <div className="mt-5 space-y-1.5">
+          <div className="mt-5 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-1 gap-1.5">
             {visibleModules.map((module) => {
               const Icon = module.icon;
               const active = module.id === activeModule;
@@ -4551,11 +3886,11 @@ const AdminPage: React.FC = () => {
                 <button
                   key={module.id}
                   onClick={() => setActiveModule(module.id)}
-                  className={`w-full rounded-2xl px-3 py-2.5 text-left flex items-center justify-between transition ${
+                  className={`w-full rounded-2xl px-2.5 xl:px-3 py-2 text-left flex items-center justify-between transition ${
                     active ? 'bg-teal-600 text-white shadow-lg' : 'bg-transparent text-slate-600 hover:bg-teal-50'
                   }`}
                 >
-                  <span className="inline-flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.14em]">
+                  <span className="inline-flex items-center gap-1.5 text-[10px] xl:text-[11px] font-black uppercase tracking-[0.12em] xl:tracking-[0.14em]">
                     <Icon size={14} /> {module.label}
                   </span>
                   <ChevronRight size={14} className={active ? 'opacity-80' : 'opacity-40'} />
@@ -4574,8 +3909,8 @@ const AdminPage: React.FC = () => {
           </div>
         </aside>
 
-        <section className="space-y-5">
-          <div className={`${cardClass} px-5 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3`}>
+        <section className="min-w-0 space-y-5">
+          <div className={`${cardClass} px-4 lg:px-5 py-3 lg:py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3`}>
             <div>
               <h1 className="text-2xl font-black tracking-tight text-slate-900">{MODULES.find((item) => item.id === activeModule)?.label}</h1>
               <p className="text-xs font-semibold text-slate-500 mt-1">

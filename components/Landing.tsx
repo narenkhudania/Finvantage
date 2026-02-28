@@ -38,11 +38,10 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
   const formatMoney = (value: number) => `${currencySymbol}${Math.round(value).toLocaleString()}`;
   const [activeScenario, setActiveScenario] = useState<'home' | 'education' | 'travel' | 'car'>('home');
   const [riskIndex, setRiskIndex] = useState(3);
-  const [emiPrincipal, setEmiPrincipal] = useState(2500000);
-  const [emiRate, setEmiRate] = useState(8.5);
-  const [emiYears, setEmiYears] = useState(20);
   const [goalOffset, setGoalOffset] = useState(6);
   const [cashflowMode, setCashflowMode] = useState<'income' | 'surplus'>('income');
+  const [emergencyMonths, setEmergencyMonths] = useState(7);
+  const [lifestyleCut, setLifestyleCut] = useState(12);
 
   const scenarioMap = {
     home: {
@@ -88,14 +87,13 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
   const goalInflation = 6;
   const goalYear = baseYear + goalOffset;
   const goalValue = goalBase * Math.pow(1 + goalInflation / 100, goalOffset);
-  const monthlyRate = emiRate / 12 / 100;
-  const totalMonths = Math.max(1, emiYears * 12);
-  const emiMonthly = monthlyRate > 0
-    ? (emiPrincipal * monthlyRate * Math.pow(1 + monthlyRate, totalMonths)) / (Math.pow(1 + monthlyRate, totalMonths) - 1)
-    : emiPrincipal / totalMonths;
   const cashflowSeries = cashflowMode === 'income'
     ? [68, 72, 78, 84, 88, 92, 96]
     : [22, 26, 31, 35, 30, 34, 38];
+  const emergencyCoveragePct = Math.min(100, Math.round((emergencyMonths / 12) * 100));
+  const monthlyLifestyleSpend = 25000;
+  const annualRecovered = Math.round((monthlyLifestyleSpend * (lifestyleCut / 100)) * 12);
+  const fiveYearRecoveryValue = Math.round(annualRecovered * ((Math.pow(1.1, 5) - 1) / 0.1));
 
   useEffect(() => {
     const canonical = `${window.location.origin}/`;
@@ -158,7 +156,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </nav>
 
       {/* Hero */}
-      <section className="relative pt-32 md:pt-48 pb-20 md:pb-28 px-6 md:px-8 overflow-hidden">
+      <section className="relative pt-20 md:pt-24 pb-10 md:pb-14 px-6 md:px-8 overflow-hidden">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[160%] md:w-[140%] h-[600px] md:h-[800px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-teal-100/40 via-transparent to-transparent -z-10" />
 
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
@@ -272,7 +270,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Proof */}
-      <section id="proof" className="py-20 md:py-28 px-6 md:px-8">
+      <section id="proof" className="py-10 md:py-14 px-6 md:px-8">
         <div className="max-w-7xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
@@ -287,7 +285,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
             ))}
           </div>
 
-          <div className="mt-12 grid grid-cols-2 md:grid-cols-5 gap-4 text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
+          <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-4 text-[10px] font-black uppercase tracking-[0.35em] text-slate-400">
             {['Advisors', 'Founders', 'Families', 'Professionals', 'Planners'].map((label) => (
               <div key={label} className="bg-white/60 border border-slate-100 rounded-full py-3 text-center">{label}</div>
             ))}
@@ -296,9 +294,9 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Features */}
-      <section id="features" className="py-24 md:py-32 px-6 md:px-8 bg-slate-50/60">
+      <section id="features" className="py-10 md:py-14 px-6 md:px-8 bg-slate-50/60">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row items-end justify-between mb-12 gap-8">
+          <div className="flex flex-col md:flex-row items-end justify-between mb-8 gap-6">
             <div className="max-w-2xl">
               <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-50 text-teal-600 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-100 mb-6">
                 <Layers size={14} /> Core Modules
@@ -333,9 +331,9 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Real-life Outcomes */}
-      <section className="py-24 md:py-32 px-6 md:px-8">
+      <section className="py-10 md:py-14 px-6 md:px-8">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row items-end justify-between mb-12 gap-8">
+          <div className="flex flex-col md:flex-row items-end justify-between mb-8 gap-6">
             <div className="max-w-2xl">
               <div className="inline-flex items-center gap-3 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-emerald-100 mb-6">
                 <Target size={14} /> Real-Life Results
@@ -362,7 +360,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Interactive Infographics */}
-      <section className="py-24 md:py-32 px-6 md:px-8 bg-slate-50/60">
+      <section className="py-10 md:py-14 px-6 md:px-8 bg-slate-50/60">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
           <div>
             <div className="inline-flex items-center gap-3 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-indigo-100 mb-6">
@@ -428,7 +426,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Risk Slider */}
-      <section className="py-24 md:py-32 px-6 md:px-8">
+      <section className="py-10 md:py-14 px-6 md:px-8">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
           <div>
             <div className="inline-flex items-center gap-3 px-4 py-2 bg-rose-50 text-rose-600 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-rose-100 mb-6">
@@ -486,7 +484,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Method */}
-      <section id="method" className="py-24 md:py-32 px-6 md:px-8">
+      <section id="method" className="py-10 md:py-14 px-6 md:px-8">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <div>
             <div className="inline-flex items-center gap-3 px-4 py-2 bg-amber-50 text-amber-600 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-amber-100 mb-6">
@@ -538,83 +536,21 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
         </div>
       </section>
 
-      {/* Live Calculators */}
-      <section className="py-24 md:py-32 px-6 md:px-8 bg-slate-50/60">
+      {/* Interactive Games */}
+      <section className="py-10 md:py-14 px-6 md:px-8 bg-slate-50/60">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row items-end justify-between mb-12 gap-8">
+          <div className="flex flex-col md:flex-row items-end justify-between mb-8 gap-6">
             <div className="max-w-2xl">
               <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-50 text-teal-600 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-100 mb-6">
-                <Calculator size={14} /> Live Calculators
+                <Sparkles size={14} /> Interactive Games
               </div>
-              <h2 className="text-4xl md:text-6xl font-black text-slate-900 leading-tight">Make changes, see outcomes instantly.</h2>
-              <p className="text-lg text-slate-500 mt-4">Quick tools that mirror real financial decisions.</p>
+              <h2 className="text-4xl md:text-6xl font-black text-slate-900 leading-tight">Play strategy games, see outcomes instantly.</h2>
+              <p className="text-lg text-slate-500 mt-4">Purpose-built decision games for planning, not generic loan math.</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* EMI */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">EMI</p>
-                  <h3 className="text-xl font-black text-slate-900">Loan Calculator</h3>
-                </div>
-                <div className="p-2 bg-teal-50 text-teal-600 rounded-2xl"><Wallet size={18} /></div>
-              </div>
-              <div className="space-y-4 text-xs font-black uppercase tracking-widest text-slate-400">
-                <div>
-                  <div className="flex justify-between">
-                    <span>Loan Amount</span>
-                    <span className="text-slate-900">{formatMoney(emiPrincipal)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={500000}
-                    max={10000000}
-                    step={50000}
-                    value={emiPrincipal}
-                    onChange={(e) => setEmiPrincipal(Number(e.target.value))}
-                    className="w-full h-2 rounded-full bg-slate-100 accent-teal-600 mt-2"
-                  />
-                </div>
-                <div>
-                  <div className="flex justify-between">
-                    <span>Interest Rate</span>
-                    <span className="text-slate-900">{emiRate.toFixed(1)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={5}
-                    max={14}
-                    step={0.1}
-                    value={emiRate}
-                    onChange={(e) => setEmiRate(Number(e.target.value))}
-                    className="w-full h-2 rounded-full bg-slate-100 accent-teal-600 mt-2"
-                  />
-                </div>
-                <div>
-                  <div className="flex justify-between">
-                    <span>Tenure</span>
-                    <span className="text-slate-900">{emiYears} yrs</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={1}
-                    max={30}
-                    step={1}
-                    value={emiYears}
-                    onChange={(e) => setEmiYears(Number(e.target.value))}
-                    className="w-full h-2 rounded-full bg-slate-100 accent-teal-600 mt-2"
-                  />
-                </div>
-              </div>
-              <div className="mt-6 p-4 rounded-2xl bg-slate-900 text-white">
-                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Estimated EMI</p>
-                <p className="text-2xl font-black mt-2">{formatMoney(emiMonthly)}</p>
-              </div>
-            </div>
-
-            {/* Goal inflation */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
+            {/* Goal Timeline Game */}
             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -645,7 +581,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
               </div>
             </div>
 
-            {/* Cashflow toggle */}
+            {/* Cashflow Toggle Game */}
             <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -678,14 +614,80 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
                 {cashflowMode === 'income' ? 'Projected income lift' : 'Projected surplus buffer'}
               </p>
             </div>
+
+            {/* Emergency Buffer Game */}
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Safety</p>
+                  <h3 className="text-xl font-black text-slate-900">Emergency Buffer Sprint</h3>
+                </div>
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-2xl"><ShieldCheck size={18} /></div>
+              </div>
+              <p className="text-sm text-slate-500">Slide to test how many months of expenses your reserve can absorb.</p>
+              <div className="mt-6">
+                <div className="flex justify-between text-xs font-black uppercase tracking-widest text-slate-400">
+                  <span>Runway</span>
+                  <span className="text-slate-900">{emergencyMonths} months</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={18}
+                  step={1}
+                  value={emergencyMonths}
+                  onChange={(e) => setEmergencyMonths(Number(e.target.value))}
+                  className="w-full h-2 rounded-full bg-slate-100 accent-indigo-600 mt-2"
+                />
+              </div>
+              <div className="mt-6 p-4 rounded-2xl bg-indigo-50">
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-600">Coverage Score</p>
+                <p className="text-2xl font-black text-slate-900 mt-2">{emergencyCoveragePct}%</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mt-2">
+                  {emergencyMonths >= 12 ? 'Strong buffer' : emergencyMonths >= 6 ? 'Stable buffer' : 'Needs reinforcement'}
+                </p>
+              </div>
+            </div>
+
+            {/* Lifestyle Challenge Game */}
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Habits</p>
+                  <h3 className="text-xl font-black text-slate-900">Lifestyle Swap Challenge</h3>
+                </div>
+                <div className="p-2 bg-amber-50 text-amber-600 rounded-2xl"><Sparkles size={18} /></div>
+              </div>
+              <p className="text-sm text-slate-500">Cut discretionary spend and reroute it to long-term compounding.</p>
+              <div className="mt-6">
+                <div className="flex justify-between text-xs font-black uppercase tracking-widest text-slate-400">
+                  <span>Cut Level</span>
+                  <span className="text-slate-900">{lifestyleCut}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={35}
+                  step={1}
+                  value={lifestyleCut}
+                  onChange={(e) => setLifestyleCut(Number(e.target.value))}
+                  className="w-full h-2 rounded-full bg-slate-100 accent-amber-600 mt-2"
+                />
+              </div>
+              <div className="mt-6 p-4 rounded-2xl bg-amber-50">
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-amber-600">Recovered Value</p>
+                <p className="text-lg font-black text-slate-900 mt-2">Annual: {formatMoney(annualRecovered)}</p>
+                <p className="text-sm font-black text-slate-700 mt-1">5Y Potential: {formatMoney(fiveYearRecoveryValue)}</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
       {/* Security */}
-      <section id="security" className="py-24 md:py-32 px-6 md:px-8 bg-slate-50/60">
+      <section id="security" className="py-10 md:py-14 px-6 md:px-8 bg-slate-50/60">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row items-end justify-between mb-12 gap-8">
+          <div className="flex flex-col md:flex-row items-end justify-between mb-8 gap-6">
             <div className="max-w-2xl">
               <div className="inline-flex items-center gap-3 px-4 py-2 bg-slate-100 text-slate-600 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-slate-200 mb-6">
                 <Lock size={14} /> Security
@@ -714,7 +716,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="py-24 md:py-32 px-6 md:px-8">
+      <section id="pricing" className="py-10 md:py-14 px-6 md:px-8">
         <div className="max-w-5xl mx-auto text-center">
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Pricing</p>
           <h2 className="text-4xl md:text-6xl font-black text-slate-900 mt-3">Free subscription. Full system.</h2>
@@ -755,9 +757,9 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Testimonials */}
-      <section className="py-24 md:py-32 px-6 md:px-8">
+      <section className="py-10 md:py-14 px-6 md:px-8">
         <div className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-12">
+          <div className="flex items-center justify-between mb-8">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Stories</p>
               <h2 className="text-4xl md:text-6xl font-black text-slate-900">Built for real decisions.</h2>
@@ -796,9 +798,9 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* FAQ */}
-      <section id="faq" className="py-24 md:py-32 px-6 md:px-8 bg-slate-50/60">
+      <section id="faq" className="py-10 md:py-14 px-6 md:px-8 bg-slate-50/60">
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-12">
+          <div className="text-center mb-8">
             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">FAQ</p>
             <h2 className="text-4xl md:text-6xl font-black text-slate-900">Common questions.</h2>
           </div>
@@ -831,7 +833,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* CTA */}
-      <section className="py-20 md:py-28 px-6 md:px-8">
+      <section className="py-10 md:py-14 px-6 md:px-8">
         <div className="max-w-6xl mx-auto">
           <div className="surface-dark rounded-[3rem] p-10 md:p-16 text-white relative overflow-hidden">
             <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-teal-500/20 blur-[140px] rounded-full" />
@@ -860,6 +862,24 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
           </div>
         </div>
       </section>
+
+      <footer className="border-t border-slate-200 bg-white/90 px-6 py-10 md:px-8 md:py-12">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
+          <p className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">
+            Copyright © {baseYear} Finvanage All Rights Reserved.
+          </p>
+          <div className="flex flex-wrap gap-x-6 gap-y-3 text-xs font-bold text-slate-600 md:text-sm">
+            <a href="/support" className="transition hover:text-slate-900">Support Desk and Contact us</a>
+            <a href="/faq" className="transition hover:text-slate-900">FAQ</a>
+            <a href="/privacy-policy" className="transition hover:text-slate-900">Privacy Policy</a>
+            <a href="/terms-and-condition" className="transition hover:text-slate-900">Terms and Condition</a>
+            <a href="/legal" className="transition hover:text-slate-900">Legal</a>
+            <a href="/site-map" className="transition hover:text-slate-900">Site Map</a>
+            <a href="/about" className="transition hover:text-slate-900">About</a>
+            <a href="/blog" className="transition hover:text-slate-900">Blog</a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };

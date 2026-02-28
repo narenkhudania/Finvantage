@@ -1,6 +1,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bell, ChevronDown, ChevronRight, LogOut, Menu, Settings, Sparkles, User } from 'lucide-react';
+import { ArrowLeft, Bell, ChevronDown, ChevronRight, LifeBuoy, LogOut, Menu, Settings, Sparkles, User } from 'lucide-react';
 import { FinanceState, View } from '../types';
 import { getJourneyProgress } from '../lib/journey';
 import { TYPOGRAPHY_CLASS } from '../lib/designTokens';
@@ -11,11 +11,12 @@ interface HeaderProps {
   title: string;
   state: FinanceState;
   setView: (view: View) => void;
+  onBack: () => void;
   onLogout: () => void;
   isTerminalOnline: boolean;
 }
 
-const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onLogout, isTerminalOnline }) => {
+const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onBack, onLogout, isTerminalOnline }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -55,7 +56,7 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
             <AppButton
               tone="secondary"
               size="md"
-              onClick={() => setView('dashboard')}
+              onClick={onBack}
               className="mt-0.5"
               leadingIcon={<ArrowLeft size={13} />}
             >
@@ -135,6 +136,19 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, title, state, setView, onL
                       <span className="inline-flex items-center gap-3">
                         <Settings size={18} />
                         <span>Configuration</span>
+                      </span>
+                    }
+                    trailingIcon={<ChevronRight size={14} className="opacity-30" />}
+                  />
+                  <AppButton
+                    tone="ghost"
+                    size="md"
+                    onClick={() => { setView('support'); setIsDropdownOpen(false); }}
+                    className="w-full !justify-between !rounded-xl !px-4 !py-3 !text-slate-600 hover:!bg-teal-50 hover:!text-teal-600"
+                    leadingIcon={
+                      <span className="inline-flex items-center gap-3">
+                        <LifeBuoy size={18} />
+                        <span>Support Desk</span>
                       </span>
                     }
                     trailingIcon={<ChevronRight size={14} className="opacity-30" />}

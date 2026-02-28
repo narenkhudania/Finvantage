@@ -727,6 +727,24 @@ export interface AdminCrmTask {
   createdAt: string;
 }
 
+export interface AdminCrmComplaintTicket {
+  id: string;
+  ticketNumber: string;
+  userId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  subject: string;
+  description: string | null;
+  priority: string;
+  status: string;
+  assignedTo: string | null;
+  tags: string[];
+  resolutionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
 export interface AdminCrmEmailTemplate {
   id: string;
   name: string;
@@ -790,6 +808,10 @@ export interface AdminCrmKpis {
   emailClickRatePct: number;
   workflowsActive: number;
   tasksDue: number;
+  complaintTickets: number;
+  openComplaints: number;
+  resolvedComplaints: number;
+  highPriorityComplaints: number;
 }
 
 export interface AdminCrmReport {
@@ -801,6 +823,7 @@ export interface AdminCrmReport {
   leads: AdminCrmLead[];
   deals: AdminCrmDeal[];
   tasks: AdminCrmTask[];
+  complaints: AdminCrmComplaintTicket[];
   templates: AdminCrmEmailTemplate[];
   workflows: AdminCrmWorkflow[];
   customObjects: AdminCrmCustomObject[];

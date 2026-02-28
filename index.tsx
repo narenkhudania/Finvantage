@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { StaticInfoPage, SupportDeskPage } from './components/site/PublicInfoPages';
 
 const AdminPage = lazy(() => import('./components/admin/AdminPage'));
 const BlogIndexPage = lazy(() => import('./components/blog/BlogIndexPage'));
@@ -13,16 +14,33 @@ if (!rootElement) {
 
 const root = ReactDOM.createRoot(rootElement);
 const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+const normalizedPath = pathname.toLowerCase();
+const pathParts = pathname.split('/').filter(Boolean);
+const blogSlug = pathParts.length >= 2 ? pathParts.slice(1).join('/') : '';
 
 const Entry: React.ComponentType =
-  pathname.startsWith('/admin')
+  normalizedPath.startsWith('/admin')
     ? AdminPage
-    : pathname === '/blog' || pathname === '/blogs'
+    : normalizedPath === '/support' || normalizedPath === '/contact' || normalizedPath === '/contact-us'
+    ? SupportDeskPage
+    : normalizedPath === '/faq'
+    ? (() => <StaticInfoPage page="faq" />)
+    : normalizedPath === '/privacy-policy' || normalizedPath === '/privacy'
+    ? (() => <StaticInfoPage page="privacy" />)
+    : normalizedPath === '/terms-and-condition' || normalizedPath === '/terms-and-conditions' || normalizedPath === '/terms'
+    ? (() => <StaticInfoPage page="terms" />)
+    : normalizedPath === '/legal'
+    ? (() => <StaticInfoPage page="legal" />)
+    : normalizedPath === '/site-map' || normalizedPath === '/sitemap'
+    ? (() => <StaticInfoPage page="sitemap" />)
+    : normalizedPath === '/about'
+    ? (() => <StaticInfoPage page="about" />)
+    : normalizedPath === '/blog' || normalizedPath === '/blogs'
     ? BlogIndexPage
-    : pathname.startsWith('/blog/')
-    ? (() => <BlogPostPage slug={decodeURIComponent(pathname.replace('/blog/', ''))} />)
-    : pathname.startsWith('/blogs/')
-    ? (() => <BlogPostPage slug={decodeURIComponent(pathname.replace('/blogs/', ''))} />)
+    : normalizedPath.startsWith('/blog/')
+    ? (() => <BlogPostPage slug={decodeURIComponent(blogSlug)} />)
+    : normalizedPath.startsWith('/blogs/')
+    ? (() => <BlogPostPage slug={decodeURIComponent(blogSlug)} />)
     : App;
 
 root.render(

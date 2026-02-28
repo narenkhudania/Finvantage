@@ -46,7 +46,7 @@ const AdminOverviewModule: React.FC<AdminOverviewModuleProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
         {overviewKpis.map((kpi) => {
           const Icon = kpi.icon;
           return (
@@ -75,7 +75,7 @@ const AdminOverviewModule: React.FC<AdminOverviewModuleProps> = ({
             </span>
           }
         />
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {growthTrackingCards.map((metric) => (
             <div key={metric.label} className={`rounded-2xl border p-3 ${toneClass(metric.tone)}`}>
               <p className="text-[10px] font-black uppercase tracking-[0.14em]">{metric.label}</p>
@@ -91,7 +91,7 @@ const AdminOverviewModule: React.FC<AdminOverviewModuleProps> = ({
         </div>
       </SurfaceCard>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.3fr_0.9fr]">
+      <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[1.3fr_0.9fr]">
         <SurfaceCard variant="elevated" padding="none" className="p-5">
           <SectionHeader
             title="Growth & Activity (180 days)"
@@ -164,14 +164,14 @@ const AdminOverviewModule: React.FC<AdminOverviewModuleProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.35fr_0.9fr]">
+      <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[1.35fr_0.9fr]">
         <SurfaceCard variant="elevated" padding="none" className="p-5">
           <SectionHeader
             title="Top Households by Net Worth"
             action={<span className="text-xs font-black uppercase tracking-wider text-slate-500">{overview.topCustomers.length} customers</span>}
           />
           <div className="mt-4 overflow-auto">
-            <table className="min-w-[760px] w-full text-sm">
+            <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Customer</th>

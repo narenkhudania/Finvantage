@@ -2,7 +2,7 @@
 // Updated: saveFinanceData() now returns DB-assigned UUIDs which
 // are merged back into state so subsequent saves use real UUIDs.
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
@@ -28,6 +28,7 @@ import Settings from './components/Settings';
 import Notifications from './components/Notifications';
 import AIAdvisor from './components/AIAdvisor';
 import Cashflow from './components/Cashflow';
+import SupportCenter from './components/SupportCenter';
 import { FinanceState, View, DetailedIncome, IncomeSource } from './types';
 import { LayoutDashboard, Bell, ListChecks, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { supabase } from './services/supabase';
@@ -182,7 +183,7 @@ const SyncPill: React.FC<{ status: SaveStatus }> = ({ status }) => {
 
 // ── App ───────────────────────────────────────────────────────
 const App: React.FC = () => {
-  const [view, setView]                   = useState<View>('dashboard');
+  const [view, setViewState]              = useState<View>('dashboard');
   const [showAuth, setShowAuth]           = useState(false);
   const [resumeProfile, setResumeProfile] = useState<FinanceState['profile'] | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -192,6 +193,7 @@ const App: React.FC = () => {
   const saveTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstRender = useRef(true);
   const authUserIdRef = useRef<string | null>(null);
+  const viewHistoryRef = useRef<View[]>([]);
   const usageSnapshotRef = useRef<{
     familyCount: number;
     goalCount: number;
@@ -209,6 +211,25 @@ const App: React.FC = () => {
     }
     return INITIAL_STATE;
   });
+
+  const setView = useCallback((nextView: View) => {
+    setViewState((currentView) => {
+      if (currentView === nextView) return currentView;
+      viewHistoryRef.current = [...viewHistoryRef.current.slice(-24), currentView];
+      return nextView;
+    });
+  }, []);
+
+  const handleGoBack = useCallback(() => {
+    setViewState((currentView) => {
+      if (currentView === 'dashboard') return currentView;
+      const history = viewHistoryRef.current;
+      if (!history.length) return 'dashboard';
+      const previous = history[history.length - 1];
+      viewHistoryRef.current = history.slice(0, -1);
+      return previous || 'dashboard';
+    });
+  }, []);
 
   // ── On mount: restore full state from all 6 DB tables ────────
   useEffect(() => {
@@ -270,6 +291,7 @@ const App: React.FC = () => {
         setFinanceState({ ...INITIAL_STATE });
         setShowAuth(false);
         setResumeProfile(null);
+        viewHistoryRef.current = [];
       }
     });
 
@@ -336,7 +358,8 @@ const App: React.FC = () => {
           setFinanceState({ ...INITIAL_STATE, isRegistered: false });
           setShowAuth(false);
           setResumeProfile(null);
-          setView('dashboard');
+          viewHistoryRef.current = [];
+          setViewState('dashboard');
 
           const reason = flags.is_blocked
             ? `Your account is blocked. ${flags.blocked_reason ? `Reason: ${flags.blocked_reason}` : ''}`
@@ -436,7 +459,8 @@ const App: React.FC = () => {
       localStorage.removeItem(LOCAL_KEY);
       setFinanceState({ ...INITIAL_STATE, isRegistered: false });
       setShowAuth(false);
-      setView('dashboard');
+      viewHistoryRef.current = [];
+      setViewState('dashboard');
     }
   };
 
@@ -662,6 +686,10 @@ const App: React.FC = () => {
         title: 'Notifications | FinVantage',
         description: 'View strategy alerts, risk prompts, and planning notifications.',
       },
+      support: {
+        title: 'Support & Complaint Tracker | FinVantage',
+        description: 'Register complaints and track support ticket status end-to-end.',
+      },
       benefits: {
         title: 'Benefits | FinVantage',
         description: 'Explore platform value and outcomes across your financial journey.',
@@ -756,6 +784,7 @@ const App: React.FC = () => {
       case 'monthly-savings': return <MonthlySavingsPlan state={financeState} />;
       case 'settings':        return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} />;
       case 'notifications':   return <Notifications state={financeState} updateState={handleUpdateState} setView={setView} />;
+      case 'support':         return <SupportCenter state={financeState} updateState={handleUpdateState} />;
       case 'tax-estate':      return <TaxEstate state={financeState} />;
       case 'projections':     return <RetirementPlan state={financeState} />;
       case 'ai-advisor':      return <AIAdvisor state={financeState} />;
@@ -782,6 +811,7 @@ const App: React.FC = () => {
           title={view}
           state={financeState}
           setView={setView}
+          onBack={handleGoBack}
           onLogout={handleLogout}
           isTerminalOnline={isTerminalOnline}
         />

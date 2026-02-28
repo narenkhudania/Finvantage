@@ -17,6 +17,19 @@ export interface Notification {
   read: boolean;
 }
 
+export interface CustomerComplaintTicket {
+  id: string;
+  ticketNumber: string;
+  subject: string;
+  description: string;
+  category: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: 'open' | 'in_progress' | 'waiting_user' | 'resolved' | 'closed';
+  resolutionNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type LoanSourceType = 'Bank' | 'NBFC' | 'Friends & Family';
 export type LoanType = 'Home Loan' | 'Personal Loan' | 'Credit Card EMI' | 'OD' | 'Car Loan' | 'Property Purchase' | 'Others';
 export type InterestRateType = 'Fixed' | 'Floating';
@@ -413,6 +426,7 @@ export type View =
   | 'monthly-savings' 
   | 'settings' 
   | 'notifications' 
+  | 'support'
   | 'benefits' 
   | 'scenarios'
   | 'insurance';

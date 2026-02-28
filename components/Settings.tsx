@@ -330,10 +330,12 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
         </div>
       </div>
 
-      <div className="flex p-1.5 bg-white rounded-[2.5rem] border border-slate-200 w-full md:w-fit mx-auto shadow-sm sticky top-20 md:top-28 z-40 overflow-x-auto no-scrollbar">
-        <button onClick={() => setActiveTab('profile')} className={`flex-1 md:flex-none px-4 md:px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'profile' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><User size={14}/> Profile</button>
-        <button onClick={() => setActiveTab('planning')} className={`flex-1 md:flex-none px-4 md:px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'planning' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><Shield size={14}/> Planning Engine</button>
-        <button onClick={() => setActiveTab('datalab')} className={`flex-1 md:flex-none px-4 md:px-8 py-3.5 rounded-[2rem] text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'datalab' ? 'bg-teal-600 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}><Database size={14}/> Data &amp; Trust</button>
+      <div className="sticky top-0 z-40 -mx-4 md:-mx-6 px-4 md:px-6 py-3 bg-slate-50/95 backdrop-blur border-y border-slate-200/70">
+        <div className="flex p-1.5 bg-white rounded-2xl border border-slate-200 w-full max-w-5xl mx-auto overflow-x-auto no-scrollbar">
+          <button onClick={() => setActiveTab('profile')} className={`flex-1 px-4 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'profile' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}><User size={14}/> Profile</button>
+          <button onClick={() => setActiveTab('planning')} className={`flex-1 px-4 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'planning' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}><Shield size={14}/> Planning Engine</button>
+          <button onClick={() => setActiveTab('datalab')} className={`flex-1 px-4 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'datalab' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}><Database size={14}/> Data &amp; Trust</button>
+        </div>
       </div>
 
       {activeTab === 'profile' && (

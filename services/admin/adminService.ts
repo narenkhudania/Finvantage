@@ -18,6 +18,7 @@ import type {
   AdminBehaviorSearchInsightRow,
   AdminBehaviorSessionReplayRow,
   AdminBehaviorTrafficRow,
+  AdminCrmComplaintTicket,
   AdminCrmContact,
   AdminCrmCustomObject,
   AdminCrmDeal,
@@ -2312,6 +2313,39 @@ export async function getSupportTickets(params?: {
   }));
 }
 
+export async function createCrmComplaintTicket(payload: {
+  userId: string;
+  subject: string;
+  description?: string;
+  priority?: string;
+  assignedTo?: string | null;
+  tags?: string[];
+}): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const datePart = nowIso.slice(2, 10).replace(/-/g, '');
+  const ticketNumber = `CMP-${datePart}-${randomHex(2).toUpperCase()}`;
+
+  const normalizedPriority = ['low', 'medium', 'high', 'urgent'].includes(String(payload.priority || '').toLowerCase())
+    ? String(payload.priority || '').toLowerCase()
+    : 'medium';
+
+  const { error } = await supabase.from('support_tickets').insert({
+    ticket_number: ticketNumber,
+    user_id: payload.userId.trim(),
+    subject: payload.subject.trim(),
+    description: payload.description?.trim() || null,
+    category: 'complaint',
+    priority: normalizedPriority,
+    status: 'open',
+    assigned_to: payload.assignedTo?.trim() || null,
+    tags: (payload.tags || []).map((tag) => tag.trim()).filter(Boolean),
+    created_at: nowIso,
+    updated_at: nowIso,
+  });
+
+  if (error) throw toError(error, 'Could not create complaint ticket.');
+}
+
 export async function updateSupportTicket(
   ticketId: string,
   payload: {
@@ -3523,6 +3557,38 @@ const mapCrmTask = (row: Record<string, any>): AdminCrmTask => ({
   createdAt: String(row.created_at || new Date().toISOString()),
 });
 
+const toTagList = (raw: unknown): string[] => {
+  if (Array.isArray(raw)) return raw.map((item) => String(item).trim()).filter(Boolean);
+  if (typeof raw === 'string') return raw.split(',').map((item) => item.trim()).filter(Boolean);
+  return [];
+};
+
+const mapCrmComplaint = (
+  row: Record<string, any>,
+  profileMap: Map<string, { identifier: string | null; first_name: string | null; last_name: string | null }>
+): AdminCrmComplaintTicket => {
+  const userId = String(row.user_id || '');
+  const profile = profileMap.get(userId);
+  const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim();
+  return {
+    id: String(row.id),
+    ticketNumber: String(row.ticket_number || `CMP-${String(row.id).slice(0, 8).toUpperCase()}`),
+    userId,
+    customerName: fullName || null,
+    customerEmail: profile?.identifier || null,
+    subject: String(row.subject || 'Customer Complaint'),
+    description: row.description ? String(row.description) : null,
+    priority: String(row.priority || 'medium'),
+    status: String(row.status || 'open'),
+    assignedTo: row.assigned_to ? String(row.assigned_to) : null,
+    tags: toTagList(row.tags),
+    resolutionNote: row.resolution_note ? String(row.resolution_note) : null,
+    createdAt: String(row.created_at || new Date().toISOString()),
+    updatedAt: String(row.updated_at || row.created_at || new Date().toISOString()),
+    resolvedAt: row.resolved_at ? String(row.resolved_at) : null,
+  };
+};
+
 const mapCrmTemplate = (row: Record<string, any>): AdminCrmEmailTemplate => ({
   id: String(row.id),
   name: String(row.name || 'Template'),
@@ -3569,6 +3635,7 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
     leadsResult,
     dealsResult,
     tasksResult,
+    complaintsResult,
     templatesResult,
     workflowsResult,
     objectsResult,
@@ -3580,6 +3647,11 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
     supabase.from('crm_leads').select('*').order('updated_at', { ascending: false }).limit(600),
     supabase.from('crm_deals').select('*').order('updated_at', { ascending: false }).limit(600),
     supabase.from('crm_tasks').select('*').order('updated_at', { ascending: false }).limit(600),
+    supabase
+      .from('support_tickets')
+      .select('id, ticket_number, user_id, subject, description, category, priority, status, assigned_to, tags, resolution_note, created_at, updated_at, resolved_at')
+      .order('updated_at', { ascending: false })
+      .limit(1200),
     supabase.from('crm_email_templates').select('*').order('updated_at', { ascending: false }).limit(200),
     supabase.from('crm_workflows').select('*').order('updated_at', { ascending: false }).limit(200),
     supabase.from('crm_custom_objects').select('*').order('updated_at', { ascending: false }).limit(300),
@@ -3597,6 +3669,7 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
   assertOrIgnore(leadsResult.error, 'Could not load CRM leads.');
   assertOrIgnore(dealsResult.error, 'Could not load CRM deals.');
   assertOrIgnore(tasksResult.error, 'Could not load CRM tasks.');
+  assertOrIgnore(complaintsResult.error, 'Could not load complaint tickets.');
   assertOrIgnore(templatesResult.error, 'Could not load CRM templates.');
   assertOrIgnore(workflowsResult.error, 'Could not load CRM workflows.');
   assertOrIgnore(objectsResult.error, 'Could not load CRM objects.');
@@ -3619,6 +3692,21 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
     last_name: string | null;
     created_at: string;
   }>;
+  const profileMap = new Map<string, { identifier: string | null; first_name: string | null; last_name: string | null }>(
+    profiles.map((row) => [
+      String(row.id),
+      {
+        identifier: row.identifier || null,
+        first_name: row.first_name || null,
+        last_name: row.last_name || null,
+      },
+    ])
+  );
+
+  const complaints = ((complaintsResult.data || []) as Array<Record<string, any>>)
+    .filter((row) => String(row.category || '').toLowerCase() === 'complaint')
+    .map((row) => mapCrmComplaint(row, profileMap));
+
   const events = (eventsResult.data || []) as Array<{ user_id: string | null; event_name: string; event_time: string }>;
   const notifications = (notificationsResult.data || []) as Array<{ title: string | null; status: string | null; created_at: string }>;
 
@@ -3822,12 +3910,22 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
       action: row.status,
       detail: row.title,
     })),
+    ...complaints.slice(0, 40).map((row) => ({
+      time: row.updatedAt || row.createdAt,
+      entity: 'complaint',
+      action: row.status,
+      detail: `#${row.ticketNumber} • ${row.subject}`,
+    })),
   ]
     .filter((row) => Boolean(row.time))
     .sort((a, b) => parseTimeMs(b.time) - parseTimeMs(a.time))
     .slice(0, 80);
 
   const emailsSent = templates.reduce((sum, row) => sum + row.sent, 0);
+  const complaintTickets = complaints.length;
+  const openComplaints = complaints.filter((row) => !includesAny(row.status.toLowerCase(), ['resolved', 'closed'])).length;
+  const resolvedComplaints = complaints.filter((row) => includesAny(row.status.toLowerCase(), ['resolved', 'closed'])).length;
+  const highPriorityComplaints = complaints.filter((row) => includesAny(row.priority.toLowerCase(), ['high', 'urgent', 'critical'])).length;
 
   return {
     generatedAt: nowIso,
@@ -3850,12 +3948,17 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
       emailClickRatePct: pct(templates.reduce((sum, row) => sum + row.clicks, 0), emailsSent || 1),
       workflowsActive: workflows.filter((row) => includesAny(row.status.toLowerCase(), ['active', 'running'])).length,
       tasksDue: tasks.filter((row) => row.dueAt && !includesAny(row.status.toLowerCase(), ['done', 'closed']) && parseTimeMs(row.dueAt) <= Date.now() + 24 * 60 * 60 * 1000).length,
+      complaintTickets,
+      openComplaints,
+      resolvedComplaints,
+      highPriorityComplaints,
     },
     pipeline,
     contacts: contacts.slice(0, 350),
     leads: leads.slice(0, 350),
     deals: deals.slice(0, 350),
     tasks: tasks.slice(0, 350),
+    complaints: complaints.slice(0, 500),
     templates: templates.slice(0, 120),
     workflows: workflows.slice(0, 120),
     customObjects: customObjects.slice(0, 220),
