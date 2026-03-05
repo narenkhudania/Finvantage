@@ -22,6 +22,24 @@ const priorityClass = (priority: string) => {
   return 'border-emerald-200 bg-emerald-50 text-emerald-700';
 };
 
+const slaClass = (slaStatus?: string | null) => {
+  const normalized = String(slaStatus || 'on_track').toLowerCase();
+  if (normalized === 'breached') return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (normalized === 'due_soon') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (normalized === 'met') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+};
+
+const dueLabel = (resolutionDueAt?: string | null) => {
+  if (!resolutionDueAt) return 'Not assigned';
+  const dueMs = new Date(resolutionDueAt).getTime();
+  if (!Number.isFinite(dueMs)) return 'Not assigned';
+  const deltaHours = Math.round((dueMs - Date.now()) / (60 * 60 * 1000));
+  if (deltaHours < 0) return `Overdue by ${Math.abs(deltaHours)}h`;
+  if (deltaHours === 0) return 'Due within 1h';
+  return `Due in ${deltaHours}h`;
+};
+
 const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -106,14 +124,14 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-24">
-      <div className="surface-dark p-10 md:p-14 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
+    <div className="space-y-6 md:space-y-8 animate-in fade-in duration-500 pb-24">
+      <div className="surface-dark p-6 sm:p-8 md:p-12 rounded-[2rem] md:rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
         <div className="relative z-10 space-y-4">
           <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
             <LifeBuoy size={14} /> Complaint Desk
           </div>
-          <h2 className="text-4xl md:text-6xl font-black tracking-tight leading-tight">Raise & Track Complaints</h2>
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight leading-tight">Raise & Track Complaints</h2>
           <p className="text-slate-300 text-sm md:text-base font-medium max-w-3xl">
             Register service complaints and track ticket status in real time. The same ticket is visible to customer support operations in admin.
           </p>
@@ -121,7 +139,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-6">
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4">
+        <div className="bg-white p-5 sm:p-6 md:p-8 rounded-[1.75rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4">
           <div>
             <h3 className="text-xl font-black text-slate-900">Complaint Registration Form</h3>
             <p className="text-sm text-slate-500 mt-1">Please add clear details so support can resolve faster.</p>
@@ -199,7 +217,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4 h-fit">
+        <div className="bg-white p-5 sm:p-6 md:p-8 rounded-[1.75rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4 h-fit">
           <h3 className="text-xl font-black text-slate-900">Support Assurance</h3>
           <div className="space-y-3">
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -211,6 +229,10 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
               <p className="text-xs text-slate-600 mt-1">Tickets appear directly in admin CRM complaint tracker for action.</p>
             </div>
             <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <p className="text-sm font-black text-slate-900">SLA Monitoring</p>
+              <p className="text-xs text-slate-600 mt-1">Each ticket is tracked against response and resolution deadlines with auto-escalation for overdue complaints.</p>
+            </div>
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
               <p className="text-sm font-black text-slate-900">Data Security</p>
               <p className="text-xs text-slate-600 mt-1 inline-flex items-center gap-1.5">
                 <ShieldCheck size={12} className="text-emerald-600" /> Complaint details are linked only to your signed-in account.
@@ -220,7 +242,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4">
+      <div className="bg-white p-5 sm:p-6 md:p-8 rounded-[1.75rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
             <h3 className="text-xl font-black text-slate-900">My Complaint Tickets</h3>
@@ -249,11 +271,61 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
           </div>
         </div>
 
-        <div className="overflow-auto">
-          <table className="min-w-[980px] w-full text-sm">
+        <div className="space-y-3 lg:hidden">
+          {loading ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm font-semibold text-slate-500">
+              Loading complaint tickets...
+            </div>
+          ) : filteredTickets.length ? (
+            filteredTickets.map((ticket) => (
+              <div key={ticket.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-900 truncate">#{ticket.ticketNumber}</p>
+                    <p className="text-sm font-semibold text-slate-700 mt-0.5">{ticket.subject}</p>
+                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">{ticket.description || '-'}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${priorityClass(ticket.priority)}`}>
+                    {ticket.priority}
+                  </span>
+                  <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${statusClass(ticket.status)}`}>
+                    {ticket.status.replace('_', ' ')}
+                  </span>
+                  <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${slaClass(ticket.slaStatus)}`}>
+                    {(ticket.slaStatus || 'on_track').replace('_', ' ')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <p className="font-semibold text-slate-600">Resolution due: <span className="text-slate-500 font-medium">{dueLabel(ticket.resolutionDueAt)}</span></p>
+                  <p className="font-semibold text-slate-600">Escalation: <span className="text-slate-500 font-medium">{ticket.escalated ? `Level ${ticket.escalationLevel || 1}` : 'No'}</span></p>
+                  <p className="font-semibold text-slate-600">Created: <span className="text-slate-500 font-medium">{new Date(ticket.createdAt).toLocaleString()}</span></p>
+                  <p className="font-semibold text-slate-600">Updated: <span className="text-slate-500 font-medium">{new Date(ticket.updatedAt).toLocaleString()}</span></p>
+                </div>
+
+                {ticket.resolutionNote && (
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Resolution note</p>
+                    <p className="text-xs text-slate-600 mt-1">{ticket.resolutionNote}</p>
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm font-semibold text-slate-500">
+              No complaint tickets found.
+            </div>
+          )}
+        </div>
+
+        <div className="hidden lg:block overflow-x-auto">
+          <table className="min-w-[1080px] w-full text-sm">
             <thead className="bg-slate-50">
               <tr>
-                {['Ticket', 'Subject', 'Priority', 'Status', 'Created', 'Updated', 'Resolution'].map((header) => (
+                {['Ticket', 'Subject', 'Priority', 'Status', 'SLA', 'Resolution Due', 'Escalation', 'Created', 'Updated', 'Resolution'].map((header) => (
                   <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
                     {header}
                   </th>
@@ -263,7 +335,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
+                  <td colSpan={10} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
                     Loading complaint tickets...
                   </td>
                 </tr>
@@ -287,6 +359,17 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
                         {ticket.status.replace('_', ' ')}
                       </span>
                     </td>
+                    <td className="px-3 py-3">
+                      <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${slaClass(ticket.slaStatus)}`}>
+                        {(ticket.slaStatus || 'on_track').replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-slate-600">
+                      {dueLabel(ticket.resolutionDueAt)}
+                    </td>
+                    <td className="px-3 py-3 text-xs text-slate-500">
+                      {ticket.escalated ? `Level ${ticket.escalationLevel || 1}` : 'No'}
+                    </td>
                     <td className="px-3 py-3 text-xs text-slate-500">{new Date(ticket.createdAt).toLocaleString()}</td>
                     <td className="px-3 py-3 text-xs text-slate-500">{new Date(ticket.updatedAt).toLocaleString()}</td>
                     <td className="px-3 py-3 text-xs text-slate-500">{ticket.resolutionNote || '-'}</td>
@@ -294,7 +377,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
+                  <td colSpan={10} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
                     No complaint tickets found.
                   </td>
                 </tr>

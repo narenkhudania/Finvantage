@@ -30,6 +30,7 @@ interface CommandReportProps {
 }
 
 const COLORS = ['#0f766e', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#84cc16'];
+const formatPct = (value: number) => `${value.toFixed(1)}%`;
 
 const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
   const currencyCountry = snapshot.currency;
@@ -80,6 +81,77 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
     { name: 'Recommended', value: snapshot.goals.returnComparison.recommendedReturn },
   ];
 
+  const fundedPct = snapshot.goals.totalTargetToday > 0
+    ? (snapshot.goals.totalCurrent / snapshot.goals.totalTargetToday) * 100
+    : 0;
+  const debtToAssetPct = snapshot.statementOfPosition.totals.debtToAssets * 100;
+  const riskAllocationDriftPct = (
+    Math.abs(snapshot.riskProfile.currentAllocation.equity - snapshot.riskProfile.recommendedAllocation.equity) +
+    Math.abs(snapshot.riskProfile.currentAllocation.debt - snapshot.riskProfile.recommendedAllocation.debt) +
+    Math.abs(snapshot.riskProfile.currentAllocation.gold - snapshot.riskProfile.recommendedAllocation.gold) +
+    Math.abs(snapshot.riskProfile.currentAllocation.liquid - snapshot.riskProfile.recommendedAllocation.liquid)
+  ) / 2;
+
+  const actionableKpis: Array<{
+    label: string;
+    value: string;
+    tone: 'good' | 'watch' | 'critical';
+    detail: string;
+    action: string;
+    view: View;
+  }> = [
+    {
+      label: 'Monthly Cash Flow Health',
+      value: formatCurrency(snapshot.cashFlow.monthly.surplus, currencyCountry),
+      tone: snapshot.cashFlow.monthly.surplus < 0
+        ? 'critical'
+        : snapshot.cashFlow.monthly.surplus < snapshot.cashFlow.monthly.income * 0.1
+          ? 'watch'
+          : 'good',
+      detail: snapshot.cashFlow.monthly.surplus < 0
+        ? 'You are running a monthly deficit.'
+        : 'Income after expenses and EMIs.',
+      action: snapshot.cashFlow.monthly.surplus < 0
+        ? 'Reduce burn or debt EMI load this month.'
+        : 'Set a fixed monthly investable surplus target.',
+      view: 'cashflow',
+    },
+    {
+      label: 'Goal Funding Coverage',
+      value: formatPct(fundedPct),
+      tone: fundedPct >= 80 ? 'good' : fundedPct >= 40 ? 'watch' : 'critical',
+      detail: `${snapshot.goals.fundedCount} funded out of ${snapshot.goals.totalGoals} goals.`,
+      action: fundedPct < 80
+        ? 'Prioritize top goals and increase monthly contribution.'
+        : 'Maintain current cadence and monitor next goal year.',
+      view: 'goal-summary',
+    },
+    {
+      label: 'Debt Pressure (DTI)',
+      value: formatPct(snapshot.executiveSummary.dtiPct),
+      tone: snapshot.executiveSummary.dtiPct > 45
+        ? 'critical'
+        : snapshot.executiveSummary.dtiPct > 30
+          ? 'watch'
+          : 'good',
+      detail: `Debt to income: ${formatPct(snapshot.executiveSummary.dtiPct)} • Debt to assets: ${formatPct(debtToAssetPct)}.`,
+      action: snapshot.executiveSummary.dtiPct > 30
+        ? 'Evaluate prepayment or refinance options.'
+        : 'Debt load is within healthy range.',
+      view: 'debt',
+    },
+    {
+      label: 'Allocation Drift',
+      value: formatPct(riskAllocationDriftPct),
+      tone: riskAllocationDriftPct > 20 ? 'critical' : riskAllocationDriftPct > 10 ? 'watch' : 'good',
+      detail: 'Total mismatch between current and recommended allocation.',
+      action: riskAllocationDriftPct > 10
+        ? 'Review reallocation actions to reduce risk drift.'
+        : 'Allocation is aligned with your risk profile.',
+      view: 'investment-plan',
+    },
+  ];
+
   const allocationData = [
     {
       name: 'Equity',
@@ -118,6 +190,36 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
         <div>
           <h3 className="text-2xl font-black text-slate-900 tracking-tight">Command Report.</h3>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Infographic Summary</p>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm">
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Prioritized Actions</p>
+            <h4 className="text-base font-black text-slate-900">Actionable KPI Board</h4>
+          </div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Act first on critical</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {actionableKpis.map((item) => (
+            <button
+              key={item.label}
+              onClick={() => onOpen(item.view)}
+              className={`rounded-2xl border p-4 text-left transition ${
+                item.tone === 'critical'
+                  ? 'border-rose-200 bg-rose-50 hover:border-rose-300'
+                  : item.tone === 'watch'
+                    ? 'border-amber-200 bg-amber-50 hover:border-amber-300'
+                    : 'border-emerald-200 bg-emerald-50 hover:border-emerald-300'
+              }`}
+            >
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{item.label}</p>
+              <p className="mt-2 text-2xl font-black text-slate-900">{item.value}</p>
+              <p className="mt-2 text-xs font-semibold text-slate-700">{item.detail}</p>
+              <p className="mt-2 text-xs font-black text-slate-900">{item.action}</p>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -386,15 +488,15 @@ const CommandReport: React.FC<CommandReportProps> = ({ snapshot, onOpen }) => {
       <div className="bg-white p-8 rounded-[3rem] border border-slate-200 shadow-sm">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Command Center</p>
-            <h4 className="text-xl font-black text-slate-900">Deep Dive Modules</h4>
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Reports</p>
+            <h4 className="text-xl font-black text-slate-900">Deep Dive Modules (Context)</h4>
           </div>
           <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Open Details</div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[
             { label: 'Loan Planning Drilldown', view: 'debt', desc: 'Loan schedule, what-if prepay, and repayment analysis.' },
-            { label: 'Shield Configuration', view: 'insurance', desc: 'Insurance gap & coverage logic.' },
+            { label: 'Insurance Planning', view: 'insurance', desc: 'Insurance gap & coverage logic.' },
             { label: 'Tax & Compliance', view: 'tax-estate', desc: 'Tax regime checks and estate flags.' },
             { label: 'Action Strategy', view: 'action-plan', desc: 'Priority actions and alerts.' },
             { label: 'Budget Matrix', view: 'monthly-savings', desc: 'Monthly partitioning and control.' },

@@ -22,8 +22,8 @@ const AdminFraudModule: React.FC<AdminFraudModuleProps> = ({
         action={<span className="text-xs font-black uppercase tracking-wider text-slate-500">{fraudQueue.length} flags</span>}
       />
 
-      <div className="mt-4 overflow-auto">
-        <table className="min-w-[620px] xl:min-w-[880px] 2xl:min-w-[980px] w-full text-sm">
+      <div className="mt-4 admin-table-wrap">
+        <table className="admin-table">
           <thead className="bg-slate-50">
             <tr>
               {['Severity', 'Customer', 'Rule', 'Amount', 'Status', 'Actions'].map((header) => (

@@ -87,8 +87,8 @@ const AdminCustomersModule: React.FC<AdminCustomersModuleProps> = ({
       </SurfaceCard>
 
       <SurfaceCard variant="elevated" padding="none" className="overflow-hidden">
-        <div className="overflow-auto">
-          <table className="min-w-[620px] xl:min-w-[880px] 2xl:min-w-[1050px] w-full text-sm">
+        <div className="admin-table-wrap">
+          <table className="admin-table">
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-3 py-2.5 text-left">

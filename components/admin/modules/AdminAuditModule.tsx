@@ -38,8 +38,8 @@ const AdminAuditModule: React.FC<AdminAuditModuleProps> = ({
       </SurfaceCard>
 
       <SurfaceCard variant="elevated" padding="none" className="overflow-hidden">
-        <div className="overflow-auto">
-          <table className="min-w-[620px] xl:min-w-[900px] 2xl:min-w-[1080px] w-full text-sm">
+        <div className="admin-table-wrap">
+          <table className="admin-table">
             <thead className="bg-slate-50">
               <tr>
                 {['Timestamp', 'Action', 'Entity', 'Entity Id', 'Admin User', 'Reason'].map((header) => (

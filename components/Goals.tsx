@@ -75,6 +75,14 @@ const RETIREMENT_EXPENSE_CATEGORIES = [
   'Surplus (Savings-Investments)',
 ];
 
+const normalizeGoalIdentityText = (value?: string) =>
+  (value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<FinanceState>) => void }> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [step, setStep] = useState(1);
@@ -155,6 +163,35 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
       ? retirementMonthlyFromDetails
       : retirementMonthlyEstimate;
   const retirementAnnualTarget = retirementMonthlyTarget * 12;
+
+  const stepGuidance = useMemo(() => {
+    if (step === 1) {
+      return [
+        'Select goal type and set a unique goal name/description.',
+        'Set priority rank (1 = highest urgency).',
+        'Choose recurring vs one-time and set frequency.',
+      ];
+    }
+    if (step === 2) {
+      return [
+        'Select start and end timeline (or one year for one-time goals).',
+        'Set realistic inflation rate (0% to 15%).',
+        'Verify dates are in the correct sequence.',
+      ];
+    }
+    if (isRetirementGoal) {
+      return [
+        'Choose retirement expense method (current, estimate, or detailed).',
+        'Select at least one funding source bucket.',
+        'Optional: enable loan bridge and provide loan details.',
+      ];
+    }
+    return [
+      'Enter target amount in today’s value.',
+      'Select at least one funding source bucket.',
+      'Optional: enable loan bridge and provide loan details.',
+    ];
+  }, [step, isRetirementGoal]);
 
   const handleOpenAdd = () => {
     setEditingId(null);
@@ -341,6 +378,12 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
     const inflationRate = parseNumber(newGoal.inflationRate || 0, 0);
     const resourceBuckets = newGoal.resourceBuckets || [];
     const isRecurring = newGoal.type === 'Retirement' ? true : Boolean(newGoal.isRecurring);
+    const proposedFrequency = isRecurring ? (newGoal.frequency ?? 'Yearly') : 'One time';
+    const proposedIntervalYears = proposedFrequency === 'Once in 10 years'
+      ? 10
+      : (proposedFrequency === 'Every 2–15 Years' || proposedFrequency === 'Every 2-15 Years')
+        ? parseNumber(newGoal.frequencyIntervalYears ?? 0, 0)
+        : 0;
     let startDate = newGoal.startDate;
     let endDate = newGoal.endDate;
 
@@ -394,6 +437,32 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
         setFormError('Recurring interval must be between 2 and 15 years.');
         return;
       }
+    }
+    const normalizedDescription = normalizeGoalIdentityText(
+      effectiveDescription.length > 0 ? effectiveDescription : (newGoal.type || 'Goal')
+    );
+    const duplicateGoal = state.goals.find(goal => {
+      if (editingId && goal.id === editingId) return false;
+      const goalStartYear = resolveYear(goal.startDate);
+      const goalEndYear = resolveYear(goal.endDate);
+      const goalRecurring = goal.type === 'Retirement' ? true : Boolean(goal.isRecurring);
+      const goalFrequency = goalRecurring ? (goal.frequency ?? 'Yearly') : 'One time';
+      const goalIntervalYears = goalRecurring ? parseNumber(goal.frequencyIntervalYears ?? 0, 0) : 0;
+      const goalDescription = normalizeGoalIdentityText(goal.description || goal.type);
+
+      return (
+        goal.type === newGoal.type &&
+        goalDescription === normalizedDescription &&
+        goalStartYear === startYear &&
+        goalEndYear === endYear &&
+        goalRecurring === isRecurring &&
+        goalFrequency === proposedFrequency &&
+        goalIntervalYears === proposedIntervalYears
+      );
+    });
+    if (duplicateGoal) {
+      setFormError('Duplicate goal detected. Change name, timeline, or frequency before saving.');
+      return;
     }
     if (resourceBuckets.length === 0) {
       setFormError('Select at least one resource bucket.');
@@ -656,12 +725,21 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
 
       {showAdd && (
         <div className="bg-white rounded-[2.5rem] md:rounded-[5rem] w-full shadow-2xl ring-1 ring-slate-200/70 overflow-hidden animate-in slide-in-from-top-3 duration-300 border border-white/20">
-          <div className="p-6 sm:p-10 md:p-12 border-b border-slate-50 flex justify-between items-center bg-white/90">
-             <div className="text-left">
-                <h3 className="text-3xl font-black text-slate-900 tracking-tight">{editingId ? 'Mission Calibration' : 'Mission Configurator'}</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Step {step} of 3</p>
+          <div className="p-6 sm:p-10 md:p-12 border-b border-slate-50 flex justify-between items-center bg-white/90 gap-4">
+             <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setShowAdd(false)}
+                  className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-500 hover:text-slate-900 hover:border-teal-200 transition-all shrink-0"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+                <div className="text-left min-w-0">
+                   <h3 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight truncate">{editingId ? 'Mission Calibration' : 'Mission Configurator'}</h3>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-1">Step {step} of 3</p>
+                </div>
              </div>
-             <button onClick={() => setShowAdd(false)} className="p-4 bg-slate-50 hover:bg-rose-50 hover:text-rose-500 rounded-3xl text-slate-400 transition-all"><Plus size={32} className="rotate-45" /></button>
+             <button onClick={() => setShowAdd(false)} className="p-4 bg-slate-50 hover:bg-rose-50 hover:text-rose-500 rounded-3xl text-slate-400 transition-all shrink-0"><Plus size={32} className="rotate-45" /></button>
           </div>
 
           <div className="p-6 sm:p-10 md:p-12 space-y-12 bg-white/70">
@@ -675,6 +753,25 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                  {formWarning}
                </div>
              )}
+             <div className="p-4 sm:p-6 rounded-[1.5rem] border border-teal-100 bg-teal-50/50 space-y-3 text-left">
+               <div className="flex items-center justify-between gap-3">
+                 <p className="text-[10px] font-black text-teal-700 uppercase tracking-widest flex items-center gap-2">
+                   <Info size={14} /> Input Checklist
+                 </p>
+                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Step {step}/3</span>
+               </div>
+               <div className="w-full h-1.5 bg-teal-100 rounded-full overflow-hidden">
+                 <div className="h-full bg-teal-600 transition-all duration-300" style={{ width: `${(step / 3) * 100}%` }} />
+               </div>
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                 {stepGuidance.map((item) => (
+                   <div key={item} className="rounded-xl bg-white border border-teal-100 px-3 py-2 text-[11px] font-semibold text-slate-700 flex items-start gap-2">
+                     <CheckCircle2 size={13} className="text-teal-600 mt-0.5 shrink-0" />
+                     <span>{item}</span>
+                   </div>
+                 ))}
+               </div>
+             </div>
              {step === 1 && (
                <div className="space-y-12 animate-in fade-in duration-500">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
@@ -882,7 +979,16 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                         <span className="text-4xl font-black min-w-[70px]">{newGoal.inflationRate}%</span>
                      </div>
                   </div>
-                  <button onClick={() => setStep(3)} className="w-full py-8 bg-slate-900 text-white rounded-[3rem] font-black uppercase tracking-[0.3em] hover:bg-teal-600 transition-all flex items-center justify-center gap-4 shadow-xl">Actuarial Calibration <ChevronRight size={20}/></button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setStep(1)}
+                      className="w-full py-6 bg-white border border-slate-200 text-slate-700 rounded-[2rem] font-black uppercase tracking-[0.2em] hover:border-teal-200 hover:text-teal-700 transition-all flex items-center justify-center gap-3"
+                    >
+                      <ArrowLeft size={16}/> Back
+                    </button>
+                    <button onClick={() => setStep(3)} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] hover:bg-teal-600 transition-all flex items-center justify-center gap-3 shadow-xl">Actuarial Calibration <ChevronRight size={18}/></button>
+                  </div>
                </div>
              )}
 
@@ -1137,9 +1243,18 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
                      )}
                   </div>
 
-                  <button onClick={handleSave} className="w-full py-10 bg-teal-600 text-white rounded-[4rem] font-black uppercase tracking-[0.4em] text-xl hover:bg-teal-500 transition-all shadow-2xl flex items-center justify-center gap-6">
-                     {editingId ? 'Update Strategic Mission' : 'Deploy Strategic Mission'} <Rocket size={32}/>
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      className="w-full py-6 bg-white border border-slate-200 text-slate-700 rounded-[2rem] font-black uppercase tracking-[0.2em] hover:border-teal-200 hover:text-teal-700 transition-all flex items-center justify-center gap-3"
+                    >
+                      <ArrowLeft size={16}/> Back
+                    </button>
+                    <button onClick={handleSave} className="w-full py-6 bg-teal-600 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] hover:bg-teal-500 transition-all shadow-2xl flex items-center justify-center gap-3">
+                       {editingId ? 'Update Mission' : 'Deploy Mission'} <Rocket size={20}/>
+                    </button>
+                  </div>
                </div>
              )}
           </div>

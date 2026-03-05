@@ -9,6 +9,7 @@ import { FinanceState, DetailedIncome } from '../types';
 import { clampNumber, parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 import { monthlyIncomeBreakdown, monthlyIncomeFromDetailed } from '../lib/incomeMath';
+import PlanningAssistStrip from './common/PlanningAssistStrip';
 
 interface InflowProfileProps {
   state: FinanceState;
@@ -88,6 +89,11 @@ const PASSIVE_FIELDS: IncomeInputConfig[] = [
 
 const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => {
   const [editingId, setEditingId] = useState<'self' | string | null>(null);
+  const [salaryShockPct, setSalaryShockPct] = useState(0);
+  const [variableIncomeHaircutPct, setVariableIncomeHaircutPct] = useState(0);
+  const [growthScenarioPct, setGrowthScenarioPct] = useState(
+    Math.max(0, Math.round(Number(state.profile.income.expectedIncrease || 6))),
+  );
 
   const members = useMemo(() => [
     { id: 'self', name: state.profile.firstName || 'Primary Member', relation: 'Self', income: state.profile.income },
@@ -206,24 +212,171 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
   const currencyCountry = state.profile.country;
   const currencySymbol = getCurrencySymbol(currencyCountry);
 
+  const inflowAnalysis = useMemo(() => {
+    const inflationAssumption = Math.max(
+      0,
+      Number(state.discountSettings?.defaultInflationRate ?? state.insuranceAnalysis?.inflation ?? 6),
+    );
+    const aggregate = members.reduce((acc, member) => {
+      const breakdown = monthlyIncomeBreakdown(member.income);
+      acc.salary += breakdown.salary;
+      acc.bonus += breakdown.bonus;
+      acc.reimbursements += breakdown.reimbursements;
+      acc.business += breakdown.business;
+      acc.rental += breakdown.rental;
+      acc.investment += breakdown.investment;
+      acc.pension += breakdown.pension;
+      return acc;
+    }, {
+      salary: 0,
+      bonus: 0,
+      reimbursements: 0,
+      business: 0,
+      rental: 0,
+      investment: 0,
+      pension: 0,
+    });
+
+    const fixedCore = aggregate.salary + aggregate.pension;
+    const variablePool = aggregate.bonus + aggregate.reimbursements + aggregate.business + aggregate.rental + aggregate.investment;
+    const stressedMonthly = Math.max(
+      0,
+      fixedCore * (1 + salaryShockPct / 100) + variablePool * (1 - variableIncomeHaircutPct / 100),
+    );
+    const projectedAnnual = stressedMonthly * 12 * (1 + growthScenarioPct / 100);
+    const monthlyOutflow =
+      state.detailedExpenses.reduce((sum, expense) => sum + Math.max(0, Number(expense.amount || 0)), 0)
+      + state.loans.reduce((sum, loan) => sum + Math.max(0, Number(loan.emi || 0)), 0);
+    const stressedSurplus = stressedMonthly - monthlyOutflow;
+    const liquidReserves = state.assets
+      .filter(asset => asset.availableForGoals && (asset.category === 'Liquid' || asset.category === 'Debt'))
+      .reduce((sum, asset) => sum + Math.max(0, Number(asset.currentValue || 0)), 0);
+    const runwayMonths = monthlyOutflow > 0 ? liquidReserves / monthlyOutflow : 0;
+
+    const biggestContributor = members
+      .map(member => ({ name: member.name, monthly: monthlyIncomeFromDetailed(member.income) }))
+      .sort((a, b) => b.monthly - a.monthly)[0];
+
+    const sourceRows = [
+      { label: 'Salary + Pension', value: fixedCore },
+      { label: 'Bonus + Reimbursements', value: aggregate.bonus + aggregate.reimbursements },
+      { label: 'Rental + Dividends', value: aggregate.rental + aggregate.investment },
+      { label: 'Business', value: aggregate.business },
+    ].filter(row => row.value > 0);
+    const topSource = sourceRows.reduce((top, row) => (!top || row.value > top.value ? row : top), null as { label: string; value: number } | null);
+    const sourceConcentrationPct = topSource && totalHouseholdInflow > 0 ? (topSource.value / totalHouseholdInflow) * 100 : 0;
+    const sourceHhiPct = sourceRows.reduce((sum, row) => {
+      const share = totalHouseholdInflow > 0 ? row.value / totalHouseholdInflow : 0;
+      return sum + share * share;
+    }, 0) * 100;
+    const annualNormalizedMonthly = aggregate.bonus + aggregate.reimbursements + aggregate.investment;
+    const growthInflationGap = growthScenarioPct - inflationAssumption;
+    const incomeVolatilityScore = Math.min(100, Math.max(0, (variablePool / (totalHouseholdInflow || 1)) * 100));
+    const planningImpact = members
+      .filter(member => member.id !== 'self')
+      .map(member => {
+        const monthly = monthlyIncomeFromDetailed(member.income);
+        const familyMember = state.family.find(f => f.id === member.id);
+        const included = Boolean(familyMember && !familyMember.isDependent && (familyMember.includeIncomeInPlanning ?? false));
+        return {
+          id: member.id,
+          name: member.name,
+          included,
+          monthly,
+        };
+      })
+      .filter(item => item.monthly > 0);
+    const planningIncludedIncome = planningImpact.filter(item => item.included).reduce((sum, item) => sum + item.monthly, 0);
+    const planningExcludedIncome = planningImpact.filter(item => !item.included).reduce((sum, item) => sum + item.monthly, 0);
+
+    return {
+      aggregate,
+      fixedCore,
+      variablePool,
+      stressedMonthly,
+      projectedAnnual,
+      monthlyOutflow,
+      stressedSurplus,
+      liquidReserves,
+      runwayMonths,
+      biggestContributor,
+      sourceRows,
+      topSource,
+      sourceConcentrationPct,
+      sourceHhiPct,
+      annualNormalizedMonthly,
+      growthInflationGap,
+      inflationAssumption,
+      incomeVolatilityScore,
+      planningImpact,
+      planningIncludedIncome,
+      planningExcludedIncome,
+      variableSharePct: totalHouseholdInflow > 0 ? (variablePool / totalHouseholdInflow) * 100 : 0,
+      fixedSharePct: totalHouseholdInflow > 0 ? (fixedCore / totalHouseholdInflow) * 100 : 0,
+    };
+  }, [
+    members,
+    salaryShockPct,
+    variableIncomeHaircutPct,
+    growthScenarioPct,
+    state.detailedExpenses,
+    state.loans,
+    state.assets,
+    state.family,
+    state.discountSettings?.defaultInflationRate,
+    state.insuranceAnalysis?.inflation,
+    totalHouseholdInflow,
+  ]);
+
+  const inflowAssistStats = useMemo(() => {
+    const growthGapTone = inflowAnalysis.growthInflationGap >= 0 ? 'positive' : 'critical';
+    const runwayTone = inflowAnalysis.runwayMonths >= 12
+      ? 'positive'
+      : inflowAnalysis.runwayMonths >= 6
+        ? 'warning'
+        : 'critical';
+
+    return [
+      {
+        label: 'Monthly Inflow',
+        value: formatCurrency(totalHouseholdInflow, currencyCountry),
+        tone: 'positive',
+      },
+      {
+        label: 'Variable Share',
+        value: `${inflowAnalysis.variableSharePct.toFixed(1)}%`,
+        tone: inflowAnalysis.variableSharePct <= 35 ? 'positive' : 'warning',
+      },
+      {
+        label: 'Runway',
+        value: `${inflowAnalysis.runwayMonths.toFixed(1)} months`,
+        tone: runwayTone,
+      },
+      {
+        label: 'Growth - Inflation',
+        value: `${inflowAnalysis.growthInflationGap >= 0 ? '+' : ''}${inflowAnalysis.growthInflationGap.toFixed(1)}%`,
+        tone: growthGapTone,
+      },
+      {
+        label: 'Volatility Score',
+        value: `${inflowAnalysis.incomeVolatilityScore.toFixed(1)} / 100`,
+        tone: inflowAnalysis.incomeVolatilityScore <= 40 ? 'positive' : 'warning',
+      },
+    ] as const;
+  }, [inflowAnalysis, totalHouseholdInflow, currencyCountry]);
+
   return (
     <div className="space-y-8 md:space-y-12 animate-in fade-in duration-700 pb-24">
-      {/* Visual Header */}
-      <div className="surface-dark p-8 md:p-16 rounded-[2.5rem] md:rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8 md:gap-12">
-          <div className="space-y-4 md:space-y-6 text-left">
-            <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-4 py-1.5 md:py-2 bg-teal-500/10 text-teal-300 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
-              <TrendingUp size={14}/> Household Liquidity
-            </div>
-            <h2 className="text-3xl md:text-7xl font-black tracking-tighter leading-tight md:leading-[0.85]">Household <br/><span className="text-teal-500">Inflows.</span></h2>
-          </div>
-          <div className="bg-white/5 border border-white/10 p-8 md:p-12 rounded-[2rem] md:rounded-[4rem] backdrop-blur-xl flex flex-col items-center gap-2 shadow-inner w-full md:min-w-[300px]">
-             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Aggregated Monthly</p>
-             <h4 className="text-4xl md:text-6xl font-black tracking-tighter text-emerald-400">{formatCurrency(totalHouseholdInflow, currencyCountry)}</h4>
-          </div>
-        </div>
-      </div>
+      <PlanningAssistStrip
+        title="Normalize and stress-test household income"
+        description="Annual inflows are converted to monthly equivalents so cash-flow and goal funding stay comparable."
+        tip="Update only changed fields during salary revisions to keep trend analysis stable."
+        stats={inflowAssistStats.map((stat) => ({
+          label: stat.label,
+          value: stat.value,
+          tone: stat.tone,
+        }))}
+      />
 
       {/* Member Contribution Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -346,6 +499,173 @@ const InflowProfile: React.FC<InflowProfileProps> = ({ state, updateState }) => 
                  ))}
               </div>
            </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_1fr] gap-6">
+        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6 text-left">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Income Analysis Lab</p>
+              <h3 className="text-2xl font-black text-slate-900">Stress Test Your Inflow</h3>
+            </div>
+            <div className="px-3 py-2 rounded-2xl border border-slate-200 bg-slate-50 text-right">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Variable share</p>
+              <p className="text-lg font-black text-slate-900">{inflowAnalysis.variableSharePct.toFixed(1)}%</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Salary shock</label>
+                <span className="text-sm font-black text-slate-900">{salaryShockPct}%</span>
+              </div>
+              <input
+                type="range"
+                min={-40}
+                max={20}
+                step={1}
+                value={salaryShockPct}
+                onChange={(event) => setSalaryShockPct(Number(event.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-teal-600 cursor-pointer"
+              />
+            </div>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Variable haircut</label>
+                <span className="text-sm font-black text-slate-900">{variableIncomeHaircutPct}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={80}
+                step={1}
+                value={variableIncomeHaircutPct}
+                onChange={(event) => setVariableIncomeHaircutPct(Number(event.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-amber-500 cursor-pointer"
+              />
+            </div>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Growth assumption</label>
+                <span className="text-sm font-black text-slate-900">{growthScenarioPct}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                step={1}
+                value={growthScenarioPct}
+                onChange={(event) => setGrowthScenarioPct(Number(event.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-emerald-500 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stressed monthly inflow</p>
+              <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(inflowAnalysis.stressedMonthly, currencyCountry)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Projected annual inflow</p>
+              <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(inflowAnalysis.projectedAnnual, currencyCountry)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stressed monthly surplus</p>
+              <p className={`text-lg font-black mt-1 ${inflowAnalysis.stressedSurplus >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {formatCurrency(inflowAnalysis.stressedSurplus, currencyCountry)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Liquidity runway</p>
+              <p className="text-lg font-black text-slate-900 mt-1">{inflowAnalysis.runwayMonths.toFixed(1)} months</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="surface-dark p-6 md:p-8 rounded-[2.5rem] text-white space-y-5 shadow-xl text-left">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Depth Signals</p>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Source concentration risk</p>
+            <p className="text-xl font-black text-teal-400 mt-1">
+              {inflowAnalysis.sourceConcentrationPct.toFixed(1)}%
+            </p>
+            <p className="text-xs font-semibold text-slate-300 mt-1">
+              HHI: {inflowAnalysis.sourceHhiPct.toFixed(1)} (higher means concentration risk).
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Annual-to-month normalized</p>
+            <p className="text-lg font-black text-slate-100 mt-1">
+              {formatCurrency(inflowAnalysis.annualNormalizedMonthly, currencyCountry)} / month
+            </p>
+            <p className="text-xs font-semibold text-slate-300 mt-1">
+              Bonus, reimbursements, and dividends converted from annual values.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Growth vs inflation gap</p>
+            <p className={`text-lg font-black mt-1 ${inflowAnalysis.growthInflationGap >= 0 ? 'text-emerald-400' : 'text-rose-300'}`}>
+              {inflowAnalysis.growthInflationGap >= 0 ? '+' : ''}{inflowAnalysis.growthInflationGap.toFixed(1)}%
+            </p>
+            <p className="text-xs font-semibold text-slate-300 mt-1">
+              Growth {growthScenarioPct}% vs inflation {inflowAnalysis.inflationAssumption.toFixed(1)}%.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Income volatility score</p>
+            <p className="text-lg font-black text-amber-300 mt-1">
+              {inflowAnalysis.incomeVolatilityScore.toFixed(1)} / 100
+            </p>
+            <p className="text-xs font-semibold text-slate-300 mt-1">
+              Based on variable share of total income.
+            </p>
+          </div>
+          <div className="space-y-4">
+            {inflowAnalysis.sourceRows.map(row => (
+              <div key={row.label} className="space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <span>{row.label}</span>
+                  <span>{formatCurrency(row.value, currencyCountry)}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-teal-400"
+                    style={{ width: `${Math.min(100, (row.value / (totalHouseholdInflow || 1)) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Key insight</p>
+            <p className="text-sm font-semibold text-slate-200">
+              {inflowAnalysis.topSource
+                ? `${inflowAnalysis.topSource.label} is your largest income engine.`
+                : 'Add income data to unlock concentration insights.'}
+            </p>
+            <p className="text-sm font-semibold text-slate-200">
+              {inflowAnalysis.biggestContributor
+                ? `${inflowAnalysis.biggestContributor.name} contributes ${formatCurrency(inflowAnalysis.biggestContributor.monthly, currencyCountry)} per month.`
+                : 'No contributor data yet.'}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Consider in planning impact</p>
+            <p className="text-xs font-semibold text-slate-200">
+              Included: {formatCurrency(inflowAnalysis.planningIncludedIncome, currencyCountry)} • Excluded: {formatCurrency(inflowAnalysis.planningExcludedIncome, currencyCountry)}
+            </p>
+            {inflowAnalysis.planningImpact.slice(0, 3).map(item => (
+              <div key={item.id} className="flex items-center justify-between text-xs text-slate-200">
+                <span>{item.name}</span>
+                <span className={`font-black ${item.included ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {item.included ? 'Included' : 'Excluded'} · {formatCurrency(item.monthly, currencyCountry)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

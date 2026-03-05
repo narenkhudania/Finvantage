@@ -30,6 +30,7 @@ const LAST_UPDATED = 'February 28, 2026';
 
 const NAV_LINKS = [
   { label: 'Support', href: '/support' },
+  { label: 'Contact us', href: '/contact-us' },
   { label: 'FAQ', href: '/faq' },
   { label: 'Privacy', href: '/privacy-policy' },
   { label: 'Terms', href: '/terms-and-condition' },
@@ -288,7 +289,7 @@ export const StaticInfoPage: React.FC<{ page: StaticPageKey }> = ({ page }) => {
         icon={<HelpCircle size={22} />}
       >
         <SectionCard title="Product & Access">
-          <p><strong>Is FinVantage free?</strong> Yes. The core planning system is currently available as a free subscription.</p>
+          <p><strong>Is FinVantage free?</strong> FinVantage runs on paid subscription plans. Current pricing is available on the pricing page and may be updated by admin.</p>
           <p><strong>Do I need to be an expert?</strong> No. The app is structured to guide decisions with visual modules and prompts.</p>
           <p><strong>Can I use it for family planning?</strong> Yes. You can add dependents and include multiple income/expense streams.</p>
         </SectionCard>
@@ -498,4 +499,3 @@ export const StaticInfoPage: React.FC<{ page: StaticPageKey }> = ({ page }) => {
     </SiteShell>
   );
 };
-

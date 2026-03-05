@@ -26,6 +26,14 @@ export interface CustomerComplaintTicket {
   priority: 'low' | 'medium' | 'high' | 'urgent';
   status: 'open' | 'in_progress' | 'waiting_user' | 'resolved' | 'closed';
   resolutionNote?: string | null;
+  firstResponseAt?: string | null;
+  firstResponseDueAt?: string | null;
+  resolutionDueAt?: string | null;
+  closedAt?: string | null;
+  slaStatus?: 'on_track' | 'due_soon' | 'breached' | 'paused' | 'met';
+  escalated?: boolean;
+  escalationLevel?: number;
+  escalationReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -133,6 +141,8 @@ export interface FamilyMember {
   relation: Relation;
   age: number;
   isDependent: boolean;
+  coveredUnderPrimaryInsurance?: boolean;
+  hasSeparateInsurance?: boolean;
   includeIncomeInPlanning?: boolean;
   retirementAge?: number;
   income: DetailedIncome;
@@ -408,6 +418,19 @@ export type Insurance = {
 
 export type View = 
   | 'dashboard' 
+  | 'pricing'
+  | 'billing-manage'
+  | 'subscription-terms'
+  | 'refund-policy'
+  | 'cancellation-policy'
+  | 'faq'
+  | 'privacy-policy'
+  | 'terms-and-condition'
+  | 'legal'
+  | 'site-map'
+  | 'about'
+  | 'blog'
+  | 'blog-post'
   | 'transactions' 
   | 'goals' 
   | 'goal-summary' 
@@ -425,6 +448,7 @@ export type View =
   | 'action-plan' 
   | 'monthly-savings' 
   | 'settings' 
+  | 'data-trust'
   | 'notifications' 
   | 'support'
   | 'benefits' 

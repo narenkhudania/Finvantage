@@ -15,6 +15,7 @@ import {
   Layers,
   ListChecks,
   LogOut,
+  Menu,
   Megaphone,
   RefreshCw,
   Search,
@@ -27,6 +28,7 @@ import {
   Users,
   Wallet,
   Wrench,
+  X,
 } from 'lucide-react';
 import {
   Bar,
@@ -73,6 +75,8 @@ import {
   getPortfolioRows,
   getSubscriptions,
   getSupportTickets,
+  runSupportTicketSlaSweep,
+  escalateSupportTicket,
   getUsageReport,
   getWebhookEvents,
   regenerateAdminRecoveryCodes,
@@ -230,6 +234,7 @@ const MODULES: Array<{
   { id: 'customers', label: 'Customers', icon: Users, permission: 'customers.read' },
   { id: 'portfolio', label: 'Portfolio', icon: Wallet, permission: 'customers.read' },
   { id: 'payments', label: 'Payments', icon: CreditCard, permission: 'payments.read' },
+  { id: 'rewards', label: 'Rewards', icon: CircleDollarSign, permission: 'payments.read' },
   { id: 'compliance', label: 'KYC', icon: Shield, permission: 'kyc.read' },
   { id: 'fraud', label: 'Fraud', icon: ShieldAlert, permission: 'fraud.read' },
   { id: 'support', label: 'Support', icon: Ticket, permission: 'ops.manage' },
@@ -243,6 +248,64 @@ const MODULES: Array<{
   { id: 'blogs', label: 'Blogs', icon: SlidersHorizontal, permission: 'analytics.read' },
   { id: 'operations', label: 'Operations', icon: Wrench, permission: 'ops.manage' },
 ];
+
+const ADMIN_WORKFLOW_NAV: Array<{
+  id: string;
+  label: string;
+  modules: AdminModule[];
+}> = [
+  {
+    id: 'command_center',
+    label: 'Command Center',
+    modules: ['overview'],
+  },
+  {
+    id: 'customer_ops',
+    label: 'Customer Ops',
+    modules: ['customers', 'support', 'crm'],
+  },
+  {
+    id: 'money_ops',
+    label: 'Money Ops',
+    modules: ['payments', 'portfolio', 'rewards'],
+  },
+  {
+    id: 'risk_compliance',
+    label: 'Risk & Compliance',
+    modules: ['compliance', 'fraud'],
+  },
+  {
+    id: 'governance',
+    label: 'Governance',
+    modules: ['access', 'audit', 'operations'],
+  },
+  {
+    id: 'intelligence',
+    label: 'Intelligence',
+    modules: ['analytics', 'usage', 'behavior', 'growth', 'blogs'],
+  },
+];
+
+const ADMIN_ROLE_MODULE_DEFAULTS: Record<string, AdminModule[]> = {
+  support_agent: ['overview', 'customers', 'support', 'crm'],
+  support_manager: ['overview', 'customers', 'support', 'crm', 'analytics'],
+  compliance_officer: ['overview', 'customers', 'compliance', 'fraud', 'audit', 'support'],
+  risk_officer: ['overview', 'customers', 'compliance', 'fraud', 'audit'],
+  operations_manager: ['overview', 'customers', 'payments', 'portfolio', 'rewards', 'support', 'operations', 'crm'],
+  growth_manager: ['overview', 'customers', 'analytics', 'usage', 'behavior', 'growth', 'blogs', 'crm'],
+};
+
+const resolveRoleScopedModules = (roleKey?: string | null): AdminModule[] | null => {
+  if (!roleKey) return null;
+  const normalized = roleKey.toLowerCase().trim();
+  if (!normalized || normalized === 'admin' || normalized === 'super_admin') return null;
+  if (ADMIN_ROLE_MODULE_DEFAULTS[normalized]) return ADMIN_ROLE_MODULE_DEFAULTS[normalized];
+  if (normalized.includes('support')) return ADMIN_ROLE_MODULE_DEFAULTS.support_agent;
+  if (normalized.includes('compliance') || normalized.includes('risk')) return ADMIN_ROLE_MODULE_DEFAULTS.compliance_officer;
+  if (normalized.includes('growth') || normalized.includes('marketing')) return ADMIN_ROLE_MODULE_DEFAULTS.growth_manager;
+  if (normalized.includes('operation') || normalized.includes('ops')) return ADMIN_ROLE_MODULE_DEFAULTS.operations_manager;
+  return null;
+};
 
 const INR = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -337,6 +400,43 @@ const BLOG_PROMOTION_STEPS: Array<{ key: string; label: string }> = [
   { key: 'refresh_date', label: 'Added refresh date in content' },
   { key: 'repurpose_video', label: 'Repurposed to short video' },
 ];
+
+const toDateTimeLocalInput = (value: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const toIsoOrNull = (value: string) => {
+  if (!value.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+};
+
+const downloadCsv = (filename: string, headers: string[], rows: Array<Array<string | number | null | undefined>>) => {
+  const escapeCell = (value: string | number | null | undefined) => {
+    const text = value == null ? '' : String(value);
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const csv = [
+    headers.map(escapeCell).join(','),
+    ...rows.map((row) => row.map(escapeCell).join(',')),
+  ].join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+};
 
 type ModuleErrorBoundaryProps = React.PropsWithChildren<{
   moduleName: AdminModule;
@@ -433,9 +533,23 @@ const createBlogDraft = (): BlogPost => ({
   updatedAt: new Date().toISOString(),
 });
 
+type AdminCommandItem = {
+  id: string;
+  kind: 'module' | 'customer' | 'payment' | 'portfolio' | 'support' | 'kyc' | 'fraud';
+  label: string;
+  helper: string;
+  module: AdminModule;
+  queryHint?: string;
+};
+
 const AdminPage: React.FC = () => {
   const [booting, setBooting] = useState(true);
   const [activeModule, setActiveModule] = useState<AdminModule>('overview');
+  const [moduleViewMode, setModuleViewMode] = useState<'summary' | 'detailed'>('summary');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
+  const [commandActiveIndex, setCommandActiveIndex] = useState(0);
   const [access, setAccess] = useState<AdminAccess | null>(null);
   const [loginState, setLoginState] = useState<LoginState>({ email: '', password: '' });
   const [revealLoginPassword, setRevealLoginPassword] = useState(false);
@@ -506,6 +620,10 @@ const AdminPage: React.FC = () => {
 
   const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
   const [webhookEvents, setWebhookEvents] = useState<WebhookEvent[]>([]);
+  const [billingCoupons, setBillingCoupons] = useState<Array<Record<string, any>>>([]);
+  const [billingPlans, setBillingPlans] = useState<Array<Record<string, any>>>([]);
+  const [billingReminders, setBillingReminders] = useState<Array<Record<string, any>>>([]);
+  const [billingReferralEvents, setBillingReferralEvents] = useState<Array<Record<string, any>>>([]);
 
   const [blogPosts, setBlogPosts] = useState<BlogPost[]>([]);
   const [blogStatusFilter, setBlogStatusFilter] = useState<BlogStatus | 'all'>('all');
@@ -525,6 +643,39 @@ const AdminPage: React.FC = () => {
     enabled: false,
     rolloutPercent: 100,
   });
+
+  const [couponForm, setCouponForm] = useState({
+    code: '',
+    description: '',
+    discountType: 'percentage',
+    discountValue: 10,
+    maxDiscountAmount: 99,
+    usageLimitTotal: 0,
+    usageLimitPerUser: 0,
+    appliesToPlanCodes: '',
+    validUntil: '',
+    stackable: true,
+    recurringAllowed: true,
+  });
+
+  const [overrideForm, setOverrideForm] = useState({
+    userId: '',
+    durationDays: 30,
+    reason: 'Admin override',
+  });
+
+  const [pointsForm, setPointsForm] = useState({
+    userId: '',
+    points: 0,
+    eventType: 'admin_manual_adjustment',
+    sourceRef: 'admin_manual',
+    reason: '',
+  });
+  const [pointsFreezeForm, setPointsFreezeForm] = useState({
+    userId: '',
+    frozen: true,
+  });
+  const [pointsExportUserId, setPointsExportUserId] = useState('');
 
   const [crmLeadForm, setCrmLeadForm] = useState({
     title: '',
@@ -594,6 +745,45 @@ const AdminPage: React.FC = () => {
     setError(null);
     setSuccess(null);
   };
+
+  const callAdminBillingMutation = useCallback(async (
+    action: string,
+    payload: Record<string, unknown> = {}
+  ) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token || '';
+    if (!token) {
+      throw new Error('Sign in again to continue.');
+    }
+
+    const response = await fetch('/api/admin/billing-mutations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(selectedWorkspaceId ? { 'x-workspace-id': selectedWorkspaceId } : {}),
+      },
+      body: JSON.stringify({
+        action,
+        ...payload,
+      }),
+    });
+
+    const payloadText = await response.text().catch(() => '');
+    let parsed: Record<string, any> = {};
+    if (payloadText) {
+      try {
+        parsed = JSON.parse(payloadText) as Record<string, any>;
+      } catch {
+        parsed = {};
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(String(parsed.error || `Admin billing action failed (HTTP ${response.status}).`));
+    }
+    return parsed;
+  }, [selectedWorkspaceId]);
 
   const safeErrorText = useMemo(() => {
     if (!error) return null;
@@ -806,9 +996,40 @@ const AdminPage: React.FC = () => {
   }, [blogSearch, blogStatusFilter]);
 
   const loadOperations = useCallback(async () => {
-    const [flags, events] = await Promise.all([getFeatureFlags(), getWebhookEvents(160)]);
+    const [flags, events, couponsRes, plansRes, remindersRes, referralRes] = await Promise.all([
+      getFeatureFlags(),
+      getWebhookEvents(160),
+      supabase
+        .from('subscription_coupons')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(120),
+      supabase
+        .from('billing_plans')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .limit(40),
+      supabase
+        .from('billing_internal_reminders')
+        .select('*')
+        .order('due_at', { ascending: true })
+        .limit(120),
+      supabase
+        .from('referral_events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200),
+    ]);
     setFeatureFlags(flags);
     setWebhookEvents(events);
+    if (couponsRes.error) throw new Error(couponsRes.error.message || 'Could not load coupons.');
+    if (plansRes.error) throw new Error(plansRes.error.message || 'Could not load billing plans.');
+    if (remindersRes.error) throw new Error(remindersRes.error.message || 'Could not load billing reminders.');
+    if (referralRes.error) throw new Error(referralRes.error.message || 'Could not load referral events.');
+    setBillingCoupons((couponsRes.data || []) as Array<Record<string, any>>);
+    setBillingPlans((plansRes.data || []) as Array<Record<string, any>>);
+    setBillingReminders((remindersRes.data || []) as Array<Record<string, any>>);
+    setBillingReferralEvents((referralRes.data || []) as Array<Record<string, any>>);
   }, []);
 
   const refreshModule = useCallback(async () => {
@@ -830,6 +1051,9 @@ const AdminPage: React.FC = () => {
           break;
         case 'payments':
           await loadPayments();
+          break;
+        case 'rewards':
+          await loadOperations();
           break;
         case 'compliance':
           await loadCompliance();
@@ -1381,10 +1605,473 @@ const AdminPage: React.FC = () => {
     return cards;
   }, [analyticsGrowth, usageGrowth]);
 
-  const visibleModules = useMemo(
-    () => MODULES.filter((module) => can(module.permission)),
-    [can]
+  const roleScopedModules = useMemo(() => resolveRoleScopedModules(access?.roleKey), [access?.roleKey]);
+
+  const visibleModules = useMemo(() => {
+    const permissionScoped = MODULES.filter((module) => can(module.permission));
+    if (!roleScopedModules || roleScopedModules.length === 0) return permissionScoped;
+    const scopedSet = new Set(roleScopedModules);
+    const workflowScoped = permissionScoped.filter((module) => scopedSet.has(module.id));
+    return workflowScoped.length ? workflowScoped : permissionScoped;
+  }, [can, roleScopedModules]);
+
+  const visibleWorkflowNav = useMemo(() => {
+    const visibleById = new Map(visibleModules.map((module) => [module.id, module]));
+    return ADMIN_WORKFLOW_NAV
+      .map((group) => ({
+        ...group,
+        moduleItems: group.modules
+          .map((moduleId) => visibleById.get(moduleId))
+          .filter((module): module is NonNullable<typeof module> => Boolean(module)),
+      }))
+      .filter((group) => group.moduleItems.length > 0);
+  }, [visibleModules]);
+
+  const activeModuleMeta = useMemo(
+    () => MODULES.find((item) => item.id === activeModule) || null,
+    [activeModule]
   );
+
+  const activeWorkflowMeta = useMemo(
+    () =>
+      visibleWorkflowNav.find((group) =>
+        group.moduleItems.some((module) => module.id === activeModule)
+      ) || null,
+    [activeModule, visibleWorkflowNav]
+  );
+
+  useEffect(() => {
+    if (!visibleModules.length) return;
+    if (!visibleModules.some((module) => module.id === activeModule)) {
+      setActiveModule(visibleModules[0].id);
+    }
+  }, [activeModule, visibleModules]);
+
+  useEffect(() => {
+    if (activeModule === 'overview') {
+      setModuleViewMode('detailed');
+      return;
+    }
+    setModuleViewMode('summary');
+  }, [activeModule]);
+
+  const onCommandSelect = useCallback((item: AdminCommandItem) => {
+    setActiveModule(item.module);
+    if (item.kind === 'customer' && item.queryHint) setCustomerSearch(item.queryHint);
+    if (item.kind === 'portfolio' && item.queryHint) setPortfolioSearch(item.queryHint);
+    if (item.kind === 'support') setSupportStatusFilter('all');
+    setCommandPaletteOpen(false);
+    setCommandQuery('');
+  }, []);
+
+  const renderModuleSummary = () => {
+    const summary = moduleSummary[activeModule];
+    return (
+      <div className={`${cardClass} p-5 lg:p-6`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-600">Summary View</p>
+            <h3 className="mt-2 text-xl font-black tracking-tight text-slate-900">{activeModuleMeta?.label || 'Module'} Snapshot</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-600">{summary.label}</p>
+          </div>
+          <button
+            onClick={() => setModuleViewMode('detailed')}
+            className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700 inline-flex items-center gap-1.5`}
+          >
+            <ChevronRight size={14} />
+            Open Detailed Tools
+          </button>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {summary.metrics.map((metric) => (
+            <div key={metric.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{metric.label}</p>
+              <p className="mt-2 text-lg font-black text-slate-900">{metric.value}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 text-xs font-semibold text-slate-500">
+          Use Summary View for quick triage. Switch to Detailed Tools for full workflows and editing actions.
+        </p>
+      </div>
+    );
+  };
+
+  const moduleSummary = useMemo(() => {
+    const paymentFailures = payments.filter((payment) => ['failed', 'declined'].includes(String(payment.status || '').toLowerCase())).length;
+    const openSupport = supportTickets.filter((ticket) => !['resolved', 'closed'].includes(String(ticket.status || '').toLowerCase())).length;
+    const pendingKyc = kycQueue.filter((kyc) => !['approved'].includes(String(kyc.status || '').toLowerCase())).length;
+    const openFraud = fraudQueue.filter((flag) => !['resolved', 'false_positive', 'closed'].includes(String(flag.status || '').toLowerCase())).length;
+    const blockedCustomers = customers.filter((customer) => Boolean(customer.blocked)).length;
+    const growthJourneys = growthReport?.journeys?.length || 0;
+
+    return {
+      overview: {
+        label: 'Platform health and critical queues',
+        metrics: [
+          { label: 'Total Users', value: formatNumber(overview?.summary.totalUsers || 0) },
+          { label: 'Open Tickets', value: formatNumber(overview?.summary.openTickets || 0) },
+          { label: 'Pending KYC', value: formatNumber(overview?.summary.pendingKyc || 0) },
+        ],
+      },
+      customers: {
+        label: 'Customer base, risk, and service signals',
+        metrics: [
+          { label: 'Profiles loaded', value: formatNumber(customers.length) },
+          { label: 'Blocked', value: formatNumber(blockedCustomers) },
+          { label: 'Onboarded', value: formatNumber(customers.filter((customer) => customer.onboarding_done).length) },
+        ],
+      },
+      portfolio: {
+        label: 'AUM and net-worth posture',
+        metrics: [
+          { label: 'Profiles tracked', value: formatNumber(portfolioRows.length) },
+          {
+            label: 'Aggregate Net Worth',
+            value: formatCurrency(
+              portfolioRows.reduce((total, row) => total + (Number.isFinite(row.netWorth) ? row.netWorth : 0), 0)
+            ),
+          },
+          {
+            label: 'Total Assets',
+            value: formatCurrency(
+              portfolioRows.reduce((total, row) => total + (Number.isFinite(row.totalAssets) ? row.totalAssets : 0), 0)
+            ),
+          },
+        ],
+      },
+      payments: {
+        label: 'Collections, renewals, and failure pressure',
+        metrics: [
+          { label: 'Payments', value: formatNumber(payments.length) },
+          { label: 'Active subscriptions', value: formatNumber(subscriptions.filter((sub) => String(sub.status || '').toLowerCase() === 'active').length) },
+          { label: 'Failures', value: formatNumber(paymentFailures) },
+        ],
+      },
+      rewards: {
+        label: 'Coupons, plans, referrals, and points controls',
+        metrics: [
+          { label: 'Active coupons', value: formatNumber(billingCoupons.filter((coupon) => coupon?.is_active !== false).length) },
+          { label: 'Plans', value: formatNumber(billingPlans.length) },
+          { label: 'Referral events', value: formatNumber(billingReferralEvents.length) },
+        ],
+      },
+      compliance: {
+        label: 'KYC pipeline and review readiness',
+        metrics: [
+          { label: 'KYC queue', value: formatNumber(kycQueue.length) },
+          { label: 'Pending review', value: formatNumber(pendingKyc) },
+          { label: 'High risk (70+)', value: formatNumber(kycQueue.filter((kyc) => Number(kyc.risk_score || 0) >= 70).length) },
+        ],
+      },
+      fraud: {
+        label: 'Fraud events and resolution backlog',
+        metrics: [
+          { label: 'Open flags', value: formatNumber(openFraud) },
+          { label: 'Critical severity', value: formatNumber(fraudQueue.filter((flag) => String(flag.severity || '').toLowerCase() === 'critical').length) },
+          { label: 'Assigned', value: formatNumber(fraudQueue.filter((flag) => Boolean(flag.assigned_to)).length) },
+        ],
+      },
+      support: {
+        label: 'Ticket queue and SLA pressure',
+        metrics: [
+          { label: 'Open tickets', value: formatNumber(openSupport) },
+          { label: 'Due soon', value: formatNumber(supportTickets.filter((ticket) => ticket.slaStatus === 'due_soon').length) },
+          { label: 'Breached', value: formatNumber(supportTickets.filter((ticket) => ticket.slaStatus === 'breached').length) },
+        ],
+      },
+      access: {
+        label: 'Access posture and admin security',
+        metrics: [
+          { label: 'Admin users', value: formatNumber(adminUsers.length) },
+          { label: 'Roles', value: formatNumber(adminRoles.length) },
+          { label: 'Live sessions', value: formatNumber(securitySessions.filter((session) => !session.revokedAt).length) },
+        ],
+      },
+      audit: {
+        label: 'Immutable trail and governance events',
+        metrics: [
+          { label: 'Audit rows', value: formatNumber(auditLogs.length) },
+          { label: 'Unique actors', value: formatNumber(new Set(auditLogs.map((item) => item.adminUserId)).size) },
+          { label: 'Latest event', value: formatDate(auditLogs[0]?.createdAt || null) },
+        ],
+      },
+      analytics: {
+        label: 'Growth, conversion, and revenue trajectory',
+        metrics: [
+          { label: 'New users', value: formatNumber(analytics?.totals.newUsers || 0) },
+          { label: 'Revenue', value: formatCurrency(analytics?.totals.revenue || 0) },
+          { label: 'Avg DAU', value: formatNumber(Math.round(analytics?.totals.avgDau || 0)) },
+        ],
+      },
+      usage: {
+        label: 'Product usage concentration and activation',
+        metrics: [
+          { label: 'Total events', value: formatNumber(usageReport?.totals.totalEvents || 0) },
+          { label: 'Unique users', value: formatNumber(usageReport?.totals.uniqueUsers || 0) },
+          {
+            label: 'Goal conversion',
+            value: usageReport?.totals.uniqueUsers
+              ? `${round((usageReport.totals.goalCreates / usageReport.totals.uniqueUsers) * 100, 1).toFixed(1)}%`
+              : '0.0%',
+          },
+        ],
+      },
+      behavior: {
+        label: 'Behavior cohorts and retention',
+        metrics: [
+          { label: 'Cohorts', value: formatNumber(behaviorReport?.cohorts?.length || 0) },
+          { label: 'At risk users', value: formatNumber(behaviorReport?.alerts?.filter((alert) => alert.severity === 'high' || alert.severity === 'critical').length || 0) },
+          { label: 'Week-4 retention', value: `${round(behaviorReport?.kpis?.retentionWeek4Pct || 0, 1).toFixed(1)}%` },
+        ],
+      },
+      growth: {
+        label: 'Lifecycle campaigns and experimentation',
+        metrics: [
+          { label: 'Journeys', value: formatNumber(growthJourneys) },
+          { label: 'Active campaigns', value: formatNumber(growthReport?.journeys?.filter((journey) => journey.status === 'active').length || 0) },
+          { label: 'Conversion', value: `${round(growthReport?.kpis?.goalConversionPct || 0, 1).toFixed(1)}%` },
+        ],
+      },
+      crm: {
+        label: 'Customer pipeline and engagement operations',
+        metrics: [
+          { label: 'Leads', value: formatNumber(crmReport?.summary.leads || 0) },
+          { label: 'Deals', value: formatNumber(crmReport?.summary.deals || 0) },
+          { label: 'Open tasks', value: formatNumber(crmReport?.summary.openTasks || 0) },
+        ],
+      },
+      blogs: {
+        label: 'Content pipeline and SEO publishing',
+        metrics: [
+          { label: 'Posts', value: formatNumber(blogPosts.length) },
+          { label: 'Published', value: formatNumber(blogPosts.filter((post) => post.status === 'published').length) },
+          { label: 'Scheduled', value: formatNumber(blogPosts.filter((post) => post.status === 'scheduled').length) },
+        ],
+      },
+      operations: {
+        label: 'Platform controls and incident tooling',
+        metrics: [
+          { label: 'Feature flags', value: formatNumber(featureFlags.length) },
+          { label: 'Webhook queue', value: formatNumber(webhookEvents.length) },
+          { label: 'Open reminders', value: formatNumber(billingReminders.filter((item) => String(item.status || '').toLowerCase() !== 'done').length) },
+        ],
+      },
+    } satisfies Record<AdminModule, { label: string; metrics: Array<{ label: string; value: string }> }>;
+  }, [
+    adminRoles.length,
+    adminUsers.length,
+    analytics?.totals.avgDau,
+    analytics?.totals.newUsers,
+    analytics?.totals.revenue,
+    auditLogs,
+    behaviorReport,
+    billingCoupons,
+    billingPlans,
+    billingReferralEvents.length,
+    billingReminders,
+    blogPosts,
+    crmReport,
+    customers,
+    featureFlags.length,
+    formatDate,
+    fraudQueue,
+    growthReport,
+    kycQueue,
+    overview?.summary.openTickets,
+    overview?.summary.pendingKyc,
+    overview?.summary.totalUsers,
+    payments,
+    portfolioRows,
+    securitySessions,
+    subscriptions,
+    supportTickets,
+    usageReport,
+    webhookEvents.length,
+  ]);
+
+  const commandItems = useMemo(() => {
+    const q = commandQuery.trim().toLowerCase();
+    const include = (...chunks: Array<string | undefined | null>) => {
+      if (!q) return true;
+      return chunks.some((chunk) => String(chunk || '').toLowerCase().includes(q));
+    };
+
+    const items: AdminCommandItem[] = [];
+
+    visibleModules.forEach((module) => {
+      if (!include(module.label, module.id, `open ${module.label}`)) return;
+      items.push({
+        id: `module:${module.id}`,
+        kind: 'module',
+        label: `Open ${module.label}`,
+        helper: `Workflow: ${visibleWorkflowNav.find((group) => group.moduleItems.some((item) => item.id === module.id))?.label || 'General'}`,
+        module: module.id,
+      });
+    });
+
+    customers.slice(0, 160).forEach((customer) => {
+      if (!include(customer.email, customer.first_name, customer.last_name, customer.user_id, customer.mobile)) return;
+      items.push({
+        id: `customer:${customer.user_id}`,
+        kind: 'customer',
+        label: `${customer.first_name} ${customer.last_name || ''}`.trim() || customer.email,
+        helper: `Customer • ${customer.email}`,
+        module: 'customers',
+        queryHint: customer.email || customer.user_id,
+      });
+    });
+
+    payments.slice(0, 160).forEach((payment) => {
+      if (!include(payment.provider_payment_id, payment.user_id, payment.status, String(payment.amount), payment.id)) return;
+      items.push({
+        id: `payment:${payment.id}`,
+        kind: 'payment',
+        label: payment.provider_payment_id || payment.id,
+        helper: `Payment • ${formatCurrency(payment.amount)} • ${payment.status}`,
+        module: 'payments',
+      });
+    });
+
+    portfolioRows.slice(0, 160).forEach((row) => {
+      if (!include(row.email, row.name, row.userId)) return;
+      items.push({
+        id: `portfolio:${row.userId}`,
+        kind: 'portfolio',
+        label: row.name || row.email,
+        helper: `Portfolio • Net worth ${formatCurrency(row.netWorth)}`,
+        module: 'portfolio',
+        queryHint: row.email || row.userId,
+      });
+    });
+
+    supportTickets.slice(0, 160).forEach((ticket) => {
+      if (!include(ticket.ticketNumber, ticket.subject, ticket.userId, ticket.status, ticket.priority)) return;
+      items.push({
+        id: `support:${ticket.id}`,
+        kind: 'support',
+        label: `#${ticket.ticketNumber} ${ticket.subject}`,
+        helper: `Support • ${ticket.status} • ${ticket.priority}`,
+        module: 'support',
+      });
+    });
+
+    kycQueue.slice(0, 160).forEach((kyc) => {
+      if (!include(kyc.user_id, kyc.email || '', kyc.status, String(kyc.risk_score))) return;
+      items.push({
+        id: `kyc:${kyc.user_id}`,
+        kind: 'kyc',
+        label: kyc.email || kyc.user_id,
+        helper: `KYC • ${kyc.status} • risk ${kyc.risk_score}`,
+        module: 'compliance',
+      });
+    });
+
+    fraudQueue.slice(0, 160).forEach((flag) => {
+      if (!include(flag.id, flag.user_id, flag.email || '', flag.rule_key, flag.status, flag.severity)) return;
+      items.push({
+        id: `fraud:${flag.id}`,
+        kind: 'fraud',
+        label: flag.email || flag.user_id,
+        helper: `Fraud • ${flag.severity} • ${flag.rule_key}`,
+        module: 'fraud',
+      });
+    });
+
+    if (!q) {
+      return items
+        .sort((a, b) => {
+          if (a.kind === 'module' && b.kind !== 'module') return -1;
+          if (a.kind !== 'module' && b.kind === 'module') return 1;
+          return a.label.localeCompare(b.label);
+        })
+        .slice(0, 20);
+    }
+
+    return items.slice(0, 30);
+  }, [
+    commandQuery,
+    customers,
+    formatCurrency,
+    fraudQueue,
+    kycQueue,
+    payments,
+    portfolioRows,
+    supportTickets,
+    visibleModules,
+    visibleWorkflowNav,
+  ]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
+
+      if (!commandPaletteOpen) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setCommandPaletteOpen(false);
+        return;
+      }
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setCommandActiveIndex((current) => Math.min(current + 1, Math.max(commandItems.length - 1, 0)));
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setCommandActiveIndex((current) => Math.max(current - 1, 0));
+        return;
+      }
+
+      if (event.key === 'Enter' && commandItems[commandActiveIndex]) {
+        event.preventDefault();
+        onCommandSelect(commandItems[commandActiveIndex]);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [commandActiveIndex, commandItems, commandPaletteOpen, onCommandSelect]);
+
+  useEffect(() => {
+    setCommandActiveIndex(0);
+  }, [commandQuery, commandPaletteOpen]);
+
+  useEffect(() => {
+    if (!commandPaletteOpen || !access?.isAdmin) return;
+    const tasks: Array<Promise<unknown>> = [];
+    if (customers.length === 0) tasks.push(loadCustomers());
+    if (payments.length === 0 || subscriptions.length === 0) tasks.push(loadPayments());
+    if (portfolioRows.length === 0) tasks.push(loadPortfolio());
+    if (supportTickets.length === 0) tasks.push(loadSupport());
+    if (kycQueue.length === 0) tasks.push(loadCompliance());
+    if (fraudQueue.length === 0) tasks.push(loadFraud());
+    if (!tasks.length) return;
+    void Promise.allSettled(tasks);
+  }, [
+    access?.isAdmin,
+    commandPaletteOpen,
+    customers.length,
+    fraudQueue.length,
+    kycQueue.length,
+    loadCompliance,
+    loadCustomers,
+    loadFraud,
+    loadPayments,
+    loadPortfolio,
+    loadSupport,
+    payments.length,
+    portfolioRows.length,
+    subscriptions.length,
+    supportTickets.length,
+  ]);
 
   const renderOverview = () => {
     return (
@@ -1443,6 +2130,26 @@ const AdminPage: React.FC = () => {
       formatCurrency={formatCurrency}
       formatNumber={formatNumber}
       formatDate={formatDate}
+      busy={busy}
+      onAdminSubscriptionAction={async (action, subscription) => {
+        setBusy(true);
+        try {
+          const patch = action === 'cancel_at_period_end'
+            ? { cancel_at_period_end: true, auto_renew: false, updated_at: new Date().toISOString() }
+            : { cancel_at_period_end: false, auto_renew: true, updated_at: new Date().toISOString() };
+          const { error: updateError } = await supabase
+            .from('subscriptions')
+            .update(patch)
+            .eq('id', subscription.id);
+          if (updateError) throw updateError;
+          setSuccess(action === 'cancel_at_period_end' ? 'Subscription set to cancel at period end.' : 'Subscription resumed.');
+          await loadPayments();
+        } catch (err) {
+          setError((err as Error).message || 'Could not update subscription status.');
+        } finally {
+          setBusy(false);
+        }
+      }}
     />
   );
 
@@ -1504,6 +2211,30 @@ const AdminPage: React.FC = () => {
       supportTickets={supportTickets}
       setSupportStatusFilter={setSupportStatusFilter}
       onRefreshSupport={loadSupport}
+      onRunSlaSweep={async () => {
+        setBusy(true);
+        try {
+          const result = await runSupportTicketSlaSweep({ dueSoonHours: 6, forceEscalation: false });
+          setSuccess(`SLA sweep complete: ${result.updated} updated, ${result.escalated} escalated, ${result.breached} breached.`);
+          await loadSupport();
+        } catch (err) {
+          setError((err as Error).message || 'Could not run SLA sweep.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onManualEscalate={async (ticket) => {
+        setBusy(true);
+        try {
+          await escalateSupportTicket(ticket.id, 'manual_escalation_admin_panel');
+          setSuccess('Ticket escalated.');
+          await loadSupport();
+        } catch (err) {
+          setError((err as Error).message || 'Could not escalate ticket.');
+        } finally {
+          setBusy(false);
+        }
+      }}
       onMoveInProgress={async (ticket) => {
         setBusy(true);
         try {
@@ -1769,6 +2500,68 @@ const AdminPage: React.FC = () => {
     ]
   );
 
+  const appendBlogMarkdown = useCallback((snippet: string) => {
+    setBlogForm((prev) => {
+      const existing = prev.contentMarkdown.trimEnd();
+      return {
+        ...prev,
+        contentMarkdown: existing ? `${existing}\n\n${snippet}` : snippet,
+      };
+    });
+  }, []);
+
+  const persistBlogPost = useCallback(
+    async (statusOverride?: BlogStatus) => {
+      if (!blogForm.title.trim()) {
+        setError('Blog title is required.');
+        return;
+      }
+
+      const nextStatus = statusOverride || blogForm.status;
+      const payloadPublishedAt =
+        nextStatus === 'published'
+          ? blogForm.publishedAt || new Date().toISOString()
+          : blogForm.publishedAt;
+
+      setBusy(true);
+      try {
+        const saved = await saveAdminBlogPost({
+          id: blogForm.id || undefined,
+          title: blogForm.title,
+          slug: blogForm.slug,
+          excerpt: blogForm.excerpt,
+          contentMarkdown: blogForm.contentMarkdown,
+          status: nextStatus,
+          publishedAt: payloadPublishedAt,
+          scheduledFor: blogForm.scheduledFor,
+          targetKeyword: blogForm.targetKeyword,
+          secondaryKeywords: blogForm.secondaryKeywords,
+          tags: blogForm.tags,
+          metaTitle: blogForm.metaTitle,
+          metaDescription: blogForm.metaDescription,
+          canonicalUrl: blogForm.canonicalUrl,
+          ogImageUrl: blogForm.ogImageUrl,
+          ctaText: blogForm.ctaText,
+          ctaUrl: blogForm.ctaUrl,
+          internalLinkTargets: blogForm.internalLinkTargets,
+          externalReferences: blogForm.externalReferences,
+          schemaType: blogForm.schemaType,
+          faqSchema: blogForm.faqSchema,
+          promotionChecklist: blogForm.promotionChecklist,
+          isFeatured: blogForm.isFeatured,
+        });
+        setBlogForm(saved);
+        setSuccess(nextStatus === 'published' ? 'Post published.' : 'Blog post saved.');
+        await loadBlogs();
+      } catch (err) {
+        setError((err as Error).message || 'Could not save blog post.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [blogForm, loadBlogs]
+  );
+
   const renderUsage = () => (
     <AdminUsageModule
       usageDays={usageDays}
@@ -1852,8 +2645,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Behavioral Cohorts</h3>
-            <div className="overflow-auto mt-3">
-              <table className="min-w-[620px] lg:min-w-[700px] w-full text-sm">
+            <div className="admin-table-wrap mt-3">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Cohort', 'Users', 'W1', 'W4', 'Churn'].map((header) => (
@@ -1895,8 +2688,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Path Analysis</h3>
-            <div className="overflow-auto mt-3">
-              <table className="min-w-[620px] lg:min-w-[700px] w-full text-sm">
+            <div className="admin-table-wrap mt-3">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Path', 'Users', 'Share', 'Gap (min)'].map((header) => (
@@ -1938,8 +2731,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Audience & Traffic</h3>
-            <div className="overflow-auto mt-3">
-              <table className="min-w-[620px] lg:min-w-[700px] w-full text-sm">
+            <div className="admin-table-wrap mt-3">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Source', 'Sessions', 'Users', 'Conversion', 'Bounce Risk'].map((header) => (
@@ -1964,8 +2757,8 @@ const AdminPage: React.FC = () => {
 
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Cross-Platform + A/B Impact</h3>
-            <div className="overflow-auto mt-3">
-              <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
+            <div className="admin-table-wrap mt-3">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Metric', 'Users', 'Events/Sample', 'Conversion', 'Extra'].map((header) => (
@@ -2001,8 +2794,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_0.9fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Heatmaps, Session Replay, Issues</h3>
-            <div className="overflow-auto mt-3">
-              <table className="min-w-[620px] xl:min-w-[820px] 2xl:min-w-[880px] w-full text-sm">
+            <div className="admin-table-wrap mt-3">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Type', 'Label', 'Metric 1', 'Metric 2', 'Metric 3'].map((header) => (
@@ -2102,6 +2895,21 @@ const AdminPage: React.FC = () => {
       if (crmComplaintPriorityFilter !== 'all' && ticket.priority !== crmComplaintPriorityFilter) return false;
       return true;
     });
+    const slaClass = (slaStatus?: string) => {
+      if (slaStatus === 'breached') return 'border-rose-200 bg-rose-50 text-rose-700';
+      if (slaStatus === 'due_soon') return 'border-amber-200 bg-amber-50 text-amber-700';
+      if (slaStatus === 'met') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+    };
+    const dueLabel = (dueAt?: string | null) => {
+      if (!dueAt) return 'Not assigned';
+      const dueMs = new Date(dueAt).getTime();
+      if (!Number.isFinite(dueMs)) return 'Not assigned';
+      const deltaHours = Math.round((dueMs - Date.now()) / (60 * 60 * 1000));
+      if (deltaHours < 0) return `Overdue ${Math.abs(deltaHours)}h`;
+      if (deltaHours === 0) return 'Due <1h';
+      return `Due ${deltaHours}h`;
+    };
 
     return (
       <div className="space-y-5">
@@ -2133,8 +2941,16 @@ const AdminPage: React.FC = () => {
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Pipeline</p><p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(crmReport.kpis.openPipelineValue)}</p></div>
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Email Open</p><p className="mt-2 text-2xl font-black text-slate-900">{formatPct(crmReport.kpis.emailOpenRatePct)}</p></div>
           <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Automations</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.workflowsActive)}</p></div>
-          <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Open Complaints</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.openComplaints)}</p><p className="mt-1 text-xs text-slate-500">{formatNumber(crmReport.kpis.complaintTickets)} total</p></div>
-          <div className={`${cardClass} p-4`}><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">High Priority</p><p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.highPriorityComplaints)}</p><p className="mt-1 text-xs text-slate-500">{formatNumber(crmReport.kpis.resolvedComplaints)} resolved</p></div>
+          <div className={`${cardClass} p-4`}>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Open Complaints</p>
+            <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.openComplaints)}</p>
+            <p className="mt-1 text-xs text-slate-500">{formatNumber(crmReport.kpis.complaintTickets)} total • {formatNumber(crmReport.kpis.resolvedComplaints)} resolved</p>
+          </div>
+          <div className={`${cardClass} p-4`}>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">SLA Pressure</p>
+            <p className="mt-2 text-2xl font-black text-slate-900">{formatNumber(crmReport.kpis.breachedComplaints)}</p>
+            <p className="mt-1 text-xs text-slate-500">{formatNumber(crmReport.kpis.dueSoonComplaints)} due soon • {formatNumber(crmReport.kpis.escalatedComplaints)} escalated</p>
+          </div>
         </div>
 
         <div className={`${cardClass} p-5`}>
@@ -2510,14 +3326,31 @@ const AdminPage: React.FC = () => {
                   </option>
                 ))}
               </select>
+              <button
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const result = await runSupportTicketSlaSweep({ dueSoonHours: 6, forceEscalation: false });
+                    setSuccess(`CRM SLA sweep complete: ${result.updated} updated, ${result.escalated} escalated.`);
+                    await loadCrm();
+                  } catch (err) {
+                    setError((err as Error).message || 'Could not run CRM SLA sweep.');
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className={`${buttonBase} border-indigo-200 bg-indigo-50 text-indigo-700`}
+              >
+                Run SLA Sweep
+              </button>
             </div>
           </div>
 
-          <div className="overflow-auto mt-3">
-            <table className="min-w-[700px] xl:min-w-[960px] 2xl:min-w-[1260px] w-full text-sm">
+          <div className="admin-table-wrap mt-3">
+            <table className="admin-table">
               <thead className="bg-slate-50">
                 <tr>
-                  {['Ticket', 'Customer', 'Subject', 'Priority', 'Status', 'Assigned', 'Updated', 'Actions'].map((header) => (
+                  {['Ticket', 'Customer', 'Subject', 'Priority', 'Status', 'SLA', 'Resolution Due', 'Escalation', 'Assigned', 'Updated', 'Actions'].map((header) => (
                     <th key={header} className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
                       {header}
                     </th>
@@ -2541,6 +3374,19 @@ const AdminPage: React.FC = () => {
                     </td>
                     <td className="px-3 py-3">{renderPill(ticket.priority)}</td>
                     <td className="px-3 py-3">{renderPill(ticket.status)}</td>
+                    <td className="px-3 py-3">
+                      <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-widest ${slaClass(ticket.slaStatus)}`}>
+                        {(ticket.slaStatus || 'on_track').replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-slate-600">{dueLabel(ticket.resolutionDueAt)}</td>
+                    <td className="px-3 py-3 text-xs text-slate-600">
+                      {ticket.escalated ? (
+                        <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-indigo-700">
+                          L{ticket.escalationLevel || 1}
+                        </span>
+                      ) : '-'}
+                    </td>
                     <td className="px-3 py-3 text-xs text-slate-600">{ticket.assignedTo || '-'}</td>
                     <td className="px-3 py-3 text-xs text-slate-500">{formatDate(ticket.updatedAt)}</td>
                     <td className="px-3 py-3">
@@ -2594,6 +3440,25 @@ const AdminPage: React.FC = () => {
                             onClick={async () => {
                               setBusy(true);
                               try {
+                                await escalateSupportTicket(ticket.id, 'manual_escalation_crm_tracker');
+                                setSuccess('Complaint escalated.');
+                                await loadCrm();
+                              } catch (err) {
+                                setError((err as Error).message || 'Could not escalate complaint.');
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                            className={`${buttonBase} !px-2.5 !py-1.5 border-indigo-200 bg-indigo-50 text-indigo-700`}
+                          >
+                            Escalate
+                          </button>
+                        )}
+                        {!['resolved', 'closed'].includes(ticket.status) && (
+                          <button
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
                                 await updateSupportTicket(ticket.id, {
                                   status: 'resolved',
                                   resolutionNote: 'Resolved from CRM complaint tracker.',
@@ -2617,7 +3482,7 @@ const AdminPage: React.FC = () => {
                 ))}
                 {!filteredComplaints.length && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
+                    <td colSpan={11} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
                       No complaint tickets for selected filters.
                     </td>
                   </tr>
@@ -2630,8 +3495,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Contacts & Lead Scoring</h3>
-            <div className="overflow-auto mt-3">
-              <table className="min-w-[620px] xl:min-w-[780px] 2xl:min-w-[840px] w-full text-sm">
+            <div className="admin-table-wrap mt-3">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Contact', 'Stage', 'Lead Score', 'Tags', 'Last Activity'].map((header) => (
@@ -2776,7 +3641,7 @@ const AdminPage: React.FC = () => {
                   <>
                     <p className="mt-2 text-[11px] font-black uppercase tracking-widest text-rose-500">Gaps</p>
                     <ul className="mt-1 text-xs text-rose-600 space-y-1">
-                      {capability.gaps.slice(0, 2).map((item) => (
+                      {capability.gaps.slice(0, 3).map((item) => (
                         <li key={`${capability.id}-gap-${item}`}>• {item}</li>
                       ))}
                     </ul>
@@ -2790,8 +3655,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1.2fr_0.8fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Cross-Channel Engagement Performance</h3>
-            <div className="overflow-auto mt-4">
-              <table className="min-w-[620px] xl:min-w-[800px] 2xl:min-w-[860px] w-full text-sm">
+            <div className="admin-table-wrap mt-4">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Channel', 'Sent', 'Delivered', 'Opened', 'Clicked', 'Conversions', 'Revenue', 'Fail Rate'].map((header) => (
@@ -2843,8 +3708,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Audience Segmentation & Predictive Signals</h3>
-            <div className="overflow-auto mt-4">
-              <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
+            <div className="admin-table-wrap mt-4">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Segment', 'Users', 'Criteria', 'Conversion Rate', 'Churn Risk'].map((header) => (
@@ -3003,8 +3868,8 @@ const AdminPage: React.FC = () => {
               )}
             </div>
 
-            <div className="overflow-auto">
-              <table className="min-w-[560px] lg:min-w-[680px] w-full text-sm">
+            <div className="admin-table-wrap">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Journey', 'Status', 'Trigger', 'Audience', 'Conversion'].map((header) => (
@@ -3029,8 +3894,8 @@ const AdminPage: React.FC = () => {
 
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">A/B & Optimization Experiments</h3>
-            <div className="overflow-auto mt-4">
-              <table className="min-w-[560px] lg:min-w-[680px] w-full text-sm">
+            <div className="admin-table-wrap mt-4">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Experiment', 'Status', 'Coverage', 'Conversion', 'Uplift'].map((header) => (
@@ -3057,8 +3922,8 @@ const AdminPage: React.FC = () => {
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_0.9fr] gap-5">
           <div className={`${cardClass} p-5`}>
             <h3 className="text-lg font-black tracking-tight text-slate-900">Integrations & Connectivity</h3>
-            <div className="overflow-auto mt-4">
-              <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
+            <div className="admin-table-wrap mt-4">
+              <table className="admin-table">
                 <thead className="bg-slate-50">
                   <tr>
                     {['Integration', 'Type', 'Status', 'Throughput (24h)', 'Error Rate', 'Last Sync'].map((header) => (
@@ -3112,360 +3977,495 @@ const AdminPage: React.FC = () => {
     );
   };
 
-  const renderBlogs = () => (
-    <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[0.95fr_1.05fr]">
-      <div className="space-y-5">
-        <div className={`${cardClass} p-4`}>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-              <Search size={16} className="text-slate-400" />
-              <input
-                value={blogSearch}
-                onChange={(event) => setBlogSearch(event.target.value)}
-                placeholder="Search title / keyword / slug"
-                className="w-full bg-transparent text-sm font-semibold text-slate-700 outline-none"
-              />
-            </div>
-            <select
-              value={blogStatusFilter}
-              onChange={(event) => setBlogStatusFilter(event.target.value as BlogStatus | 'all')}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
-            >
-              <option value="all">All</option>
-              <option value="draft">Draft</option>
-              <option value="scheduled">Scheduled</option>
-              <option value="published">Published</option>
-              <option value="archived">Archived</option>
-            </select>
-            <button onClick={loadBlogs} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>Refresh</button>
-          </div>
-        </div>
+  const renderBlogs = () => {
+    const metaTitleLength = blogForm.metaTitle.trim().length;
+    const metaDescriptionLength = blogForm.metaDescription.trim().length;
+    const excerptLength = blogForm.excerpt.trim().length;
+    const keywordCount = blogForm.secondaryKeywords.length;
+    const tagCount = blogForm.tags.length;
 
-        <div className={`${cardClass} p-5`}>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-black tracking-tight text-slate-900">Blog Library</h3>
-            <span className="text-xs font-black uppercase tracking-wider text-slate-500">{blogPosts.length} posts</span>
-          </div>
+    const slugPreview = blogForm.slug || slugify(blogForm.title || 'new-post');
+    const previewTitle = blogForm.metaTitle.trim() || blogForm.title.trim() || 'Post title preview';
+    const previewDescription =
+      blogForm.metaDescription.trim() || blogForm.excerpt.trim() || 'Meta description preview appears here.';
 
-          <div className="max-h-[720px] overflow-auto space-y-2 pr-1">
-            {blogPosts.map((post) => (
-              <div key={post.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-black text-slate-800">{post.title}</p>
-                    <p className="text-xs text-slate-500 mt-1">/{post.slug}</p>
-                  </div>
-                  {renderPill(post.status)}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  <span>SEO {post.organicScore}%</span>
-                  <span>•</span>
-                  <span>{post.estimatedReadMinutes} min</span>
-                  <span>•</span>
-                  <span>{post.wordCount} words</span>
-                </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  30d: {post.performance30d?.impressions || 0} impressions • {post.performance30d?.clicks || 0} clicks • {post.performance30d?.leads || 0} leads
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => setBlogForm(post)}
-                    className={`${buttonBase} border-slate-200 bg-white text-slate-700 !px-2.5 !py-1.5`}
-                  >
-                    Edit
-                  </button>
-                  {post.status !== 'published' && (
-                    <button
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await setAdminBlogPostStatus(post.id, 'published');
-                          setSuccess('Post published.');
-                          await loadBlogs();
-                        } catch (err) {
-                          setError((err as Error).message || 'Could not publish post.');
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700 !px-2.5 !py-1.5`}
-                    >
-                      Publish
-                    </button>
-                  )}
-                  {post.status === 'published' && (
-                    <button
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await setAdminBlogPostStatus(post.id, 'draft');
-                          setSuccess('Post moved back to draft.');
-                          await loadBlogs();
-                        } catch (err) {
-                          setError((err as Error).message || 'Could not unpublish post.');
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
-                      className={`${buttonBase} border-amber-200 bg-amber-50 text-amber-700 !px-2.5 !py-1.5`}
-                    >
-                      Unpublish
-                    </button>
-                  )}
-                  <button
-                    onClick={async () => {
-                      const confirmed = window.confirm('Delete this post? This cannot be undone.');
-                      if (!confirmed) return;
-                      setBusy(true);
-                      try {
-                        await deleteAdminBlogPost(post.id);
-                        setSuccess('Post deleted.');
-                        if (blogForm.id === post.id) setBlogForm(createBlogDraft());
-                        await loadBlogs();
-                      } catch (err) {
-                        setError((err as Error).message || 'Could not delete post.');
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                    className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700 !px-2.5 !py-1.5`}
-                  >
-                    Delete
-                  </button>
-                </div>
+    return (
+      <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[0.92fr_1.08fr]">
+        <div className="space-y-5">
+          <div className={`${cardClass} p-4`}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="flex flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                <Search size={16} className="text-slate-400" />
+                <input
+                  value={blogSearch}
+                  onChange={(event) => setBlogSearch(event.target.value)}
+                  placeholder="Search title / keyword / slug"
+                  className="w-full bg-transparent text-sm font-semibold text-slate-700 outline-none"
+                />
               </div>
-            ))}
-            {!blogPosts.length && (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm font-semibold text-slate-500">
-                No posts found for this filter.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-5">
-        <div className={`${cardClass} p-5`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-black tracking-tight text-slate-900">{blogForm.id ? 'Edit Blog Post' : 'New SEO Blog Post'}</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-500">
-                SEO score: {blogSeo.score}% • {blogSeo.wordCount} words • {blogSeo.readMinutes} min read
-              </p>
-            </div>
-            <button
-              onClick={() => setBlogForm(createBlogDraft())}
-              className={`${buttonBase} border-slate-200 bg-white text-slate-700 !px-2.5 !py-1.5`}
-            >
-              New Draft
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            <input
-              value={blogForm.title}
-              onChange={(event) => {
-                const title = event.target.value;
-                setBlogForm((prev) => ({
-                  ...prev,
-                  title,
-                  slug: prev.id ? prev.slug : (prev.slug || slugify(title)),
-                }));
-              }}
-              placeholder="Blog title (problem + intent keyword)"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <input
-                value={blogForm.slug}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, slug: slugify(event.target.value) }))}
-                placeholder="slug"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              />
               <select
-                value={blogForm.status}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, status: event.target.value as BlogStatus }))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                value={blogStatusFilter}
+                onChange={(event) => setBlogStatusFilter(event.target.value as BlogStatus | 'all')}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
               >
+                <option value="all">All</option>
                 <option value="draft">Draft</option>
                 <option value="scheduled">Scheduled</option>
                 <option value="published">Published</option>
                 <option value="archived">Archived</option>
               </select>
-            </div>
-
-            <input
-              value={blogForm.targetKeyword}
-              onChange={(event) => setBlogForm((prev) => ({ ...prev, targetKeyword: event.target.value }))}
-              placeholder="Primary keyword (example: retirement planning india)"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-            <input
-              value={blogForm.secondaryKeywords.join(', ')}
-              onChange={(event) =>
-                setBlogForm((prev) => ({
-                  ...prev,
-                  secondaryKeywords: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
-                }))
-              }
-              placeholder="Secondary keywords (comma separated)"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-            <input
-              value={blogForm.tags.join(', ')}
-              onChange={(event) =>
-                setBlogForm((prev) => ({
-                  ...prev,
-                  tags: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
-                }))
-              }
-              placeholder="Tags (goal-planning, insurance, investing)"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-            <textarea
-              value={blogForm.excerpt}
-              onChange={(event) => setBlogForm((prev) => ({ ...prev, excerpt: event.target.value }))}
-              rows={3}
-              placeholder="Excerpt for search/social preview (120-220 chars)"
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-            <textarea
-              value={blogForm.contentMarkdown}
-              onChange={(event) => setBlogForm((prev) => ({ ...prev, contentMarkdown: event.target.value }))}
-              rows={12}
-              placeholder="Write markdown article content..."
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-            />
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <input
-                value={blogForm.metaTitle}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, metaTitle: event.target.value }))}
-                placeholder="Meta title"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              />
-              <input
-                value={blogForm.metaDescription}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, metaDescription: event.target.value }))}
-                placeholder="Meta description"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              />
-              <input
-                value={blogForm.canonicalUrl}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, canonicalUrl: event.target.value }))}
-                placeholder="Canonical URL"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              />
-              <input
-                value={blogForm.ogImageUrl}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, ogImageUrl: event.target.value }))}
-                placeholder="Open Graph image URL"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              />
-              <input
-                value={blogForm.ctaText}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, ctaText: event.target.value }))}
-                placeholder="CTA text"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              />
-              <input
-                value={blogForm.ctaUrl}
-                onChange={(event) => setBlogForm((prev) => ({ ...prev, ctaUrl: event.target.value }))}
-                placeholder="CTA URL"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-              />
+              <button onClick={loadBlogs} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}>Refresh</button>
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-3">
-            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Organic Distribution Checklist</p>
-            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
-              {BLOG_PROMOTION_STEPS.map((step) => (
-                <label key={step.key} className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(blogForm.promotionChecklist[step.key])}
-                    onChange={(event) =>
-                      setBlogForm((prev) => ({
-                        ...prev,
-                        promotionChecklist: {
-                          ...prev.promotionChecklist,
-                          [step.key]: event.target.checked,
-                        },
-                      }))
-                    }
-                  />
-                  {step.label}
-                </label>
+          <div className={`${cardClass} p-5`}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-black tracking-tight text-slate-900">Blog Library</h3>
+              <span className="text-xs font-black uppercase tracking-wider text-slate-500">{blogPosts.length} posts</span>
+            </div>
+
+            <div className="max-h-[720px] space-y-2 overflow-auto pr-1">
+              {blogPosts.map((post) => (
+                <div key={post.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-black text-slate-800">{post.title}</p>
+                      <p className="mt-1 text-xs text-slate-500">/{post.slug}</p>
+                    </div>
+                    {renderPill(post.status)}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    <span>SEO {post.organicScore}%</span>
+                    <span>•</span>
+                    <span>{post.estimatedReadMinutes} min</span>
+                    <span>•</span>
+                    <span>{post.wordCount} words</span>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500">
+                    30d: {post.performance30d?.impressions || 0} impressions • {post.performance30d?.clicks || 0} clicks • {post.performance30d?.leads || 0} leads
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <button
+                      onClick={() => setBlogForm(post)}
+                      className={`${buttonBase} border-slate-200 bg-white text-slate-700 !px-2.5 !py-1.5`}
+                    >
+                      Edit
+                    </button>
+                    {post.status !== 'published' && (
+                      <button
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            await setAdminBlogPostStatus(post.id, 'published');
+                            setSuccess('Post published.');
+                            await loadBlogs();
+                          } catch (err) {
+                            setError((err as Error).message || 'Could not publish post.');
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700 !px-2.5 !py-1.5`}
+                      >
+                        Publish
+                      </button>
+                    )}
+                    {post.status === 'published' && (
+                      <button
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            await setAdminBlogPostStatus(post.id, 'draft');
+                            setSuccess('Post moved back to draft.');
+                            await loadBlogs();
+                          } catch (err) {
+                            setError((err as Error).message || 'Could not unpublish post.');
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className={`${buttonBase} border-amber-200 bg-amber-50 text-amber-700 !px-2.5 !py-1.5`}
+                      >
+                        Unpublish
+                      </button>
+                    )}
+                    <button
+                      onClick={async () => {
+                        const confirmed = window.confirm('Delete this post? This cannot be undone.');
+                        if (!confirmed) return;
+                        setBusy(true);
+                        try {
+                          await deleteAdminBlogPost(post.id);
+                          setSuccess('Post deleted.');
+                          if (blogForm.id === post.id) setBlogForm(createBlogDraft());
+                          await loadBlogs();
+                        } catch (err) {
+                          setError((err as Error).message || 'Could not delete post.');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700 !px-2.5 !py-1.5`}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
               ))}
+              {!blogPosts.length && (
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm font-semibold text-slate-500">
+                  No posts found for this filter.
+                </div>
+              )}
             </div>
           </div>
-
-          <button
-            onClick={async () => {
-              if (!blogForm.title.trim()) {
-                setError('Blog title is required.');
-                return;
-              }
-
-              setBusy(true);
-              try {
-                const saved = await saveAdminBlogPost({
-                  id: blogForm.id || undefined,
-                  title: blogForm.title,
-                  slug: blogForm.slug,
-                  excerpt: blogForm.excerpt,
-                  contentMarkdown: blogForm.contentMarkdown,
-                  status: blogForm.status,
-                  publishedAt: blogForm.publishedAt,
-                  scheduledFor: blogForm.scheduledFor,
-                  targetKeyword: blogForm.targetKeyword,
-                  secondaryKeywords: blogForm.secondaryKeywords,
-                  tags: blogForm.tags,
-                  metaTitle: blogForm.metaTitle,
-                  metaDescription: blogForm.metaDescription,
-                  canonicalUrl: blogForm.canonicalUrl,
-                  ogImageUrl: blogForm.ogImageUrl,
-                  ctaText: blogForm.ctaText,
-                  ctaUrl: blogForm.ctaUrl,
-                  internalLinkTargets: blogForm.internalLinkTargets,
-                  externalReferences: blogForm.externalReferences,
-                  schemaType: blogForm.schemaType,
-                  faqSchema: blogForm.faqSchema,
-                  promotionChecklist: blogForm.promotionChecklist,
-                  isFeatured: blogForm.isFeatured,
-                });
-                setBlogForm(saved);
-                setSuccess('Blog post saved.');
-                await loadBlogs();
-              } catch (err) {
-                setError((err as Error).message || 'Could not save blog post.');
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className={`${buttonBase} mt-4 border-teal-200 bg-teal-50 text-teal-700`}
-          >
-            Save Blog Post
-          </button>
         </div>
 
-        <div className={`${cardClass} p-5`}>
-          <h3 className="text-lg font-black tracking-tight text-slate-900">SEO Quality Audit</h3>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Score is recalculated as you edit. Aim for 80%+ before publishing.</p>
-          <div className="mt-3 grid grid-cols-1 gap-2">
-            {blogSeo.checks.map((item) => (
-              <div key={item.id} className={`rounded-2xl border p-3 ${item.passed ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                <p className="text-xs font-black text-slate-800">{item.label}</p>
-                {!item.passed && <p className="mt-1 text-xs text-slate-600">{item.tip}</p>}
+        <div className="space-y-5">
+          <div className={`${cardClass} p-5`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-teal-600">WordPress-Style Editor</p>
+                <h3 className="mt-1 text-lg font-black tracking-tight text-slate-900">{blogForm.id ? 'Edit SEO Blog Post' : 'New SEO Blog Post'}</h3>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  {blogSeo.wordCount} words • {blogSeo.readMinutes} min read • SEO {blogSeo.score}%
+                </p>
               </div>
-            ))}
+              <button
+                onClick={() => setBlogForm(createBlogDraft())}
+                className={`${buttonBase} border-slate-200 bg-white text-slate-700 !px-2.5 !py-1.5`}
+              >
+                New Draft
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.95fr)]">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Title</p>
+                  <input
+                    value={blogForm.title}
+                    onChange={(event) => {
+                      const title = event.target.value;
+                      setBlogForm((prev) => ({
+                        ...prev,
+                        title,
+                        slug: prev.id ? prev.slug : slugify(title),
+                      }));
+                    }}
+                    placeholder="Add title"
+                    className="mt-2 w-full border-none bg-transparent p-0 text-2xl font-black tracking-tight text-slate-900 outline-none"
+                  />
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Permalink</span>
+                    <span className="text-xs font-semibold text-slate-400">/blog/</span>
+                    <input
+                      value={blogForm.slug}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, slug: slugify(event.target.value) }))}
+                      placeholder="post-slug"
+                      className="min-w-[180px] flex-1 border-none bg-transparent text-xs font-bold text-slate-700 outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                  <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-slate-100 pb-3">
+                    {[
+                      { label: 'H2', snippet: '## Section Heading' },
+                      { label: 'H3', snippet: '### Supporting Heading' },
+                      { label: 'List', snippet: '- Point one\n- Point two\n- Point three' },
+                      { label: 'Quote', snippet: '> Insightful quote or stat with source.' },
+                      { label: 'Internal Link', snippet: '[Related planning guide](/blog/example-slug)' },
+                      { label: 'CTA', snippet: '**Next step:** [Run your planning check](https://finvantage.app)' },
+                    ].map((tool) => (
+                      <button
+                        key={tool.label}
+                        onClick={() => appendBlogMarkdown(tool.snippet)}
+                        className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                      >
+                        {tool.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <textarea
+                    value={blogForm.contentMarkdown}
+                    onChange={(event) => setBlogForm((prev) => ({ ...prev, contentMarkdown: event.target.value }))}
+                    rows={18}
+                    placeholder="Start writing your post..."
+                    className="min-h-[460px] w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-6 text-slate-700 outline-none"
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Post Summary</p>
+                  <textarea
+                    value={blogForm.excerpt}
+                    onChange={(event) => setBlogForm((prev) => ({ ...prev, excerpt: event.target.value }))}
+                    rows={4}
+                    placeholder="Excerpt for search/social preview (120-220 chars)"
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                  />
+                  <p className="mt-1 text-[11px] font-semibold text-slate-500">Excerpt length: {excerptLength} chars</p>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <input
+                      value={blogForm.targetKeyword}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, targetKeyword: event.target.value }))}
+                      placeholder="Primary keyword"
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <input
+                      value={blogForm.secondaryKeywords.join(', ')}
+                      onChange={(event) =>
+                        setBlogForm((prev) => ({
+                          ...prev,
+                          secondaryKeywords: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                        }))
+                      }
+                      placeholder="Secondary keywords (comma separated)"
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <input
+                      value={blogForm.internalLinkTargets.join(', ')}
+                      onChange={(event) =>
+                        setBlogForm((prev) => ({
+                          ...prev,
+                          internalLinkTargets: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                        }))
+                      }
+                      placeholder="Internal links (comma separated)"
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <input
+                      value={blogForm.externalReferences.join(', ')}
+                      onChange={(event) =>
+                        setBlogForm((prev) => ({
+                          ...prev,
+                          externalReferences: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                        }))
+                      }
+                      placeholder="External references (comma separated)"
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <aside className="space-y-4 xl:sticky xl:top-6 h-fit">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Publish</p>
+                    {renderPill(blogForm.status)}
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    <select
+                      value={blogForm.status}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, status: event.target.value as BlogStatus }))}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    >
+                      <option value="draft">Draft</option>
+                      <option value="scheduled">Scheduled</option>
+                      <option value="published">Published</option>
+                      <option value="archived">Archived</option>
+                    </select>
+
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={blogForm.isFeatured}
+                        onChange={(event) => setBlogForm((prev) => ({ ...prev, isFeatured: event.target.checked }))}
+                      />
+                      Mark as featured post
+                    </label>
+
+                    <div className="grid grid-cols-1 gap-2">
+                      <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Schedule for</label>
+                      <input
+                        type="datetime-local"
+                        value={toDateTimeLocalInput(blogForm.scheduledFor)}
+                        onChange={(event) =>
+                          setBlogForm((prev) => ({
+                            ...prev,
+                            scheduledFor: toIsoOrNull(event.target.value),
+                          }))
+                        }
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2">
+                      <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Published at</label>
+                      <input
+                        type="datetime-local"
+                        value={toDateTimeLocalInput(blogForm.publishedAt)}
+                        onChange={(event) =>
+                          setBlogForm((prev) => ({
+                            ...prev,
+                            publishedAt: toIsoOrNull(event.target.value),
+                          }))
+                        }
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Words</p>
+                        <p className="text-sm font-black text-slate-900">{blogSeo.wordCount}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Read Time</p>
+                        <p className="text-sm font-black text-slate-900">{blogSeo.readMinutes} min</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                      <button
+                        onClick={() => void persistBlogPost()}
+                        disabled={busy}
+                        className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}
+                      >
+                        Save Draft
+                      </button>
+                      <button
+                        onClick={() => void persistBlogPost('published')}
+                        disabled={busy}
+                        className={`${buttonBase} border-emerald-200 bg-emerald-50 text-emerald-700`}
+                      >
+                        Publish Now
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">SEO Settings</p>
+                  <div className="mt-3 space-y-2.5">
+                    <input
+                      value={blogForm.metaTitle}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, metaTitle: event.target.value }))}
+                      placeholder="Meta title"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <p className="text-[11px] font-semibold text-slate-500">Meta title: {metaTitleLength} / 60</p>
+                    <textarea
+                      value={blogForm.metaDescription}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, metaDescription: event.target.value }))}
+                      rows={3}
+                      placeholder="Meta description"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <p className="text-[11px] font-semibold text-slate-500">Meta description: {metaDescriptionLength} / 160</p>
+                    <input
+                      value={blogForm.canonicalUrl}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, canonicalUrl: event.target.value }))}
+                      placeholder="Canonical URL"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <input
+                      value={blogForm.ogImageUrl}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, ogImageUrl: event.target.value }))}
+                      placeholder="Open Graph image URL"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Search Preview</p>
+                    <p className="mt-2 truncate text-sm font-bold text-sky-700">{previewTitle}</p>
+                    <p className="truncate text-xs font-semibold text-emerald-700">finvantage.app/blog/{slugPreview}</p>
+                    <p className="mt-1 line-clamp-3 text-xs text-slate-600">{previewDescription}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Taxonomy & Conversion</p>
+                  <div className="mt-3 space-y-2.5">
+                    <input
+                      value={blogForm.tags.join(', ')}
+                      onChange={(event) =>
+                        setBlogForm((prev) => ({
+                          ...prev,
+                          tags: event.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                        }))
+                      }
+                      placeholder="Tags (comma separated)"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <p className="text-[11px] font-semibold text-slate-500">{tagCount} tags selected</p>
+                    <p className="text-[11px] font-semibold text-slate-500">{keywordCount} secondary keywords</p>
+                    <select
+                      value={blogForm.schemaType}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, schemaType: event.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    >
+                      <option value="Article">Article</option>
+                      <option value="HowTo">HowTo</option>
+                      <option value="FAQPage">FAQPage</option>
+                    </select>
+                    <input
+                      value={blogForm.ctaText}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, ctaText: event.target.value }))}
+                      placeholder="CTA text"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                    <input
+                      value={blogForm.ctaUrl}
+                      onChange={(event) => setBlogForm((prev) => ({ ...prev, ctaUrl: event.target.value }))}
+                      placeholder="CTA URL"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Distribution & Audit</p>
+                    <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-[10px] font-black uppercase tracking-widest text-teal-700">
+                      SEO {blogSeo.score}%
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-2">
+                    {blogSeo.checks.map((item) => (
+                      <div key={item.id} className={`rounded-xl border p-2.5 ${item.passed ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                        <p className="text-xs font-black text-slate-800">{item.label}</p>
+                        {!item.passed && <p className="mt-1 text-[11px] text-slate-600">{item.tip}</p>}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Organic Distribution Checklist</p>
+                    <div className="mt-2 grid grid-cols-1 gap-2">
+                      {BLOG_PROMOTION_STEPS.map((step) => (
+                        <label key={step.key} className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(blogForm.promotionChecklist[step.key])}
+                            onChange={(event) =>
+                              setBlogForm((prev) => ({
+                                ...prev,
+                                promotionChecklist: {
+                                  ...prev.promotionChecklist,
+                                  [step.key]: event.target.checked,
+                                },
+                              }))
+                            }
+                          />
+                          {step.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderOperations = () => (
     <div className="grid grid-cols-1 2xl:grid-cols-[1fr_1fr] gap-5">
@@ -3666,11 +4666,694 @@ const AdminPage: React.FC = () => {
         >
           <Send size={13} /> Send Notice
         </button>
+
+        <div className="mt-6 border-t border-slate-200 pt-5 space-y-5">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Billing Plans Management</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">
+              Manage display name, months, INR pricing, discount, plan visibility, and card order for pricing pages.
+            </p>
+            <div className="mt-3 space-y-2">
+              {billingPlans.map((plan) => {
+                const planMetadata = (plan.metadata && typeof plan.metadata === 'object')
+                  ? { ...(plan.metadata as Record<string, any>) }
+                  : {};
+                const discountPct = Number(planMetadata.discount_pct || 0);
+                return (
+                <div key={plan.plan_code} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-7">
+                    <input
+                      value={String(plan.display_name || '')}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setBillingPlans((prev) => prev.map((row) => row.plan_code === plan.plan_code ? { ...row, display_name: value } : row));
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 sm:col-span-2"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={Number(plan.amount_inr || 0)}
+                      onChange={(event) => {
+                        const value = Number(event.target.value || 0);
+                        setBillingPlans((prev) => prev.map((row) => row.plan_code === plan.plan_code ? { ...row, amount_inr: value } : row));
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={Number(plan.billing_months || 1)}
+                      onChange={(event) => {
+                        const value = Math.max(1, Number(event.target.value || 1));
+                        setBillingPlans((prev) => prev.map((row) => row.plan_code === plan.plan_code ? { ...row, billing_months: value } : row));
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={Number(plan.sort_order || 0)}
+                      onChange={(event) => {
+                        const value = Number(event.target.value || 0);
+                        setBillingPlans((prev) => prev.map((row) => row.plan_code === plan.plan_code ? { ...row, sort_order: value } : row));
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={Number.isFinite(discountPct) ? discountPct : 0}
+                      onChange={(event) => {
+                        const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
+                        setBillingPlans((prev) => prev.map((row) => {
+                          if (row.plan_code !== plan.plan_code) return row;
+                          const nextMetadata = (row.metadata && typeof row.metadata === 'object')
+                            ? { ...(row.metadata as Record<string, any>) }
+                            : {};
+                          nextMetadata.discount_pct = value;
+                          return { ...row, metadata: nextMetadata };
+                        }));
+                      }}
+                      placeholder="Discount %"
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+                    />
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(plan.is_active)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setBillingPlans((prev) => prev.map((row) => row.plan_code === plan.plan_code ? { ...row, is_active: checked } : row));
+                        }}
+                      />
+                      Active
+                    </label>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{plan.plan_code}</p>
+                    <button
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          const upsertBody = {
+                            plan_code: plan.plan_code,
+                            display_name: plan.display_name,
+                            billing_months: Number(plan.billing_months || 1),
+                            amount_inr: Number(plan.amount_inr || 0),
+                            tax_inclusive: true,
+                            auto_renew: true,
+                            is_active: Boolean(plan.is_active),
+                            sort_order: Number(plan.sort_order || 0),
+                            metadata: {
+                              ...(planMetadata || {}),
+                              discount_pct: Math.max(0, Math.min(100, Number(planMetadata.discount_pct || 0))),
+                            },
+                          };
+                          
+                          const { data: sessionData } = await supabase.auth.getSession();
+                          const token = sessionData.session?.access_token || '';
+                          if (!token) throw new Error('Sign in again to save billing plans.');
+                          const response = await fetch('/api/admin/billing-plan-upsert', {
+                            method: 'POST',
+                            headers: {
+                              Authorization: `Bearer ${token}`,
+                              'Content-Type': 'application/json',
+                              ...(selectedWorkspaceId ? { 'x-workspace-id': selectedWorkspaceId } : {}),
+                            },
+                            body: JSON.stringify(upsertBody),
+                          });
+
+                          const raw = await response.text().catch(() => '');
+                          let payload: Record<string, any> = {};
+                          if (raw) {
+                            try {
+                              payload = JSON.parse(raw) as Record<string, any>;
+                            } catch {
+                              payload = {};
+                            }
+                          }
+                          if (!response.ok) {
+                            throw new Error(String(payload.error || `Could not save billing plan (HTTP ${response.status}).`));
+                          }
+
+                          setSuccess(`Saved ${plan.plan_code}.`);
+                          await loadOperations();
+                        } catch (err) {
+                          setError((err as Error).message || 'Could not save billing plan.');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className={`${buttonBase} !px-2.5 !py-1.5 border-teal-200 bg-teal-50 text-teal-700`}
+                    >
+                      Save Plan
+                    </button>
+                  </div>
+                </div>
+              )})}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Coupon Management</p>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                value={couponForm.code}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, code: event.target.value.toUpperCase() }))}
+                placeholder="Code"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                value={couponForm.description}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, description: event.target.value }))}
+                placeholder="Description"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <select
+                value={couponForm.discountType}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, discountType: event.target.value }))}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              >
+                <option value="percentage">Percentage</option>
+                <option value="flat">Flat</option>
+              </select>
+              <input
+                type="number"
+                min={0}
+                value={couponForm.discountValue}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, discountValue: Number(event.target.value || 0) }))}
+                placeholder="Discount value"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                type="number"
+                min={0}
+                value={couponForm.maxDiscountAmount}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, maxDiscountAmount: Number(event.target.value || 0) }))}
+                placeholder="Max discount"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                type="number"
+                min={0}
+                value={couponForm.usageLimitTotal}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, usageLimitTotal: Math.max(0, Math.trunc(Number(event.target.value || 0))) }))}
+                placeholder="Usage limit total (0 = unlimited)"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                type="number"
+                min={0}
+                value={couponForm.usageLimitPerUser}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, usageLimitPerUser: Math.max(0, Math.trunc(Number(event.target.value || 0))) }))}
+                placeholder="Usage limit per user (0 = unlimited)"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                value={couponForm.appliesToPlanCodes}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, appliesToPlanCodes: event.target.value }))}
+                placeholder="Plan scope (comma separated, blank = all)"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 sm:col-span-2"
+              />
+              <input
+                type="datetime-local"
+                value={couponForm.validUntil}
+                onChange={(event) => setCouponForm((prev) => ({ ...prev, validUntil: event.target.value }))}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-3">
+              <label className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={couponForm.stackable}
+                  onChange={(event) => setCouponForm((prev) => ({ ...prev, stackable: event.target.checked }))}
+                />
+                Stackable
+              </label>
+              <label className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={couponForm.recurringAllowed}
+                  onChange={(event) => setCouponForm((prev) => ({ ...prev, recurringAllowed: event.target.checked }))}
+                />
+                Recurring
+              </label>
+            </div>
+            <button
+              onClick={async () => {
+                if (!couponForm.code.trim()) {
+                  setError('Coupon code is required.');
+                  return;
+                }
+                setBusy(true);
+                try {
+                  const planScope = couponForm.appliesToPlanCodes
+                    .split(',')
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+                  await callAdminBillingMutation('upsert_coupon', {
+                    code: couponForm.code.trim().toUpperCase(),
+                    description: couponForm.description.trim() || null,
+                    discountType: couponForm.discountType,
+                    discountValue: couponForm.discountValue,
+                    maxDiscountAmount: couponForm.maxDiscountAmount > 0 ? couponForm.maxDiscountAmount : null,
+                    validUntil: couponForm.validUntil ? new Date(couponForm.validUntil).toISOString() : null,
+                    isActive: true,
+                    stackable: couponForm.stackable,
+                    recurringAllowed: couponForm.recurringAllowed,
+                    appliesToPlanCodes: planScope,
+                    usageLimitTotal: couponForm.usageLimitTotal > 0 ? couponForm.usageLimitTotal : null,
+                    usageLimitPerUser: couponForm.usageLimitPerUser > 0 ? couponForm.usageLimitPerUser : null,
+                  });
+                  setSuccess('Coupon saved.');
+                  setCouponForm({
+                    code: '',
+                    description: '',
+                    discountType: 'percentage',
+                    discountValue: 10,
+                    maxDiscountAmount: 99,
+                    usageLimitTotal: 0,
+                    usageLimitPerUser: 0,
+                    appliesToPlanCodes: '',
+                    validUntil: '',
+                    stackable: true,
+                    recurringAllowed: true,
+                  });
+                  await loadOperations();
+                } catch (err) {
+                  setError((err as Error).message || 'Could not save coupon.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              className={`${buttonBase} mt-3 border-teal-200 bg-teal-50 text-teal-700`}
+            >
+              Save Coupon
+            </button>
+            <div className="mt-3 max-h-36 overflow-auto space-y-1.5">
+              {billingCoupons.slice(0, 12).map((coupon) => (
+                <div key={coupon.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 flex items-center justify-between gap-2">
+                  <span>{coupon.code} • {coupon.discount_type} {coupon.discount_value}</span>
+                  <button
+                  onClick={async () => {
+                      setBusy(true);
+                      try {
+                        await callAdminBillingMutation('toggle_coupon', {
+                          couponId: coupon.id,
+                          isActive: !coupon.is_active,
+                        });
+                        setSuccess('Coupon status updated.');
+                        await loadOperations();
+                      } catch (err) {
+                        setError((err as Error).message || 'Could not update coupon.');
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className={`${buttonBase} !px-2 !py-1 ${coupon.is_active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-700'}`}
+                  >
+                    {coupon.is_active ? 'Active' : 'Inactive'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Billing Override (Max 365 days)</p>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input
+                value={overrideForm.userId}
+                onChange={(event) => setOverrideForm((prev) => ({ ...prev, userId: event.target.value }))}
+                placeholder="Customer UUID"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={overrideForm.durationDays}
+                onChange={(event) => setOverrideForm((prev) => ({ ...prev, durationDays: Math.max(1, Math.min(365, Number(event.target.value || 1))) }))}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                value={overrideForm.reason}
+                onChange={(event) => setOverrideForm((prev) => ({ ...prev, reason: event.target.value }))}
+                placeholder="Reason"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {[7, 30, 90].map((days) => (
+                <button
+                  key={`override-${days}`}
+                  onClick={() => setOverrideForm((prev) => ({ ...prev, durationDays: days }))}
+                  className={`${buttonBase} !px-2 !py-1 border-slate-200 bg-white text-slate-700`}
+                >
+                  {days} Days
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={async () => {
+                if (!overrideForm.userId.trim()) {
+                  setError('Customer UUID is required for override.');
+                  return;
+                }
+                setBusy(true);
+                try {
+                  await callAdminBillingMutation('grant_override', {
+                    userId: overrideForm.userId.trim(),
+                    durationDays: overrideForm.durationDays,
+                    reason: overrideForm.reason.trim() || 'Admin override',
+                  });
+                  setSuccess('Billing override granted.');
+                  setOverrideForm({ userId: '', durationDays: 30, reason: 'Admin override' });
+                } catch (err) {
+                  setError((err as Error).message || 'Could not grant override.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              className={`${buttonBase} mt-3 border-amber-200 bg-amber-50 text-amber-700`}
+            >
+              Grant Override
+            </button>
+          </div>
+
+	          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+	            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Manual Points Adjustment</p>
+	            <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-2">
+	              <input
+	                value={pointsForm.userId}
+	                onChange={(event) => setPointsForm((prev) => ({ ...prev, userId: event.target.value }))}
+	                placeholder="Customer UUID"
+	                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+              <input
+                type="number"
+                value={pointsForm.points}
+                onChange={(event) => setPointsForm((prev) => ({ ...prev, points: Math.trunc(Number(event.target.value || 0)) }))}
+                placeholder="Points (+/-)"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+              />
+	              <input
+	                value={pointsForm.reason}
+	                onChange={(event) => setPointsForm((prev) => ({ ...prev, reason: event.target.value }))}
+	                placeholder="Reason"
+	                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+	              />
+	              <input
+	                value={pointsForm.sourceRef}
+	                onChange={(event) => setPointsForm((prev) => ({ ...prev, sourceRef: event.target.value }))}
+	                placeholder="Source ref (optional)"
+	                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+	              />
+	            </div>
+	            <button
+	              onClick={async () => {
+	                if (!pointsForm.userId.trim() || !pointsForm.points) {
+	                  setError('Customer UUID and non-zero points are required.');
+                  return;
+                }
+                setBusy(true);
+                try {
+	                  await callAdminBillingMutation('adjust_points', {
+                    userId: pointsForm.userId.trim(),
+                    points: pointsForm.points,
+                    eventType: pointsForm.eventType,
+                    sourceRef: pointsForm.sourceRef.trim() || 'admin_manual',
+                    reason: pointsForm.reason || 'manual adjustment',
+                  });
+	                  setSuccess('Points updated.');
+	                  setPointsForm({ userId: '', points: 0, eventType: 'admin_manual_adjustment', sourceRef: 'admin_manual', reason: '' });
+	                } catch (err) {
+	                  setError((err as Error).message || 'Could not adjust points.');
+	                } finally {
+	                  setBusy(false);
+	                }
+	              }}
+	              className={`${buttonBase} mt-3 border-slate-200 bg-white text-slate-700`}
+	            >
+	              Adjust Points
+	            </button>
+	          </div>
+
+	          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+	            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Freeze / Unfreeze Points</p>
+	            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+	              <input
+	                value={pointsFreezeForm.userId}
+	                onChange={(event) => setPointsFreezeForm((prev) => ({ ...prev, userId: event.target.value }))}
+	                placeholder="Customer UUID"
+	                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+	              />
+	              <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+	                <input
+	                  type="checkbox"
+	                  checked={pointsFreezeForm.frozen}
+	                  onChange={(event) => setPointsFreezeForm((prev) => ({ ...prev, frozen: event.target.checked }))}
+	                />
+	                Freeze points
+	              </label>
+	              <button
+	                onClick={async () => {
+	                  if (!pointsFreezeForm.userId.trim()) {
+	                    setError('Customer UUID is required.');
+	                    return;
+	                  }
+	                  setBusy(true);
+	                  try {
+	                    await callAdminBillingMutation('freeze_points', {
+                        userId: pointsFreezeForm.userId.trim(),
+                        frozen: pointsFreezeForm.frozen,
+                      });
+	                    setSuccess(pointsFreezeForm.frozen ? 'Points frozen.' : 'Points unfrozen.');
+	                    setPointsFreezeForm({ userId: '', frozen: true });
+	                  } catch (err) {
+	                    setError((err as Error).message || 'Could not update points freeze state.');
+	                  } finally {
+	                    setBusy(false);
+	                  }
+	                }}
+	                className={`${buttonBase} border-amber-200 bg-amber-50 text-amber-700`}
+	              >
+	                Apply Freeze State
+	              </button>
+	            </div>
+	          </div>
+
+	          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+	            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Fraud Reversal & Ledger Export</p>
+	            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+	              <input
+	                value={pointsExportUserId}
+	                onChange={(event) => setPointsExportUserId(event.target.value)}
+	                placeholder="Customer UUID (optional for export)"
+	                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+	              />
+	              <button
+	                onClick={async () => {
+	                  if (!pointsForm.userId.trim()) {
+	                    setError('Set customer UUID in manual points section for fraud reversal.');
+	                    return;
+	                  }
+	                  if (pointsForm.points >= 0) {
+	                    setError('Use a negative points value for reversal.');
+	                    return;
+	                  }
+	                  setBusy(true);
+	                  try {
+	                    await callAdminBillingMutation('reverse_points', {
+                        userId: pointsForm.userId.trim(),
+                        points: pointsForm.points,
+                        sourceRef: pointsForm.sourceRef.trim() || 'fraud_reversal',
+                        reason: pointsForm.reason || 'fraud reversal',
+                      });
+	                    setSuccess('Fraud reversal posted.');
+	                  } catch (err) {
+	                    setError((err as Error).message || 'Could not post fraud reversal.');
+	                  } finally {
+	                    setBusy(false);
+	                  }
+	                }}
+	                className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700`}
+	              >
+	                Reverse Fraud Points
+	              </button>
+	              <button
+	                onClick={async () => {
+	                  setBusy(true);
+	                  try {
+	                    const response = await callAdminBillingMutation('export_points_ledger', {
+                        userId: pointsExportUserId.trim() || null,
+                      });
+                      const data = Array.isArray(response?.data) ? response.data : [];
+	                    const rows = (data || []).map((row: any) => ([
+	                      row.user_id,
+	                      row.event_type,
+	                      row.points,
+	                      row.source_ref || '',
+	                      row.expires_at || '',
+	                      row.created_at || '',
+	                      JSON.stringify(row.metadata || {}),
+	                    ]));
+	                    downloadCsv(
+	                      `points-ledger-${new Date().toISOString().slice(0, 10)}.csv`,
+	                      ['user_id', 'event_type', 'points', 'source_ref', 'expires_at', 'created_at', 'metadata'],
+	                      rows
+	                    );
+	                    setSuccess('Points ledger exported.');
+	                  } catch (err) {
+	                    setError((err as Error).message || 'Could not export points ledger.');
+	                  } finally {
+	                    setBusy(false);
+	                  }
+	                }}
+	                className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}
+	              >
+	                Export Points Ledger
+	              </button>
+	            </div>
+	          </div>
+
+	            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+	            <div className="flex items-center justify-between gap-2">
+	              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Referral Governance</p>
+	              <button
+	                onClick={() => {
+                    void (async () => {
+                      try {
+                        const response = await callAdminBillingMutation('export_referral_events');
+                        const rows = (Array.isArray(response?.data) ? response.data : []).map((row: any) => ([
+                          row.id,
+                          row.referrer_user_id,
+                          row.referred_user_id,
+                          row.referral_code,
+                          row.status,
+                          row.created_at,
+                          JSON.stringify(row.metadata || {}),
+                        ]));
+                        downloadCsv(
+                          `referral-events-${new Date().toISOString().slice(0, 10)}.csv`,
+                          ['id', 'referrer_user_id', 'referred_user_id', 'referral_code', 'status', 'created_at', 'metadata'],
+                          rows
+                        );
+                      } catch (err) {
+                        setError((err as Error).message || 'Could not export referrals.');
+                      }
+                    })();
+	                }}
+	                className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700`}
+	              >
+	                Export Referrals
+	              </button>
+	            </div>
+	            <div className="mt-3 max-h-48 overflow-auto space-y-2">
+	              {billingReferralEvents.slice(0, 30).map((event) => (
+	                <div key={event.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+	                  <div className="flex flex-wrap items-center justify-between gap-2">
+	                    <p className="text-[11px] font-black text-slate-900">{event.referral_code} • {event.status}</p>
+	                    <p className="text-[10px] font-semibold text-slate-500">{formatDate(event.created_at)}</p>
+	                  </div>
+	                  <p className="mt-1 text-[10px] font-semibold text-slate-600 break-all">
+	                    Referrer: {event.referrer_user_id} • Referred: {event.referred_user_id}
+	                  </p>
+	                  <div className="mt-2 flex flex-wrap gap-2">
+	                    <button
+	                      onClick={async () => {
+	                        setBusy(true);
+	                        try {
+	                          await callAdminBillingMutation('update_referral_status', {
+                              referralEventId: event.id,
+                              status: 'rewarded',
+                              metadata: { ...(event.metadata || {}), reviewed_by_admin: true },
+                            });
+	                          setSuccess('Referral marked rewarded.');
+	                          await loadOperations();
+	                        } catch (err) {
+	                          setError((err as Error).message || 'Could not update referral status.');
+	                        } finally {
+	                          setBusy(false);
+	                        }
+	                      }}
+	                      className={`${buttonBase} !px-2 !py-1 border-emerald-200 bg-emerald-50 text-emerald-700`}
+	                    >
+	                      Mark Rewarded
+	                    </button>
+	                    <button
+	                      onClick={async () => {
+	                        setBusy(true);
+	                        try {
+	                          await callAdminBillingMutation('update_referral_status', {
+                              referralEventId: event.id,
+                              status: 'fraud_hold',
+                              metadata: { ...(event.metadata || {}), flagged_by_admin: true },
+                            });
+	                          setSuccess('Referral moved to fraud hold.');
+	                          await loadOperations();
+	                        } catch (err) {
+	                          setError((err as Error).message || 'Could not update referral status.');
+	                        } finally {
+	                          setBusy(false);
+	                        }
+	                      }}
+	                      className={`${buttonBase} !px-2 !py-1 border-amber-200 bg-amber-50 text-amber-700`}
+	                    >
+	                      Fraud Hold
+	                    </button>
+	                    <button
+	                      onClick={async () => {
+	                        setBusy(true);
+	                        try {
+	                          await callAdminBillingMutation('update_referral_status', {
+                              referralEventId: event.id,
+                              status: 'reversed',
+                              metadata: { ...(event.metadata || {}), reversed_by_admin: true },
+                            });
+	                          setSuccess('Referral reversed.');
+	                          await loadOperations();
+	                        } catch (err) {
+	                          setError((err as Error).message || 'Could not update referral status.');
+	                        } finally {
+	                          setBusy(false);
+	                        }
+	                      }}
+	                      className={`${buttonBase} !px-2 !py-1 border-rose-200 bg-rose-50 text-rose-700`}
+	                    >
+	                      Reverse
+	                    </button>
+	                  </div>
+	                </div>
+	              ))}
+	            </div>
+	          </div>
+
+	          <div className="rounded-2xl border border-slate-200 bg-white p-3">
+	            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Internal Reminders</p>
+            <div className="mt-2 max-h-28 overflow-auto space-y-1.5">
+              {billingReminders.map((reminder) => (
+                <div key={reminder.id} className="rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-2 text-xs font-semibold text-slate-700">
+                  <p>{reminder.title}</p>
+                  <p className="text-[10px] text-slate-500">Due: {formatDate(reminder.due_at)} • {reminder.status}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 
   const renderModuleBody = () => {
+    if (activeModule !== 'overview' && moduleViewMode === 'summary') {
+      return renderModuleSummary();
+    }
+
     switch (activeModule) {
       case 'overview':
         return renderOverview();
@@ -3680,6 +5363,8 @@ const AdminPage: React.FC = () => {
         return renderPortfolio();
       case 'payments':
         return renderPayments();
+      case 'rewards':
+        return renderOperations();
       case 'compliance':
         return renderCompliance();
       case 'fraud':
@@ -3708,6 +5393,96 @@ const AdminPage: React.FC = () => {
         return renderOverview();
     }
   };
+
+  const handleModuleSelect = useCallback((moduleId: AdminModule) => {
+    setActiveModule(moduleId);
+    setCommandPaletteOpen(false);
+    setCommandQuery('');
+    setMobileNavOpen(false);
+  }, []);
+
+  const renderAdminNavContent = (mobile = false) => (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-600">FinVantage</p>
+          <h2 className="mt-2 text-xl font-black tracking-tight text-slate-900">Admin Control Plane</h2>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Role: {access?.roleName || access?.roleKey || 'Unknown'}</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            Workspace: {access?.workspaceName || selectedWorkspaceId || 'Unscoped'}
+          </p>
+        </div>
+        {mobile && (
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600"
+            aria-label="Close navigation"
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
+
+      {Boolean(access?.workspaces?.length) && (
+        <div className="mt-3">
+          <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Workspace</label>
+          <select
+            value={selectedWorkspaceId || ''}
+            onChange={(event) => void handleWorkspaceSwitch(event.target.value)}
+            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700"
+          >
+            {(access?.workspaces || []).map((workspace: AdminWorkspaceMembership) => (
+              <option key={workspace.workspaceId} value={workspace.workspaceId}>
+                {workspace.organizationName} / {workspace.workspaceName}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className="mt-5 space-y-3.5">
+        {visibleWorkflowNav.map((group) => (
+          <div key={group.id}>
+            <p className="px-2 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">{group.label}</p>
+            <div className={`mt-1.5 grid ${mobile ? 'grid-cols-1' : 'grid-cols-1'} gap-1.5`}>
+              {group.moduleItems.map((module) => {
+                const Icon = module.icon;
+                const active = module.id === activeModule;
+                return (
+                  <button
+                    key={module.id}
+                    onClick={() => handleModuleSelect(module.id)}
+                    className={`w-full rounded-2xl px-2.5 xl:px-3 py-2 text-left flex items-center justify-between transition ${
+                      active ? 'bg-teal-600 text-white shadow-lg' : 'bg-transparent text-slate-600 hover:bg-teal-50'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-1.5 text-[10px] xl:text-[11px] font-black uppercase tracking-[0.12em] xl:tracking-[0.14em]">
+                      <Icon size={14} /> {module.label}
+                    </span>
+                    <ChevronRight size={14} className={active ? 'opacity-80' : 'opacity-40'} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className={`mt-5 grid ${mobile ? 'grid-cols-1' : 'grid-cols-2'} gap-2`}>
+        <a href="/" className={`${buttonBase} border-slate-200 bg-white text-slate-700 inline-flex items-center justify-center gap-1.5`}>
+          <ArrowLeftRight size={13} /> Client
+        </a>
+        <button onClick={handleLogout} className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700 inline-flex items-center justify-center gap-1.5`}>
+          <LogOut size={13} /> Logout
+        </button>
+      </div>
+    </>
+  );
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [activeModule]);
 
   if (booting) {
     return (
@@ -3851,73 +5626,69 @@ const AdminPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-8 py-4 sm:py-5 lg:py-6 2xl:py-8">
-      <div className="max-w-[1700px] mx-auto grid grid-cols-1 xl:grid-cols-[250px_1fr] 2xl:grid-cols-[290px_1fr] gap-4 lg:gap-5">
-        <aside className={`${cardClass} p-4 xl:p-5 h-fit 2xl:sticky 2xl:top-6 2xl:max-h-[calc(100vh-3rem)] 2xl:overflow-auto`}>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-teal-600">FinVantage</p>
-          <h2 className="mt-2 text-xl font-black tracking-tight text-slate-900">Admin Control Plane</h2>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Role: {access.roleName || access.roleKey || 'Unknown'}</p>
-          <p className="mt-1 text-xs font-semibold text-slate-500">
-            Workspace: {access.workspaceName || selectedWorkspaceId || 'Unscoped'}
-          </p>
-
-          {Boolean(access.workspaces?.length) && (
-            <div className="mt-3">
-              <label className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Workspace</label>
-              <select
-                value={selectedWorkspaceId || ''}
-                onChange={(event) => void handleWorkspaceSwitch(event.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700"
-              >
-                {(access.workspaces || []).map((workspace: AdminWorkspaceMembership) => (
-                  <option key={workspace.workspaceId} value={workspace.workspaceId}>
-                    {workspace.organizationName} / {workspace.workspaceName}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="mt-5 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-1 gap-1.5">
-            {visibleModules.map((module) => {
-              const Icon = module.icon;
-              const active = module.id === activeModule;
-              return (
-                <button
-                  key={module.id}
-                  onClick={() => setActiveModule(module.id)}
-                  className={`w-full rounded-2xl px-2.5 xl:px-3 py-2 text-left flex items-center justify-between transition ${
-                    active ? 'bg-teal-600 text-white shadow-lg' : 'bg-transparent text-slate-600 hover:bg-teal-50'
-                  }`}
-                >
-                  <span className="inline-flex items-center gap-1.5 text-[10px] xl:text-[11px] font-black uppercase tracking-[0.12em] xl:tracking-[0.14em]">
-                    <Icon size={14} /> {module.label}
-                  </span>
-                  <ChevronRight size={14} className={active ? 'opacity-80' : 'opacity-40'} />
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            <a href="/" className={`${buttonBase} border-slate-200 bg-white text-slate-700 inline-flex items-center justify-center gap-1.5`}>
-              <ArrowLeftRight size={13} /> Client
-            </a>
-            <button onClick={handleLogout} className={`${buttonBase} border-rose-200 bg-rose-50 text-rose-700 inline-flex items-center justify-center gap-1.5`}>
-              <LogOut size={13} /> Logout
-            </button>
-          </div>
+    <div className="admin-shell min-h-screen px-3 sm:px-4 lg:px-5 xl:px-6 2xl:px-7 py-4 sm:py-5 lg:py-6 2xl:py-7">
+      <div className="max-w-[1700px] mx-auto grid grid-cols-1 2xl:grid-cols-[280px_minmax(0,1fr)] gap-4 lg:gap-5">
+        <aside className={`${cardClass} hidden 2xl:block p-4 xl:p-5 h-fit 2xl:sticky 2xl:top-6 2xl:max-h-[calc(100vh-3rem)] 2xl:overflow-auto`}>
+          {renderAdminNavContent(false)}
         </aside>
 
         <section className="min-w-0 space-y-5">
           <div className={`${cardClass} px-4 lg:px-5 py-3 lg:py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3`}>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-900">{MODULES.find((item) => item.id === activeModule)?.label}</h1>
+            <div className="flex items-start gap-2.5">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className="2xl:hidden mt-0.5 rounded-xl border border-slate-200 bg-white p-2 text-slate-600"
+                aria-label="Open navigation"
+              >
+                <Menu size={16} />
+              </button>
+              <div>
+              <h1 className="text-2xl font-black tracking-tight text-slate-900">{activeModuleMeta?.label || 'Admin'}</h1>
               <p className="text-xs font-semibold text-slate-500 mt-1">
-                Detailed admin telemetry, compliance workflows and operational controls for financial scale.
+                {activeWorkflowMeta?.label
+                  ? `Workflow: ${activeWorkflowMeta.label}`
+                  : 'Operational command center for internal teams.'}
               </p>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-col gap-2 lg:w-auto lg:items-end">
+              <div className="relative w-full lg:w-[380px]">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={commandQuery}
+                  onChange={(event) => {
+                    setCommandQuery(event.target.value);
+                    if (!commandPaletteOpen) setCommandPaletteOpen(true);
+                  }}
+                  onFocus={() => setCommandPaletteOpen(true)}
+                  placeholder="Search customer, payment, ticket, KYC, fraud..."
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-16 text-xs font-semibold text-slate-700 shadow-sm focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setCommandPaletteOpen(true)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500"
+                  aria-label="Open command palette"
+                >
+                  Cmd/Ctrl K
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {activeModule !== 'overview' && (
+                  <button
+                    type="button"
+                    onClick={() => setModuleViewMode((current) => (current === 'summary' ? 'detailed' : 'summary'))}
+                    className={`${buttonBase} ${
+                      moduleViewMode === 'summary'
+                        ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    } inline-flex items-center gap-1.5`}
+                  >
+                    {moduleViewMode === 'summary' ? <Eye size={13} /> : <EyeOff size={13} />}
+                    {moduleViewMode === 'summary' ? 'Summary View' : 'Detailed Tools'}
+                  </button>
+                )}
               <button onClick={refreshModule} disabled={busy} className={`${buttonBase} border-teal-200 bg-teal-50 text-teal-700 inline-flex items-center gap-1.5`}>
                 <RefreshCw size={13} className={busy ? 'animate-spin' : ''} /> Refresh
               </button>
@@ -3926,6 +5697,7 @@ const AdminPage: React.FC = () => {
                   <Users size={13} /> {selectedCustomerList.length} selected
                 </span>
               )}
+              </div>
             </div>
           </div>
 
@@ -3946,6 +5718,82 @@ const AdminPage: React.FC = () => {
           </ModuleErrorBoundary>
         </section>
       </div>
+
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-[110] 2xl:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setMobileNavOpen(false)}
+            className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]"
+          />
+          <aside className="absolute left-0 top-0 h-full w-[min(86vw,340px)] overflow-y-auto border-r border-teal-100 bg-white p-4 shadow-2xl">
+            {renderAdminNavContent(true)}
+          </aside>
+        </div>
+      )}
+
+      {commandPaletteOpen && (
+        <div className="fixed inset-0 z-[115] bg-slate-950/35 backdrop-blur-sm px-3 py-10" onClick={() => setCommandPaletteOpen(false)}>
+          <div
+            className="mx-auto w-full max-w-3xl rounded-3xl border border-teal-100 bg-white p-4 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <Search size={16} className="text-slate-500" />
+              <input
+                autoFocus
+                value={commandQuery}
+                onChange={(event) => setCommandQuery(event.target.value)}
+                placeholder="Jump to module or entity..."
+                className="w-full bg-transparent text-sm font-semibold text-slate-700 outline-none placeholder:text-slate-400"
+              />
+              <span className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                Esc
+              </span>
+            </div>
+
+            <div className="mt-3 max-h-[56vh] overflow-auto space-y-1.5 pr-1">
+              {commandItems.map((item, index) => {
+                const selected = index === commandActiveIndex;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onCommandSelect(item)}
+                    onMouseEnter={() => setCommandActiveIndex(index)}
+                    className={`w-full rounded-2xl border px-3 py-2 text-left transition ${
+                      selected
+                        ? 'border-teal-200 bg-teal-50'
+                        : 'border-slate-200 bg-white hover:border-teal-100 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-700">{item.label}</p>
+                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                        {item.kind}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">{item.helper}</p>
+                  </button>
+                );
+              })}
+              {!commandItems.length && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-6 text-center">
+                  <p className="text-sm font-black text-slate-700">No matches found.</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Try email, user ID, payment ID, ticket number, or module name.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">Enter: Open</span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">↑/↓: Navigate</span>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">Cmd/Ctrl + K: Toggle</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {timelineTarget && (
         <div className="fixed inset-0 z-[120] bg-slate-950/45 backdrop-blur-sm px-4 py-6 flex justify-end" onClick={() => setTimelineTarget(null)}>

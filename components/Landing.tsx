@@ -1,6 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { getCurrencySymbol } from '../lib/currency';
+import React, { useEffect, useMemo, useState } from 'react';
+import { formatCurrency, getCurrencySymbol } from '../lib/currency';
+import {
+  getBillingPlanBadge,
+  getBillingPlanCycleLabel,
+  getBillingPlanFallbackName,
+  getBillingPlanPricingSnapshot,
+} from '../lib/billingPlanDisplay';
 import { applySeoMeta } from '../services/seoMeta';
+import { getCachedBillingPlans, getPublicBillingPlans, type BillingPlan } from '../services/billingService';
 import {
   TrendingUp,
   ShieldCheck,
@@ -36,12 +43,66 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
   const currencySymbol = getCurrencySymbol();
   const withCurrency = (text: string) => text.replaceAll('₹', currencySymbol);
   const formatMoney = (value: number) => `${currencySymbol}${Math.round(value).toLocaleString()}`;
+  const formatPricingMoney = (value: number) => formatCurrency(value, 'India');
   const [activeScenario, setActiveScenario] = useState<'home' | 'education' | 'travel' | 'car'>('home');
   const [riskIndex, setRiskIndex] = useState(3);
   const [goalOffset, setGoalOffset] = useState(6);
   const [cashflowMode, setCashflowMode] = useState<'income' | 'surplus'>('income');
   const [emergencyMonths, setEmergencyMonths] = useState(7);
   const [lifestyleCut, setLifestyleCut] = useState(12);
+  const [landingPlans, setLandingPlans] = useState<BillingPlan[]>(() => getCachedBillingPlans()?.plans || []);
+  const [plansLoadedFromServer, setPlansLoadedFromServer] = useState<boolean>(() => {
+    const cached = getCachedBillingPlans();
+    return Boolean(cached?.plans?.length);
+  });
+  const navLinks = [
+    { href: '#features', label: 'Features' },
+    { href: '#method', label: 'Method' },
+    { href: '#proof', label: 'Proof' },
+    { href: '#pricing', label: 'Pricing' },
+    { href: '#security', label: 'Security' },
+    { href: '#faq', label: 'FAQ' },
+  ];
+  const planSource = useMemo(() => {
+    if (plansLoadedFromServer && landingPlans.length > 0) return landingPlans;
+    if (landingPlans.length > 0) return landingPlans;
+    return [];
+  }, [landingPlans, plansLoadedFromServer]);
+  const sortedLandingPlans = useMemo(
+    () => [...planSource].sort((a, b) => Number(a.billingMonths || 1) - Number(b.billingMonths || 1)),
+    [planSource]
+  );
+  const landingMonthlyPlanAmount = useMemo(() => {
+    const monthly = sortedLandingPlans.find((plan) => Number(plan.billingMonths || 0) === 1);
+    return Number(monthly?.amountInr || 0);
+  }, [sortedLandingPlans]);
+  const monthlyLandingAmount = useMemo(() => {
+    if (!sortedLandingPlans.length) return 0;
+    const effectiveMonthly = sortedLandingPlans
+      .map((plan) => getBillingPlanPricingSnapshot(plan, 0).effectivePerMonth)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    if (!effectiveMonthly.length) return 0;
+    return Math.min(...effectiveMonthly);
+  }, [sortedLandingPlans]);
+  const pricingPlans = sortedLandingPlans.map((plan) => {
+    const pricing = getBillingPlanPricingSnapshot(plan, landingMonthlyPlanAmount);
+    const months = pricing.months;
+    return {
+      key: plan.planCode,
+      name: String(plan.displayName || getBillingPlanFallbackName(months)),
+      amount: formatPricingMoney(pricing.amountInr),
+      cycle: getBillingPlanCycleLabel(months),
+      badge: getBillingPlanBadge(plan, 'landing'),
+      highlight: months === 6,
+      discount: pricing.discountPct,
+    };
+  });
+  const trustSignals = [
+    { label: 'Encrypted Profile Data', value: 'AES + RLS' },
+    { label: 'Live Goal Health Updates', value: 'Continuous' },
+    { label: 'Paywall Access Governance', value: 'Policy-Based' },
+    { label: 'Guided Planning Setup', value: '< 10 min' },
+  ];
 
   const scenarioMap = {
     home: {
@@ -128,35 +189,64 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
     });
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const loadPlans = async () => {
+      try {
+        const payload = await getPublicBillingPlans();
+        if (!active) return;
+        setLandingPlans(payload.plans);
+        setPlansLoadedFromServer(true);
+      } catch {
+        // Keep fallback plans when API is unavailable.
+      }
+    };
+    void loadPlans();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void getPublicBillingPlans()
+        .then((payload) => {
+          setLandingPlans(payload.plans);
+          setPlansLoadedFromServer(true);
+        })
+        .catch(() => {
+          // keep current plans when refresh fails
+        });
+    }, 90_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
     <div className="min-h-screen text-slate-900 overflow-x-hidden">
-      <nav className="fixed top-0 w-full bg-white/75 backdrop-blur-2xl z-[60] border-b border-white/60">
-        <div className="max-w-7xl mx-auto px-6 md:px-8 h-20 md:h-24 flex items-center justify-between">
+      <nav className="fixed top-0 w-full bg-white/78 backdrop-blur-2xl z-[60] border-b border-white/60">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 md:h-24 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="bg-teal-600 p-2 md:p-2.5 rounded-xl md:rounded-2xl shadow-[0_0_25px_rgba(13,148,136,0.35)]">
               <TrendingUp className="text-white w-5 h-5 md:w-6 md:h-6" />
             </div>
             <span className="text-xl md:text-2xl font-black tracking-tighter text-slate-900 italic font-display">FinVantage<span className="text-teal-600">.</span></span>
           </div>
-          <div className="hidden md:flex items-center gap-6 text-[10px] font-black uppercase tracking-[0.35em] text-slate-500">
-            <a href="#features" className="hover:text-slate-900 transition">Features</a>
-            <a href="#method" className="hover:text-slate-900 transition">Method</a>
-            <a href="#proof" className="hover:text-slate-900 transition">Proof</a>
-            <a href="#pricing" className="hover:text-slate-900 transition">Free</a>
-            <a href="#security" className="hover:text-slate-900 transition">Security</a>
-            <a href="#faq" className="hover:text-slate-900 transition">FAQ</a>
+          <div className="hidden lg:flex items-center gap-6 text-[10px] font-black uppercase tracking-[0.32em] text-slate-500">
+            {navLinks.map((link) => (
+              <a key={link.href} href={link.href} className="hover:text-slate-900 transition">{link.label}</a>
+            ))}
           </div>
           <button
             onClick={onStart}
-            className="hidden md:flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.3em] hover:bg-teal-600 transition"
+            className="inline-flex items-center gap-2 bg-slate-900 text-white px-4 py-2.5 md:px-6 md:py-3 rounded-full text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em] md:tracking-[0.3em] hover:bg-teal-600 transition whitespace-nowrap"
           >
-            Start Planning <ArrowRight size={14} />
+            Start <ArrowRight size={14} />
           </button>
         </div>
       </nav>
 
       {/* Hero */}
-      <section className="relative pt-20 md:pt-24 pb-10 md:pb-14 px-6 md:px-8 overflow-hidden">
+      <section className="relative pt-24 md:pt-28 pb-10 md:pb-14 px-4 md:px-8 overflow-hidden">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[160%] md:w-[140%] h-[600px] md:h-[800px] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-teal-100/40 via-transparent to-transparent -z-10" />
 
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
@@ -164,13 +254,13 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
             <div className="inline-flex items-center gap-2 md:gap-3 px-4 md:px-5 py-2 md:py-2.5 bg-teal-600 text-white rounded-full text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] shadow-xl shadow-teal-600/20">
               <Sparkles size={14} className="animate-pulse" /> Strategy-Grade Planning
             </div>
-            <h1 className="text-5xl md:text-8xl font-black text-slate-950 leading-[1.05] tracking-tight font-display">
+            <h1 className="text-4xl sm:text-5xl md:text-8xl font-black text-slate-950 leading-[1.05] tracking-tight font-display">
               Design your
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-600 to-teal-400"> wealth journey</span>
               <br />like a pro.
             </h1>
-            <p className="text-lg md:text-2xl text-slate-500 max-w-2xl leading-relaxed font-medium">
-              FinVantage turns complex finances into a visual command center—cashflow health, risk alignment, and goal funding in one continuous system. The subscription is free.
+            <p className="text-base md:text-2xl text-slate-500 max-w-2xl leading-relaxed font-medium">
+              FinVantage turns complex finances into a visual command center—cashflow health, risk alignment, and goal funding in one continuous system with paid subscription access.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -195,7 +285,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
                 onClick={onStart}
                 className="bg-teal-600 text-white px-10 py-6 rounded-[1.5rem] font-black text-base uppercase tracking-widest hover:bg-teal-700 transition-all shadow-[0_20px_60px_-15px_rgba(13,148,136,0.45)] flex items-center justify-center gap-3"
               >
-                Start Free Planning <ArrowRight size={16} />
+                Start Planning <ArrowRight size={16} />
               </button>
               <a
                 href="#features"
@@ -209,7 +299,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
               <span className="flex items-center gap-2"><CheckCircle2 size={12} /> No credit card</span>
               <span className="flex items-center gap-2"><Lock size={12} /> Privacy‑first</span>
               <span className="flex items-center gap-2"><FileJson size={12} /> Structured data</span>
-              <span className="flex items-center gap-2"><Sparkles size={12} /> Free subscription</span>
+              <span className="flex items-center gap-2"><Sparkles size={12} /> Starter from {monthlyLandingAmount > 0 ? `${formatPricingMoney(monthlyLandingAmount)}/month` : 'plans unavailable'}</span>
             </div>
           </div>
 
@@ -265,6 +355,19 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 md:px-8 pb-10 md:pb-14">
+        <div className="max-w-7xl mx-auto rounded-[2rem] border border-slate-200 bg-white/75 backdrop-blur-xl p-4 md:p-6 shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
+            {trustSignals.map((item) => (
+              <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">{item.label}</p>
+                <p className="mt-2 text-sm font-black text-slate-900">{item.value}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -397,7 +500,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
           <div className="bg-white rounded-[3rem] p-8 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400\">Scenario</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Scenario</p>
                 <h3 className="text-2xl font-black text-slate-900">{scenarioMap[activeScenario].title}</h3>
               </div>
               <div className="px-3 py-1 rounded-full bg-teal-50 text-teal-600 text-[10px] font-black uppercase tracking-widest">
@@ -406,13 +509,13 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
             </div>
 
             <div className="mt-6 p-5 rounded-2xl bg-slate-900 text-white">
-              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400\">Impact</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Impact</p>
               <div className="text-xl font-black mt-2">{scenarioMap[activeScenario].impact}</div>
               <div className="text-sm font-black text-teal-300 mt-2">Delta: {scenarioMap[activeScenario].delta}</div>
             </div>
 
             <div className="mt-6">
-              <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mb-3\">Net Worth Trajectory</p>
+              <p className="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mb-3">Net Worth Trajectory</p>
               <div className="flex items-end gap-2">
                 {scenarioMap[activeScenario].bars.map((v, idx) => (
                   <div key={idx} className="flex-1 bg-teal-500/15 rounded-xl h-24 relative overflow-hidden">
@@ -454,7 +557,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
           <div className="bg-white rounded-[3rem] p-8 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400\">Recommendation</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Recommendation</p>
                 <h3 className="text-2xl font-black text-slate-900">{activeRisk.label}</h3>
               </div>
               <div className="px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-[10px] font-black uppercase tracking-widest">
@@ -716,42 +819,66 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="py-10 md:py-14 px-6 md:px-8">
+      <section id="pricing" className="py-10 md:py-14 px-4 md:px-8">
         <div className="max-w-5xl mx-auto text-center">
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Pricing</p>
-          <h2 className="text-4xl md:text-6xl font-black text-slate-900 mt-3">Free subscription. Full system.</h2>
-          <p className="text-lg text-slate-500 mt-4">All core modules are available with no trial lockouts.</p>
-          <div className="mt-10 bg-white border border-slate-200 rounded-[2.5rem] p-10 shadow-sm max-w-2xl mx-auto text-left">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Plan</p>
-                <h3 className="text-2xl font-black text-slate-900">FinVantage Free</h3>
+          <h2 className="text-4xl md:text-6xl font-black text-slate-900 mt-3">Starter access from {monthlyLandingAmount > 0 ? `${formatPricingMoney(monthlyLandingAmount)}/month` : 'active plans'}.</h2>
+          <p className="text-lg text-slate-500 mt-4">Choose monthly or bundled plans. Existing migrated users receive a one-time 30-day trial.</p>
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+            {pricingPlans.length === 0 && (
+              <div className="md:col-span-2 rounded-[2rem] border border-amber-200 bg-amber-50 px-6 py-5 text-sm font-semibold text-amber-800">
+                No active plans are currently configured.
               </div>
-              <div className="text-right">
-                <p className="text-3xl font-black text-slate-900">{withCurrency('₹0')}</p>
-                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Forever</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-slate-600">
-              {[
-                'Full cashflow + goal funding engine',
-                'Risk profile + allocation guidance',
-                'Insurance gap analysis',
-                'Asset + liability mapping',
-                'Command Center report',
-                'Privacy-first local experience',
-              ].map((item) => (
-                <div key={item} className="flex items-center gap-2">
-                  <CheckCircle2 size={16} className="text-teal-600" /> {item}
+            )}
+            {pricingPlans.map((plan) => (
+              <div
+                key={plan.key}
+                className={`rounded-[2rem] border p-6 md:p-7 shadow-sm transition ${
+                  plan.highlight
+                    ? 'border-teal-300 bg-gradient-to-br from-teal-50 to-white'
+                    : 'border-slate-200 bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Plan</p>
+                    <h3 className="text-2xl font-black text-slate-900">{plan.name}</h3>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                    plan.highlight ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {plan.badge}
+                  </span>
                 </div>
-              ))}
-            </div>
-            <button
-              onClick={onStart}
-              className="mt-8 w-full bg-teal-600 text-white px-8 py-5 rounded-[1.5rem] font-black uppercase tracking-widest hover:bg-teal-700 transition flex items-center justify-center gap-3"
-            >
-              Start Free Planning <ArrowRight size={16} />
-            </button>
+                <div className="mt-6">
+                  <p className="text-3xl font-black text-slate-900">{plan.amount}</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 mt-1">{plan.cycle}</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-700 mt-2">
+                    {plan.discount != null && plan.discount > 0 ? `${plan.discount.toFixed(0)}% discount` : 'No bundle discount'}
+                  </p>
+                </div>
+                <div className="mt-6 space-y-2 text-sm text-slate-600">
+                  <p className="flex items-center gap-2"><CheckCircle2 size={14} className="text-teal-600" /> Full planning engine access</p>
+                  <p className="flex items-center gap-2"><CheckCircle2 size={14} className="text-teal-600" /> Goal, risk, insurance, and dashboard modules</p>
+                  <p className="flex items-center gap-2"><CheckCircle2 size={14} className="text-teal-600" /> Auto-renew with cancel-at-period-end control</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-700">Billing Note</p>
+            <p className="text-sm font-semibold text-amber-800 mt-1">Localized prices are shown by country. Checkout is currently billed in INR.</p>
+          </div>
+          <button
+            onClick={onStart}
+            className="mt-8 bg-teal-600 text-white px-8 py-5 rounded-[1.5rem] font-black uppercase tracking-widest hover:bg-teal-700 transition inline-flex items-center justify-center gap-3"
+          >
+            Start Planning <ArrowRight size={16} />
+          </button>
+          <div className="mt-4">
+            <a href="/pricing" className="text-sm font-black text-slate-700 underline underline-offset-2 hover:text-teal-700">
+              View detailed billing screen
+            </a>
           </div>
         </div>
       </section>
@@ -863,10 +990,10 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
         </div>
       </section>
 
-      <footer className="border-t border-slate-200 bg-white/90 px-6 py-10 md:px-8 md:py-12">
+      <footer className="border-t border-slate-200 bg-white/90 px-6 py-10 md:px-8 md:py-12 pb-24 md:pb-12">
         <div className="mx-auto flex max-w-7xl flex-col gap-6">
           <p className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">
-            Copyright © {baseYear} Finvanage All Rights Reserved.
+            Copyright © {baseYear} FinVantage. All Rights Reserved.
           </p>
           <div className="flex flex-wrap gap-x-6 gap-y-3 text-xs font-bold text-slate-600 md:text-sm">
             <a href="/support" className="transition hover:text-slate-900">Support Desk and Contact us</a>
@@ -880,6 +1007,15 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
           </div>
         </div>
       </footer>
+
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur md:hidden">
+        <button
+          onClick={onStart}
+          className="w-full bg-slate-900 text-white px-6 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-2"
+        >
+          Start Planning <ArrowRight size={14} />
+        </button>
+      </div>
     </div>
   );
 };

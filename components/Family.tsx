@@ -1,7 +1,10 @@
 
-import React, { useState } from 'react';
-import { Plus, Users, Trash2, Heart, User, CheckCircle2, ArrowRight } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Plus, Users, Trash2, Heart, User, CheckCircle2 } from 'lucide-react';
 import { FamilyMember, FinanceState, Relation, DetailedIncome } from '../types';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
+import { formatCurrency } from '../lib/currency';
+import PlanningAssistStrip from './common/PlanningAssistStrip';
 
 interface FamilyProps {
   state: FinanceState;
@@ -9,10 +12,12 @@ interface FamilyProps {
   setView: (view: any) => void;
 }
 
-const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
+const Family: React.FC<FamilyProps> = ({ state, updateState }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dependencyBufferYears, setDependencyBufferYears] = useState(5);
+  const [careCostInflation, setCareCostInflation] = useState(6);
   
   const initialIncome: DetailedIncome = {
     salary: 0,
@@ -30,6 +35,8 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
     relation: 'Spouse',
     age: 30,
     isDependent: true,
+    coveredUnderPrimaryInsurance: true,
+    hasSeparateInsurance: false,
     includeIncomeInPlanning: false,
     retirementAge: undefined,
     income: { ...initialIncome },
@@ -87,6 +94,10 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
     }
     const member: FamilyMember = {
       ...newMember,
+      coveredUnderPrimaryInsurance: newMember.coveredUnderPrimaryInsurance ?? true,
+      hasSeparateInsurance: (newMember.coveredUnderPrimaryInsurance ?? true)
+        ? false
+        : (newMember.hasSeparateInsurance ?? false),
       includeIncomeInPlanning: newMember.isDependent ? false : (newMember.includeIncomeInPlanning ?? false),
       id: Math.random().toString(36).substr(2, 9),
     };
@@ -96,12 +107,169 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
     }
     updateState({ family: [...state.family, member] });
     setShowAdd(false);
-    setNewMember({ name: '', relation: 'Spouse', age: 30, isDependent: true, includeIncomeInPlanning: false, retirementAge: undefined, income: { ...initialIncome }, monthlyExpenses: 0 });
+    setNewMember({
+      name: '',
+      relation: 'Spouse',
+      age: 30,
+      isDependent: true,
+      coveredUnderPrimaryInsurance: true,
+      hasSeparateInsurance: false,
+      includeIncomeInPlanning: false,
+      retirementAge: undefined,
+      income: { ...initialIncome },
+      monthlyExpenses: 0
+    });
   };
 
   const removeMember = (id: string) => {
     updateState({ family: state.family.filter(m => m.id !== id) });
   };
+
+  const currencyCountry = state.profile.country;
+  const householdInsight = useMemo(() => {
+    const selfAge = getPrimaryAge();
+    const familyCount = state.family.length;
+    const memberCount = 1 + familyCount;
+    const dependents = state.family.filter(member => member.isDependent).length;
+    const independents = familyCount - dependents;
+    const incomeIncludedMembers = state.family.filter(member => !member.isDependent && (member.includeIncomeInPlanning ?? false)).length + 1;
+    const earners = Math.max(1, incomeIncludedMembers);
+
+    const selfIncome = monthlyIncomeFromDetailed(state.profile.income);
+    const includedFamilyIncome = state.family.reduce((sum, member) => {
+      if (member.isDependent) return sum;
+      if (!(member.includeIncomeInPlanning ?? false)) return sum;
+      return sum + monthlyIncomeFromDetailed(member.income);
+    }, 0);
+    const totalPlanningIncome = selfIncome + includedFamilyIncome;
+
+    const knownHouseholdBurn = state.detailedExpenses.reduce((sum, item) => sum + Math.max(0, Number(item.amount || 0)), 0)
+      + state.loans.reduce((sum, loan) => sum + Math.max(0, Number(loan.emi || 0)), 0);
+    const fallbackBurn = Math.max(0, Number(state.profile.monthlyExpenses || 0))
+      + state.family.reduce((sum, member) => sum + Math.max(0, Number(member.monthlyExpenses || 0)), 0);
+    const monthlyBurn = knownHouseholdBurn > 0 ? knownHouseholdBurn : fallbackBurn;
+
+    const knownDependentCost = state.family
+      .filter(member => member.isDependent)
+      .reduce((sum, member) => sum + Math.max(0, Number(member.monthlyExpenses || 0)), 0);
+    const fallbackDependentCost = dependents * Math.max(5000, monthlyBurn > 0 ? monthlyBurn * 0.2 : totalPlanningIncome * 0.12);
+    const dependentSupportMonthly = knownDependentCost > 0 ? knownDependentCost : fallbackDependentCost;
+
+    const yearsFactor = Math.pow(1 + careCostInflation / 100, Math.max(0, dependencyBufferYears - 1) / 2);
+    const dependentCorpusTarget = dependentSupportMonthly * 12 * dependencyBufferYears * yearsFactor;
+
+    const goalReadyLiquid = state.assets
+      .filter(asset => asset.availableForGoals && asset.category === 'Liquid')
+      .reduce((sum, asset) => sum + Math.max(0, Number(asset.currentValue || 0)), 0);
+
+    const coveragePct = dependentCorpusTarget > 0 ? Math.min(999, (goalReadyLiquid / dependentCorpusTarget) * 100) : 0;
+    const contributionMap = [
+      {
+        name: state.profile.firstName || 'Self',
+        relation: 'Self',
+        contribution: selfIncome,
+        consumption: Math.max(
+          0,
+          monthlyBurn - state.family.reduce((sum, member) => sum + Math.max(0, Number(member.monthlyExpenses || 0)), 0),
+        ),
+      },
+      ...state.family.map(member => ({
+        name: member.name,
+        relation: member.relation,
+        contribution:
+          member.isDependent || !(member.includeIncomeInPlanning ?? false)
+            ? 0
+            : monthlyIncomeFromDetailed(member.income),
+        consumption: Math.max(0, Number(member.monthlyExpenses || 0)),
+      })),
+    ];
+    const topContributor = contributionMap
+      .slice()
+      .sort((a, b) => b.contribution - a.contribution)[0];
+    const incomeWithoutTop = Math.max(0, totalPlanningIncome - Math.max(0, topContributor?.contribution || 0));
+    const deficitAfterTopLoss = Math.max(0, monthlyBurn - incomeWithoutTop);
+    const resilienceMonths = deficitAfterTopLoss > 0 ? goalReadyLiquid / deficitAfterTopLoss : 999;
+    const selfRetirementBufferYears = Math.max(0, Number(state.profile.lifeExpectancy || 85) - Number(state.profile.retirementAge || 60));
+    const familyRetirementBuffers = state.family
+      .filter(member => Number.isFinite(member.retirementAge as number))
+      .map(member => Math.max(0, Number(state.profile.lifeExpectancy || 85) - Number(member.retirementAge || 0)));
+    const allRetirementBuffers = [selfRetirementBufferYears, ...familyRetirementBuffers];
+    const avgRetirementBufferYears = allRetirementBuffers.length
+      ? allRetirementBuffers.reduce((sum, value) => sum + value, 0) / allRetirementBuffers.length
+      : selfRetirementBufferYears;
+    const shortRetirementBufferCount = allRetirementBuffers.filter(value => value < 20).length;
+    const lifecycleCostCurve = [1, 5, 10].map((years) => ({
+      years,
+      annualCost: dependentSupportMonthly * 12 * Math.pow(1 + careCostInflation / 100, years),
+    }));
+    const ageMix = {
+      children: state.family.filter(member => member.age <= 21).length,
+      working: state.family.filter(member => member.age > 21 && member.age < 60).length + (selfAge !== null && selfAge > 21 && selfAge < 60 ? 1 : 0),
+      seniors: state.family.filter(member => member.age >= 60).length + (selfAge !== null && selfAge >= 60 ? 1 : 0),
+    };
+
+    return {
+      memberCount,
+      dependents,
+      independents,
+      earners,
+      incomeIncludedMembers,
+      totalPlanningIncome,
+      monthlyBurn,
+      dependentSupportMonthly,
+      dependentCorpusTarget,
+      goalReadyLiquid,
+      coveragePct,
+      topContributor,
+      resilienceMonths,
+      avgRetirementBufferYears,
+      shortRetirementBufferCount,
+      lifecycleCostCurve,
+      contributionMap,
+      ageMix,
+      dependencyRatioPct: memberCount > 0 ? (dependents / memberCount) * 100 : 0,
+      dependencyPerEarner: dependents / earners,
+    };
+  }, [state, dependencyBufferYears, careCostInflation]);
+
+  const familyAssistStats = useMemo(() => {
+    const resilienceTone = householdInsight.resilienceMonths >= 12 || householdInsight.resilienceMonths >= 999
+      ? 'positive'
+      : householdInsight.resilienceMonths >= 6
+        ? 'warning'
+        : 'critical';
+    const coverageTone = householdInsight.coveragePct >= 100
+      ? 'positive'
+      : householdInsight.coveragePct >= 60
+        ? 'warning'
+        : 'critical';
+
+    return [
+      {
+        label: 'Members',
+        value: String(householdInsight.memberCount),
+      },
+      {
+        label: 'Planning Earners',
+        value: String(householdInsight.earners),
+      },
+      {
+        label: 'Dependents / Earner',
+        value: householdInsight.dependencyPerEarner.toFixed(2),
+        tone: householdInsight.dependencyPerEarner <= 1 ? 'positive' : 'warning',
+      },
+      {
+        label: 'Resilience',
+        value: householdInsight.resilienceMonths >= 999 ? 'Stable' : `${householdInsight.resilienceMonths.toFixed(1)} mo`,
+        tone: resilienceTone,
+      },
+      {
+        label: 'Support Coverage',
+        value: `${householdInsight.coveragePct.toFixed(1)}%`,
+        tone: coverageTone,
+      },
+    ] as const;
+  }, [householdInsight]);
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-24">
@@ -110,39 +278,26 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
           {notice}
         </div>
       )}
-      <div className="surface-dark p-10 md:p-14 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[340px] h-[340px] bg-teal-600/10 blur-[90px] rounded-full translate-x-1/3 -translate-y-1/3" />
-        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-          <div className="space-y-4 text-left">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
-              <Users size={14}/> Family Profile
-            </div>
-            <h3 className="text-4xl md:text-5xl font-black tracking-tight">Household Node</h3>
-            <p className="text-slate-300 font-medium max-w-xl">
-              Define family members, dependency status, and planning participation before mapping income and goals.
-            </p>
-            <div className="flex gap-4">
-             <div className="flex items-center gap-2 text-[10px] font-black text-teal-600 uppercase tracking-widest bg-teal-50 px-3 py-1.5 rounded-full">
-               <Users size={14}/> {state.family.length} Added
-             </div>
-             {state.family.length > 0 && (
-               <button 
-                onClick={() => setView('inflow')}
-                className="flex items-center gap-2 text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-3 py-1.5 rounded-full hover:bg-emerald-100 transition-colors"
-               >
-                 Go to Income Mapping <ArrowRight size={14}/>
-               </button>
-             )}
-            </div>
-          </div>
-        <button 
-          onClick={() => setShowAdd(prev => !prev)}
-          className="px-10 py-5 bg-teal-600 text-white rounded-[2rem] hover:bg-teal-500 transition-all flex items-center gap-3 font-black uppercase text-[10px] tracking-widest shadow-2xl"
-        >
-          <Plus size={20} /> {showAdd ? 'Close Form' : 'Add Member'}
-        </button>
-      </div>
-      </div>
+
+      <PlanningAssistStrip
+        title="Model your family structure before funding goals"
+        description="Capture dependency, income participation, and retirement alignment so downstream planning remains realistic."
+        tip="Keep spouse/parent age and dependency details accurate to avoid projection drift."
+        actions={(
+          <button
+            type="button"
+            onClick={() => setShowAdd(prev => !prev)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-2xl hover:bg-teal-500 transition-colors font-black uppercase text-[10px] tracking-widest shadow-lg"
+          >
+            <Plus size={14} /> {showAdd ? 'Close Form' : 'Add Member'}
+          </button>
+        )}
+        stats={familyAssistStats.map((stat) => ({
+          label: stat.label,
+          value: stat.value,
+          tone: stat.tone,
+        }))}
+      />
 
       {showAdd && (
         <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden">
@@ -244,6 +399,52 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
                 />
               </div>
             )}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                  Is it covered under your insurance?
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextCovered = !(newMember.coveredUnderPrimaryInsurance ?? true);
+                      setNewMember({
+                        ...newMember,
+                        coveredUnderPrimaryInsurance: nextCovered,
+                        hasSeparateInsurance: nextCovered ? false : (newMember.hasSeparateInsurance ?? false),
+                      });
+                    }}
+                    className={`w-20 h-10 rounded-full transition-all relative ${(newMember.coveredUnderPrimaryInsurance ?? true) ? 'bg-teal-600' : 'bg-slate-200'}`}
+                  >
+                    <div className={`absolute top-1 w-8 h-8 rounded-full bg-white transition-all shadow-md ${(newMember.coveredUnderPrimaryInsurance ?? true) ? 'left-11' : 'left-1'}`} />
+                  </button>
+                  <p className="text-[10px] font-bold text-slate-500">
+                    {(newMember.coveredUnderPrimaryInsurance ?? true) ? 'Yes' : 'No'}
+                  </p>
+                </div>
+              </div>
+
+              {!(newMember.coveredUnderPrimaryInsurance ?? true) && (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                    If no, does it have separate insurance?
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewMember({ ...newMember, hasSeparateInsurance: !(newMember.hasSeparateInsurance ?? false) })}
+                      className={`w-20 h-10 rounded-full transition-all relative ${(newMember.hasSeparateInsurance ?? false) ? 'bg-teal-600' : 'bg-slate-200'}`}
+                    >
+                      <div className={`absolute top-1 w-8 h-8 rounded-full bg-white transition-all shadow-md ${(newMember.hasSeparateInsurance ?? false) ? 'left-11' : 'left-1'}`} />
+                    </button>
+                    <p className="text-[10px] font-bold text-slate-500">
+                      {(newMember.hasSeparateInsurance ?? false) ? 'Yes' : 'No'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
             <button type="submit" className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black text-lg shadow-xl shadow-slate-900/10">Add to Profile</button>
           </form>
         </div>
@@ -278,6 +479,11 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
                   <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">
                     {(member.includeIncomeInPlanning ?? true) ? 'Income Included' : 'Income Excluded'}
                   </p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mt-1">
+                    {(member.coveredUnderPrimaryInsurance ?? true)
+                      ? 'Covered Under Your Insurance'
+                      : ((member.hasSeparateInsurance ?? false) ? 'Separate Insurance: Yes' : 'Separate Insurance: No')}
+                  </p>
                 </div>
               </div>
               <button 
@@ -294,6 +500,169 @@ const Family: React.FC<FamilyProps> = ({ state, updateState, setView }) => {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1.3fr_1fr] gap-6">
+        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6 text-left">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Household Analysis Lab</p>
+              <h3 className="text-2xl font-black text-slate-900">Dependency and Support Simulation</h3>
+            </div>
+            <div className="px-3 py-2 rounded-2xl border border-slate-200 bg-slate-50 text-right">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Dependency ratio</p>
+              <p className="text-lg font-black text-slate-900">{householdInsight.dependencyRatioPct.toFixed(1)}%</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Household size</p>
+              <p className="text-xl font-black text-slate-900 mt-1">{householdInsight.memberCount}</p>
+            </div>
+            <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-amber-600">Dependents</p>
+              <p className="text-xl font-black text-amber-700 mt-1">{householdInsight.dependents}</p>
+            </div>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600">Earners</p>
+              <p className="text-xl font-black text-emerald-700 mt-1">{householdInsight.earners}</p>
+            </div>
+            <div className="rounded-2xl border border-teal-100 bg-teal-50 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-teal-600">Monthly planning inflow</p>
+              <p className="text-lg font-black text-teal-700 mt-1">{formatCurrency(householdInsight.totalPlanningIncome, currencyCountry)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Dependency buffer years</label>
+                <span className="text-sm font-black text-slate-900">{dependencyBufferYears} yrs</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                step={1}
+                value={dependencyBufferYears}
+                onChange={(event) => setDependencyBufferYears(Number(event.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-teal-600 cursor-pointer"
+              />
+              <p className="text-[10px] font-semibold text-slate-500">
+                Planning target for how long dependent support should be buffered.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Care cost inflation</label>
+                <span className="text-sm font-black text-slate-900">{careCostInflation}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                step={1}
+                value={careCostInflation}
+                onChange={(event) => setCareCostInflation(Number(event.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-emerald-500 cursor-pointer"
+              />
+              <p className="text-[10px] font-semibold text-slate-500">
+                Stress-tests dependent care requirement under rising costs.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Estimated dependent support / month</p>
+              <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(householdInsight.dependentSupportMonthly, currencyCountry)}</p>
+            </div>
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-rose-500">Required support corpus</p>
+              <p className="text-lg font-black text-rose-600 mt-1">{formatCurrency(householdInsight.dependentCorpusTarget, currencyCountry)}</p>
+            </div>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-emerald-600">Goal-ready liquid cover</p>
+              <p className="text-lg font-black text-emerald-700 mt-1">{formatCurrency(householdInsight.goalReadyLiquid, currencyCountry)}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mt-1">{householdInsight.coveragePct.toFixed(1)}% coverage</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="surface-dark p-6 md:p-8 rounded-[2.5rem] text-white space-y-5 text-left shadow-xl">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Household Signals</p>
+          <div className="space-y-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Age mix</p>
+              <p className="text-sm font-semibold text-white mt-1">
+                Children: {householdInsight.ageMix.children} • Working: {householdInsight.ageMix.working} • Seniors: {householdInsight.ageMix.seniors}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Dependency per earner</p>
+              <p className="text-xl font-black text-teal-400 mt-1">
+                {householdInsight.dependencyPerEarner.toFixed(2)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Burn vs planning inflow</p>
+              <p className="text-xl font-black text-teal-400 mt-1">
+                {householdInsight.totalPlanningIncome > 0
+                  ? `${((householdInsight.monthlyBurn / householdInsight.totalPlanningIncome) * 100).toFixed(1)}%`
+                  : '0.0%'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Resilience if top income stops</p>
+              <p className="text-sm font-semibold text-slate-200 mt-2">
+                {householdInsight.topContributor
+                  ? `${householdInsight.topContributor.name} is top contributor.`
+                  : 'Top contributor not available.'}
+              </p>
+              <p className="text-lg font-black text-teal-300 mt-1">
+                {householdInsight.resilienceMonths >= 999 ? 'Stable (no immediate deficit)' : `${householdInsight.resilienceMonths.toFixed(1)} months`}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Retirement alignment</p>
+              <p className="text-sm font-semibold text-slate-200 mt-2">
+                Avg buffer: {householdInsight.avgRetirementBufferYears.toFixed(1)} years to life expectancy.
+              </p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-amber-300 mt-2">
+                {householdInsight.shortRetirementBufferCount} member(s) below 20-year buffer
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Family lifecycle cost curve</p>
+              {householdInsight.lifecycleCostCurve.map(point => (
+                <div key={point.years} className="flex items-center justify-between text-xs font-semibold text-slate-200">
+                  <span>{point.years}Y projected dependent cost</span>
+                  <span className="font-black">{formatCurrency(point.annualCost, currencyCountry)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Contribution vs consumption</p>
+              {householdInsight.contributionMap.slice(0, 3).map(item => (
+                <div key={`${item.name}-${item.relation}`} className="flex items-center justify-between text-xs font-semibold text-slate-200">
+                  <span>{item.name}</span>
+                  <span className="font-black">
+                    {formatCurrency(item.contribution, currencyCountry)} / {formatCurrency(item.consumption, currencyCountry)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Insight</p>
+              <p className="text-sm font-semibold text-slate-200 mt-2 leading-relaxed">
+                {householdInsight.coveragePct >= 100
+                  ? 'Your liquid goal-ready assets currently cover the selected dependency buffer target.'
+                  : 'Dependency support target is underfunded for the selected horizon. Increase liquid reserves or update family cashflow contributions.'}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
           </div>

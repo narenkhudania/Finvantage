@@ -3,6 +3,7 @@ export type AdminModule =
   | 'customers'
   | 'portfolio'
   | 'payments'
+  | 'rewards'
   | 'compliance'
   | 'fraud'
   | 'support'
@@ -161,6 +162,10 @@ export interface AdminSubscription {
   start_at: string;
   end_at: string | null;
   cancel_at_period_end: boolean;
+  auto_renew?: boolean;
+  provider?: string;
+  provider_subscription_id?: string | null;
+  provider_customer_id?: string | null;
 }
 
 export interface AdminAnalyticsSeriesPoint {
@@ -263,6 +268,18 @@ export interface SupportTicket {
   status: string;
   assignedTo: string | null;
   resolutionNote: string | null;
+  firstResponseAt?: string | null;
+  firstResponseDueAt?: string | null;
+  resolutionDueAt?: string | null;
+  closedAt?: string | null;
+  slaStatus?: 'on_track' | 'due_soon' | 'breached' | 'paused' | 'met';
+  escalated?: boolean;
+  escalationLevel?: number;
+  escalationCount?: number;
+  escalationReason?: string | null;
+  escalatedAt?: string | null;
+  nextEscalationAt?: string | null;
+  breachCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -740,6 +757,19 @@ export interface AdminCrmComplaintTicket {
   assignedTo: string | null;
   tags: string[];
   resolutionNote: string | null;
+  firstResponseAt?: string | null;
+  firstResponseDueAt?: string | null;
+  resolutionDueAt?: string | null;
+  closedAt?: string | null;
+  slaStatus?: 'on_track' | 'due_soon' | 'breached' | 'paused' | 'met';
+  escalated?: boolean;
+  escalationLevel?: number;
+  escalationCount?: number;
+  escalationReason?: string | null;
+  escalatedAt?: string | null;
+  nextEscalationAt?: string | null;
+  breachCount?: number;
+  slaRemainingHours?: number | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
@@ -812,6 +842,9 @@ export interface AdminCrmKpis {
   openComplaints: number;
   resolvedComplaints: number;
   highPriorityComplaints: number;
+  dueSoonComplaints: number;
+  breachedComplaints: number;
+  escalatedComplaints: number;
 }
 
 export interface AdminCrmReport {

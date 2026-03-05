@@ -203,8 +203,13 @@ export const setAdminWorkspaceId = (workspaceId: string | null) => {
   writeLocal(ADMIN_WORKSPACE_STORAGE_KEY, workspaceId);
 };
 
-const requireWorkspaceId = () => {
+const getWorkspaceIdOrNull = () => {
   const workspaceId = getAdminWorkspaceId();
+  return workspaceId && workspaceId.trim() ? workspaceId : null;
+};
+
+const requireWorkspaceId = () => {
+  const workspaceId = getWorkspaceIdOrNull();
   if (!workspaceId) throw new Error('No workspace selected. Select a workspace first.');
   return workspaceId;
 };
@@ -286,6 +291,10 @@ const mapSubscription = (row: Record<string, any>): AdminSubscription => ({
   start_at: String(row.start_at || row.current_period_start || row.created_at || new Date().toISOString()),
   end_at: row.end_at || row.current_period_end || null,
   cancel_at_period_end: Boolean(row.cancel_at_period_end || row.cancelled_at),
+  auto_renew: row.auto_renew !== false,
+  provider: String(row.provider || row.gateway || 'internal'),
+  provider_subscription_id: row.provider_subscription_id || row.gateway_sub_id || null,
+  provider_customer_id: row.provider_customer_id || row.gateway_customer_id || null,
 });
 
 const mapFeatureFlag = (row: Record<string, any>): FeatureFlag => {
@@ -342,6 +351,54 @@ const normalizeChannel = (raw?: string | null) => {
   if (value === 'web_push' || value === 'webpush' || value === 'push_web') return 'web_push';
   if (value === 'mobile_push' || value === 'mobilepush' || value === 'push_mobile' || value === 'push') return 'mobile_push';
   return 'other';
+};
+
+const detectChannelsFromText = (raw?: string | null) => {
+  const value = String(raw || '').trim().toLowerCase();
+  const detected = new Set<string>();
+  if (!value) return detected;
+
+  const normalized = normalizeChannel(value);
+  if (normalized !== 'other') detected.add(normalized);
+
+  if (/\bmobile[_-]?push\b|\bpush[_-]?mobile\b|\bpush\b/.test(value)) detected.add('mobile_push');
+  if (/\bweb[_-]?push\b|\bpush[_-]?web\b/.test(value)) detected.add('web_push');
+  if (/\bin[_-]?app\b|\binapp\b/.test(value)) detected.add('in_app');
+  if (/\bemail\b/.test(value)) detected.add('email');
+  if (/\bsms\b/.test(value)) detected.add('sms');
+  if (/\bwhatsapp\b/.test(value)) detected.add('whatsapp');
+  if (/\brcs\b/.test(value)) detected.add('rcs');
+
+  return detected;
+};
+
+const collectChannels = (value: unknown, target: Set<string>, depth = 0) => {
+  if (depth > 3 || value == null) return;
+
+  if (typeof value === 'string') {
+    detectChannelsFromText(value).forEach((channel) => target.add(channel));
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectChannels(entry, target, depth + 1));
+    return;
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    Object.entries(record).forEach(([key, entry]) => {
+      const lowerKey = key.toLowerCase();
+      if (
+        lowerKey.includes('channel')
+        || lowerKey.includes('provider')
+        || lowerKey === 'step'
+        || lowerKey === 'steps'
+      ) {
+        collectChannels(entry, target, depth + 1);
+      }
+    });
+  }
 };
 
 const normalizeGrowthTriggerType = (raw: unknown): AdminGrowthJourneyTriggerType => {
@@ -1365,7 +1422,7 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
     getPayments(1500).catch(() => [] as AdminPayment[]),
   ]);
 
-  const [adminNotificationsResult, inAppNotificationsResult, eventsResult, profilesResult] = await Promise.all([
+  const [adminNotificationsResult, inAppNotificationsResult, eventsResult, profilesResult, billingMessageTemplatesResult, crmWorkflowsResult] = await Promise.all([
     supabase
       .from('admin_notifications')
       .select('user_id, channel, status, sent_at, created_at, metadata')
@@ -1389,6 +1446,14 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
       .select('id, created_at, country, onboarding_done')
       .order('created_at', { ascending: false })
       .limit(6000),
+    supabase
+      .from('billing_message_templates')
+      .select('channel, is_active')
+      .limit(500),
+    supabase
+      .from('crm_workflows')
+      .select('channels, status, trigger')
+      .limit(500),
   ]);
 
   if (adminNotificationsResult.error && !isMissingRelationError(adminNotificationsResult.error)) {
@@ -1402,6 +1467,12 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
   }
   if (profilesResult.error && !isMissingRelationError(profilesResult.error)) {
     throw toError(profilesResult.error, 'Could not load profile slices for growth reporting.');
+  }
+  if (billingMessageTemplatesResult.error && !isMissingRelationError(billingMessageTemplatesResult.error)) {
+    throw toError(billingMessageTemplatesResult.error, 'Could not load billing message templates for growth reporting.');
+  }
+  if (crmWorkflowsResult.error && !isMissingRelationError(crmWorkflowsResult.error)) {
+    throw toError(crmWorkflowsResult.error, 'Could not load CRM workflows for growth reporting.');
   }
 
   const adminNotifications = (adminNotificationsResult.data || []) as Array<{
@@ -1435,6 +1506,17 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
     onboarding_done: boolean | null;
   }>;
 
+  const billingMessageTemplates = (billingMessageTemplatesResult.data || []) as Array<{
+    channel: string | null;
+    is_active: boolean | null;
+  }>;
+
+  const crmWorkflows = (crmWorkflowsResult.data || []) as Array<{
+    channels: unknown;
+    status: string | null;
+    trigger: string | null;
+  }>;
+
   const channelOrder = ['mobile_push', 'web_push', 'email', 'sms', 'in_app', 'whatsapp', 'rcs', 'other'];
   const channelStats = new Map(
     channelOrder.map((channel) => [
@@ -1461,7 +1543,12 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
   const onboardedUsers = new Set<string>();
   let fallbackActivations = 0;
   let personalizationSignals = 0;
+  let personalizationWebSignals = 0;
+  let personalizationAppSignals = 0;
+  let dynamicContentSignals = 0;
+  let behaviorPersonalizationSignals = 0;
   let aiSignals = 0;
+  const personalizationUsers = new Set<string>();
 
   const eventStatsByUser = new Map<string, { events: number; lastEventAt: string; intentScore: number }>();
   events.forEach((event) => {
@@ -1469,15 +1556,29 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
     const eventName = String(event.event_name || 'unknown');
     const eventTime = String(event.event_time || '');
     const lowerEvent = eventName.toLowerCase();
+    const rawSource = String(event.source || '').toLowerCase();
+    const metadata = (event.metadata || {}) as Record<string, unknown>;
+    const platform = String(metadata.platform || metadata.channel || metadata.surface || '').toLowerCase();
+    const sourceContext = `${rawSource}|${platform}`;
+    const isPersonalizationEvent = includesAny(lowerEvent, ['personal', 'recommendation', 'offer', 'content_variant', 'dynamic_content']);
 
-    if (includesAny(lowerEvent, ['personal', 'recommendation', 'offer'])) {
+    if (isPersonalizationEvent) {
       personalizationSignals += 1;
+      if (includesAny(sourceContext, ['web', 'browser', 'site'])) personalizationWebSignals += 1;
+      if (includesAny(sourceContext, ['app', 'mobile', 'ios', 'android'])) personalizationAppSignals += 1;
+      if (includesAny(lowerEvent, ['dynamic', 'real_time', 'offer_update', 'content_update', 'recommendation_served'])) {
+        dynamicContentSignals += 1;
+      }
+      if (includesAny(lowerEvent, ['behavior', 'triggered', 'inactive', 'intent'])) {
+        behaviorPersonalizationSignals += 1;
+      }
     }
     if (includesAny(lowerEvent, ['ai.', 'ai_', 'merlin', 'sherpa'])) {
       aiSignals += 1;
     }
 
     if (!userId) return;
+    if (isPersonalizationEvent) personalizationUsers.add(userId);
 
     const base = eventStatsByUser.get(userId) || { events: 0, lastEventAt: eventTime, intentScore: 0 };
     base.events += 1;
@@ -1599,35 +1700,127 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
   const goalConversionPct = pct(goalUsers, onboardingUsers || activeUsers);
 
   const segmentationCriteriaCount = 224;
-  const sentChannelsCount = channels.filter((row) => row.sent > 0).length;
-  const channelFlagsEnabled = new Set(
-    featureFlags
-      .filter((flag) => flag.is_enabled && includesAny(flag.flag_key.toLowerCase(), ['channel.', 'messaging.', 'push', 'email', 'sms', 'whatsapp', 'rcs']))
-      .map((flag) => normalizeChannel(flag.flag_key.split('.').slice(-1)[0]))
-  );
-  const configuredChannels = Math.max(sentChannelsCount, channelFlagsEnabled.size);
-
   const campaignCostProxy = channels.reduce((sum, row) => sum + row.sent, 0) * 0.35;
   const roiPct = campaignCostProxy > 0 ? Number((((successfulRevenue - campaignCostProxy) / campaignCostProxy) * 100).toFixed(2)) : 0;
+
+  const experimentStatsByKey = new Map<
+    string,
+    {
+      lastEventAt: string;
+      controlUsers: Set<string>;
+      variantUsers: Set<string>;
+      controlConversions: Set<string>;
+      variantConversions: Set<string>;
+    }
+  >();
+
+  events.forEach((event) => {
+    const metadata = (event.metadata || {}) as Record<string, unknown>;
+    const experimentKey = String(
+      metadata.experiment
+      || metadata.exp
+      || metadata.experiment_key
+      || metadata.test
+      || ''
+    ).trim();
+    const userId = event.user_id ? String(event.user_id) : '';
+    if (!experimentKey || !userId) return;
+
+    const eventName = String(event.event_name || '');
+    const variantRaw = String(
+      metadata.variant
+      || metadata.ab_variant
+      || metadata.group
+      || metadata.arm
+      || ''
+    ).toLowerCase();
+    const isControlVariant = /\b(control|holdout|a)\b/.test(variantRaw);
+    const isConversionSignal = conversionEvents.has(eventName) || successfulPaymentUsers.has(userId);
+
+    const row = experimentStatsByKey.get(experimentKey) || {
+      lastEventAt: String(event.event_time || new Date().toISOString()),
+      controlUsers: new Set<string>(),
+      variantUsers: new Set<string>(),
+      controlConversions: new Set<string>(),
+      variantConversions: new Set<string>(),
+    };
+
+    if (String(event.event_time || '') > row.lastEventAt) {
+      row.lastEventAt = String(event.event_time || row.lastEventAt);
+    }
+
+    if (isControlVariant) {
+      row.controlUsers.add(userId);
+      if (isConversionSignal) row.controlConversions.add(userId);
+    } else {
+      row.variantUsers.add(userId);
+      if (isConversionSignal) row.variantConversions.add(userId);
+    }
+
+    experimentStatsByKey.set(experimentKey, row);
+  });
+
+  const experimentsFromEvents: AdminGrowthExperiment[] = [...experimentStatsByKey.entries()]
+    .map(([experiment, value]) => {
+      const sampleSize = value.controlUsers.size + value.variantUsers.size;
+      const controlRate = pct(value.controlConversions.size, value.controlUsers.size || 1);
+      const variantRate = pct(value.variantConversions.size, value.variantUsers.size || 1);
+      const conversionRatePct = pct(value.controlConversions.size + value.variantConversions.size, sampleSize || 1);
+      return {
+        experiment,
+        status: sampleSize > 0 ? 'running' : 'planned',
+        variantCoveragePct: pct(sampleSize, activeUsers || 1),
+        conversionRatePct,
+        upliftPct: value.controlUsers.size > 0 && value.variantUsers.size > 0
+          ? Number((variantRate - controlRate).toFixed(2))
+          : null,
+      };
+    })
+    .sort((a, b) => b.variantCoveragePct - a.variantCoveragePct)
+    .slice(0, 12);
 
   const experimentsFromFlags = featureFlags
     .filter((flag) =>
       includesAny(flag.flag_key.toLowerCase(), ['experiment', 'ab_', 'ab-', 'test'])
       || (flag.rollout_percent > 0 && flag.rollout_percent < 100)
     )
-    .slice(0, 10);
+    .slice(0, 20);
 
-  const experiments: AdminGrowthExperiment[] = experimentsFromFlags.length
-    ? experimentsFromFlags.map((flag) => {
-        const isRunning = flag.is_enabled && flag.rollout_percent > 0;
-        return {
-          experiment: flag.flag_key,
-          status: isRunning ? 'running' : 'planned',
-          variantCoveragePct: flag.rollout_percent,
-          conversionRatePct: Number((goalConversionPct * (isRunning ? 1 : 0.75)).toFixed(2)),
-          upliftPct: null,
-        };
+  const experimentsByKey = new Map<string, AdminGrowthExperiment>(
+    experimentsFromEvents.map((row) => [row.experiment, row])
+  );
+
+  experimentsFromFlags.forEach((flag) => {
+    const isRunning = flag.is_enabled && flag.rollout_percent > 0;
+    const existing = experimentsByKey.get(flag.flag_key);
+    const fallbackConversion = Number((goalConversionPct * (isRunning ? 1 : 0.75)).toFixed(2));
+    if (existing) {
+      experimentsByKey.set(flag.flag_key, {
+        ...existing,
+        status: isRunning ? 'running' : existing.status,
+        variantCoveragePct: Math.max(existing.variantCoveragePct, flag.rollout_percent),
+        conversionRatePct: existing.conversionRatePct || fallbackConversion,
+      });
+      return;
+    }
+    experimentsByKey.set(flag.flag_key, {
+      experiment: flag.flag_key,
+      status: isRunning ? 'running' : 'planned',
+      variantCoveragePct: flag.rollout_percent,
+      conversionRatePct: fallbackConversion,
+      upliftPct: null,
+    });
+  });
+
+  const experiments: AdminGrowthExperiment[] = experimentsByKey.size
+    ? [...experimentsByKey.values()]
+      .sort((a, b) => {
+        const statusOrder = (value: AdminGrowthExperiment['status']) => (value === 'running' ? 0 : value === 'paused' ? 1 : 2);
+        const statusDiff = statusOrder(a.status) - statusOrder(b.status);
+        if (statusDiff !== 0) return statusDiff;
+        return b.variantCoveragePct - a.variantCoveragePct;
       })
+      .slice(0, 12)
     : [
         {
           experiment: 'welcome_journey_copy_test',
@@ -1923,6 +2116,159 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
   const visualBuilderEnabled = true;
   const dragDropEnabled = true;
   const runningExperiments = experiments.filter((row) => row.status === 'running').length;
+  const multivariateReady = experiments.filter((row) => row.upliftPct != null).length > 0
+    || experiments.filter((row) => row.variantCoveragePct >= 25).length >= 2;
+  const automatedExperimentReportingReady =
+    analytics.series.length > 0
+    && (usage.trends.length > 0 || channels.some((row) => row.opened > 0 || row.clicked > 0 || row.conversions > 0));
+
+  const activeSentChannels = new Set(
+    channels.filter((row) => row.sent > 0).map((row) => normalizeChannel(row.channel))
+  );
+
+  const featureFlagChannels = new Set<string>();
+  featureFlags
+    .filter((flag) => flag.is_enabled)
+    .forEach((flag) => {
+      collectChannels(flag.flag_key, featureFlagChannels);
+      collectChannels(flag.config || {}, featureFlagChannels);
+    });
+
+  const templateChannels = new Set<string>();
+  billingMessageTemplates
+    .filter((row) => row.is_active !== false)
+    .forEach((row) => collectChannels(row.channel, templateChannels));
+
+  const workflowChannels = new Set<string>();
+  crmWorkflows
+    .filter((row) => String(row.status || 'active').toLowerCase() !== 'archived')
+    .forEach((row) => {
+      collectChannels(row.channels, workflowChannels);
+      collectChannels(row.trigger, workflowChannels);
+    });
+
+  const journeyStepChannels = new Set<string>();
+  journeys
+    .filter((row) => row.status !== 'planned')
+    .forEach((row) => (row.steps || []).forEach((step) => collectChannels(step.channel, journeyStepChannels)));
+
+  const configuredChannelSet = new Set<string>([
+    ...activeSentChannels,
+    ...featureFlagChannels,
+    ...templateChannels,
+    ...workflowChannels,
+    ...journeyStepChannels,
+  ]);
+  configuredChannelSet.delete('other');
+
+  const configuredChannels = configuredChannelSet.size;
+  const hasPushChannel = configuredChannelSet.has('mobile_push') || configuredChannelSet.has('web_push');
+  const coreChannelsConfiguredCount =
+    (hasPushChannel ? 1 : 0)
+    + (configuredChannelSet.has('email') ? 1 : 0)
+    + (configuredChannelSet.has('sms') ? 1 : 0)
+    + (configuredChannelSet.has('in_app') ? 1 : 0);
+
+  const configuredTriggerTypes = new Set<AdminGrowthJourneyTriggerType>();
+  journeys.forEach((row) => {
+    if (row.status === 'planned') return;
+    if (row.triggerType) {
+      configuredTriggerTypes.add(row.triggerType);
+      return;
+    }
+    const trigger = String(row.trigger || '').toLowerCase();
+    if (includesAny(trigger, ['weekly', 'monthly', 'daily', 'time'])) {
+      configuredTriggerTypes.add('time');
+      return;
+    }
+    if (includesAny(trigger, ['inactive', 'behavior'])) {
+      configuredTriggerTypes.add('behavior');
+      return;
+    }
+    configuredTriggerTypes.add('event');
+  });
+  crmWorkflows
+    .filter((row) => String(row.status || 'active').toLowerCase() !== 'archived')
+    .forEach((row) => {
+      const trigger = String(row.trigger || '').toLowerCase();
+      if (!trigger) return;
+      if (includesAny(trigger, ['weekly', 'monthly', 'daily', 'time'])) {
+        configuredTriggerTypes.add('time');
+      } else if (includesAny(trigger, ['inactive', 'behavior'])) {
+        configuredTriggerTypes.add('behavior');
+      } else {
+        configuredTriggerTypes.add('event');
+      }
+    });
+
+  const missingCoreChannels: string[] = [];
+  if (!hasPushChannel) missingCoreChannels.push('Push');
+  if (!configuredChannelSet.has('email')) missingCoreChannels.push('Email');
+  if (!configuredChannelSet.has('sms')) missingCoreChannels.push('SMS');
+  if (!configuredChannelSet.has('in_app')) missingCoreChannels.push('In-app');
+
+  const transactionalApiConfigured =
+    featureFlags.some((flag) =>
+      flag.is_enabled && includesAny(String(flag.flag_key || '').toLowerCase(), [
+        'transactional',
+        'notification.api',
+        'messaging.api',
+        'alerts.api',
+      ])
+    )
+    || integrations.some((row) => row.type === 'api' && row.status !== 'planned');
+
+  const workflowFallbackReady = crmWorkflows.some((row) => {
+    if (String(row.status || 'active').toLowerCase() === 'archived') return false;
+    const channels = new Set<string>();
+    collectChannels(row.channels, channels);
+    channels.delete('other');
+    return channels.size >= 2;
+  });
+
+  const journeyFallbackReady = journeys.some((row) => {
+    if (row.status === 'planned') return false;
+    const channels = new Set<string>();
+    (row.steps || []).forEach((step) => collectChannels(step.channel, channels));
+    channels.delete('other');
+    return channels.size >= 2;
+  });
+
+  const featureFallbackEnabled = featureFlags.some((flag) =>
+    flag.is_enabled && includesAny(String(flag.flag_key || '').toLowerCase(), ['fallback', 'failover'])
+  );
+
+  const fallbackSupportReady =
+    transactional.fallbackActivations > 0
+    || featureFallbackEnabled
+    || workflowFallbackReady
+    || journeyFallbackReady
+    || templateChannels.size >= 2;
+
+  const realtimeNotificationsReady = transactional.sent > 0 || webhookInWindow.length > 0;
+  const transactionalReliabilityScore = Math.max(0, 45 - transactional.failRatePct * 3.5);
+  const transactionalRealtimeScore =
+    (transactional.sent > 0 ? 15 : 0)
+    + (webhookInWindow.length > 0 ? 10 : 0);
+  const transactionalFallbackScore = fallbackSupportReady
+    ? (transactional.fallbackActivations > 0 ? 20 : 15)
+    : 0;
+
+  const personalizationFlagEnabled = featureFlags.some((flag) =>
+    flag.is_enabled && includesAny(String(flag.flag_key || '').toLowerCase(), ['personalization', 'recommendation', 'dynamic', 'offer'])
+  );
+  const dynamicPersonalizationFlagEnabled = featureFlags.some((flag) =>
+    flag.is_enabled && includesAny(String(flag.flag_key || '').toLowerCase(), ['dynamic', 'real_time', 'offer', 'content'])
+  );
+  const webAppPersonalizationCoverageCount =
+    (personalizationWebSignals > 0 ? 1 : 0)
+    + (personalizationAppSignals > 0 ? 1 : 0);
+  const personalizationAudienceCoveragePct = pct(intersectionCount(usersReached, personalizationUsers), usersReached.size);
+  const dynamicContentReady = dynamicContentSignals > 0 || dynamicPersonalizationFlagEnabled;
+  const behaviorPersonalizationReady = behaviorPersonalizationSignals > 0 || configuredTriggerTypes.has('behavior');
+  const personalizationSignalScore = personalizationSignals > 0
+    ? Math.min(35, 12 + Math.floor(personalizationSignals / 8))
+    : 0;
 
   const capabilities: AdminGrowthCapability[] = [
     buildCapability({
@@ -1952,10 +2298,11 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
       title: '2. Cross-Channel Engagement',
       summary: 'Campaign delivery across push, email, SMS, in-app and extensible channels with trigger support.',
       score:
-        Math.min(50, configuredChannels * 10) +
-        Math.min(30, multiChannelReachPct) +
-        (channels.some((row) => row.channel === 'whatsapp' && row.sent > 0) ? 10 : 0) +
-        (channels.some((row) => row.channel === 'rcs' && row.sent > 0) ? 10 : 0),
+        Math.min(55, configuredChannels * 10) +
+        Math.min(20, multiChannelReachPct) +
+        (configuredChannelSet.has('whatsapp') ? 5 : 0) +
+        (configuredChannelSet.has('rcs') ? 5 : 0) +
+        Math.min(15, configuredTriggerTypes.size * 5),
       requirements: [
         'Mobile/Web push + Email + SMS + In-app',
         'WhatsApp & RCS support',
@@ -1963,7 +2310,15 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
         'Real-time trigger execution',
       ],
       gaps: [
-        ...(configuredChannels >= 4 ? [] : ['Fewer than 4 channels actively configured']),
+        ...(coreChannelsConfiguredCount >= 4
+          ? []
+          : [`Core channels incomplete (${coreChannelsConfiguredCount}/4): ${missingCoreChannels.join(', ')}`]),
+        ...(configuredChannelSet.has('whatsapp') && configuredChannelSet.has('rcs')
+          ? []
+          : ['WhatsApp/RCS support is not fully configured']),
+        ...(configuredTriggerTypes.size >= 2
+          ? []
+          : ['Trigger coverage is limited (configure event + behavior/time triggers)']),
         ...(multiChannelReachPct >= 25 ? [] : ['Low multi-channel audience overlap']),
       ],
     }),
@@ -2018,16 +2373,23 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
       title: '5. Personalization at Scale',
       summary: 'Behavior and context-aware content personalization for web/app experiences.',
       score:
-        Math.min(50, personalizationSignals > 0 ? 25 : 0) +
-        Math.min(30, pct(intersectionCount(usersReached, conversionUsers), usersReached.size)) +
-        20,
+        personalizationSignalScore +
+        Math.min(25, personalizationAudienceCoveragePct) +
+        (webAppPersonalizationCoverageCount >= 2 ? 20 : webAppPersonalizationCoverageCount === 1 ? 10 : 0) +
+        (dynamicContentReady ? 10 : 0) +
+        (behaviorPersonalizationReady ? 5 : 0) +
+        (personalizationFlagEnabled ? 5 : 0),
       requirements: [
         'Behavior-based personalization',
         'Web/app content personalization',
         'Dynamic offer/content updates in real time',
       ],
       gaps: [
-        ...(personalizationSignals > 0 ? [] : ['Low explicit personalization event signals']),
+        ...(personalizationSignals >= 25 ? [] : ['Low explicit personalization event signals']),
+        ...(webAppPersonalizationCoverageCount >= 2 ? [] : ['Web/app personalization coverage is incomplete']),
+        ...(dynamicContentReady ? [] : ['Dynamic offer/content updates are not configured']),
+        ...(behaviorPersonalizationReady ? [] : ['Behavior-triggered personalization is not configured']),
+        ...(personalizationAudienceCoveragePct >= 20 ? [] : ['Low audience coverage for personalized experiences']),
       ],
     }),
     buildCapability({
@@ -2035,9 +2397,11 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
       title: '6. Testing & Optimization',
       summary: 'A/B and multivariate experimentation with optimization feedback loops.',
       score:
-        Math.min(40, experiments.length * 10) +
-        Math.min(30, experimentationCoveragePct / 2) +
-        (runningExperiments > 0 ? 30 : 0),
+        Math.min(30, experiments.length * 8) +
+        (runningExperiments > 0 ? 25 : 0) +
+        (multivariateReady ? 20 : 0) +
+        Math.min(15, experimentationCoveragePct / 2) +
+        (automatedExperimentReportingReady ? 10 : 0),
       requirements: [
         'A/B campaign testing',
         'Multivariate optimization',
@@ -2045,6 +2409,9 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
       ],
       gaps: [
         ...(runningExperiments > 0 ? [] : ['No active running experiment found']),
+        ...(multivariateReady ? [] : ['Multivariate optimization is not configured']),
+        ...(automatedExperimentReportingReady ? [] : ['Automated experiment reporting is not configured']),
+        ...(experimentationCoveragePct >= 20 ? [] : ['Variant coverage is below 20%']),
       ],
     }),
     buildCapability({
@@ -2069,16 +2436,22 @@ export async function getMarketingGrowthReport(days = 30): Promise<AdminMarketin
       title: '8. Real-Time Transactional Messaging',
       summary: 'Unified transactional delivery with fallback and reliability tracking.',
       score:
-        Math.max(0, 60 - transactional.failRatePct * 4) +
-        (transactional.fallbackActivations > 0 ? 20 : 0) +
-        (transactional.sent > 0 ? 20 : 0),
+        transactionalReliabilityScore +
+        transactionalRealtimeScore +
+        transactionalFallbackScore +
+        (transactionalApiConfigured ? 10 : 0),
       requirements: [
         'Unified transactional alerts API',
         'Real-time event notifications',
         'Channel fallback support',
       ],
       gaps: [
-        ...(transactional.fallbackActivations > 0 ? [] : ['No fallback activation signal observed']),
+        ...(transactionalApiConfigured ? [] : ['Unified transactional alerts API is not configured']),
+        ...(realtimeNotificationsReady ? [] : ['No real-time transactional notification activity detected']),
+        ...((fallbackSupportReady && transactional.failRatePct <= 1) || transactional.fallbackActivations > 0
+          ? []
+          : ['Fallback support is not validated for active transactional failures']),
+        ...(fallbackSupportReady ? [] : ['Channel fallback support is not configured']),
         ...(transactional.failRatePct <= 5 ? [] : ['Transactional fail rate above 5%']),
       ],
     }),
@@ -2284,8 +2657,19 @@ export async function getCustomerFinancialDetail(userId: string) {
 export async function getSupportTickets(params?: {
   status?: string;
   limit?: number;
+  withSlaSweep?: boolean;
 }): Promise<SupportTicket[]> {
   const limit = Math.max(20, Math.min(params?.limit || 150, 300));
+  if (params?.withSlaSweep !== false) {
+    try {
+      await supabase.rpc('support_run_sla_sweep', {
+        p_due_soon_hours: 6,
+        p_force_escalation: false,
+      });
+    } catch {
+      // Best-effort pre-refresh sweep; ignore errors so ticket listing still loads.
+    }
+  }
 
   let query = supabase.from('support_tickets').select('*').order('updated_at', { ascending: false }).limit(limit);
   if (params?.status && params.status !== 'all') {
@@ -2308,6 +2692,20 @@ export async function getSupportTickets(params?: {
     status: String(row.status || 'open'),
     assignedTo: row.assigned_to || null,
     resolutionNote: row.resolution_note || null,
+    firstResponseAt: row.first_response_at ? String(row.first_response_at) : null,
+    firstResponseDueAt: row.first_response_due_at ? String(row.first_response_due_at) : null,
+    resolutionDueAt: row.resolution_due_at ? String(row.resolution_due_at) : null,
+    closedAt: row.closed_at ? String(row.closed_at) : null,
+    slaStatus: ['on_track', 'due_soon', 'breached', 'paused', 'met'].includes(String(row.sla_status))
+      ? row.sla_status
+      : 'on_track',
+    escalated: Boolean(row.escalated),
+    escalationLevel: num(row.escalation_level),
+    escalationCount: num(row.escalation_count),
+    escalationReason: row.escalation_reason ? String(row.escalation_reason) : null,
+    escalatedAt: row.escalated_at ? String(row.escalated_at) : null,
+    nextEscalationAt: row.next_escalation_at ? String(row.next_escalation_at) : null,
+    breachCount: num(row.breach_count),
     createdAt: String(row.created_at || new Date().toISOString()),
     updatedAt: String(row.updated_at || row.created_at || new Date().toISOString()),
   }));
@@ -2353,6 +2751,9 @@ export async function updateSupportTicket(
     priority?: string;
     assignedTo?: string | null;
     resolutionNote?: string | null;
+    escalationReason?: string | null;
+    escalated?: boolean;
+    escalationLevel?: number;
   }
 ): Promise<void> {
   const updatePayload: Record<string, unknown> = {
@@ -2363,29 +2764,80 @@ export async function updateSupportTicket(
   if (payload.priority != null) updatePayload.priority = payload.priority;
   if (payload.assignedTo !== undefined) updatePayload.assigned_to = payload.assignedTo;
   if (payload.resolutionNote !== undefined) updatePayload.resolution_note = payload.resolutionNote;
+  if (payload.escalationReason !== undefined) updatePayload.escalation_reason = payload.escalationReason;
+  if (payload.escalated !== undefined) updatePayload.escalated = payload.escalated;
+  if (payload.escalationLevel !== undefined) updatePayload.escalation_level = Math.max(0, Number(payload.escalationLevel) || 0);
 
   if (payload.status === 'resolved' || payload.status === 'closed') {
     updatePayload.resolved_at = new Date().toISOString();
+    updatePayload.escalated = false;
+    updatePayload.next_escalation_at = null;
+    updatePayload.sla_status = 'met';
   }
 
   const { error } = await supabase.from('support_tickets').update(updatePayload).eq('id', ticketId);
   if (error) throw toError(error, 'Could not update support ticket.');
 }
 
-export async function getAdminRoles(): Promise<AdminRole[]> {
-  const workspaceId = requireWorkspaceId();
-  const { data, error } = await supabase.rpc('admin_list_workspace_roles', {
-    p_workspace_id: workspaceId,
+export async function runSupportTicketSlaSweep(params?: {
+  dueSoonHours?: number;
+  forceEscalation?: boolean;
+}): Promise<{ scanned: number; updated: number; escalated: number; breached: number; ranAt: string }> {
+  const dueSoonHours = Math.max(1, Math.min(Number(params?.dueSoonHours || 6), 72));
+  const { data, error } = await supabase.rpc('support_run_sla_sweep', {
+    p_due_soon_hours: dueSoonHours,
+    p_force_escalation: Boolean(params?.forceEscalation),
   });
 
-  if (!error) {
-    return (data || []).map((row: any) => ({
-      id: String(row.role_key || 'support'),
-      roleKey: String(row.role_key || 'support'),
-      displayName: String(row.display_name || row.role_key || 'Support'),
-      description: row.description || null,
-      permissionKeys: Array.isArray(row.permission_keys) ? row.permission_keys.map(String) : [],
-    }));
+  if (error) throw toError(error, 'Could not run SLA sweep.');
+  const payload = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  return {
+    scanned: num(payload.scanned),
+    updated: num(payload.updated),
+    escalated: num(payload.escalated),
+    breached: num(payload.breached),
+    ranAt: String(payload.ranAt || new Date().toISOString()),
+  };
+}
+
+export async function escalateSupportTicket(ticketId: string, reason = 'manual_escalation'): Promise<void> {
+  const rpc = await supabase.rpc('support_escalate_ticket', {
+    p_ticket_id: ticketId,
+    p_reason: reason,
+  });
+  if (!rpc.error) return;
+
+  const fallback = await supabase
+    .from('support_tickets')
+    .update({
+      escalated: true,
+      escalation_reason: reason,
+      escalation_level: 1,
+      escalation_count: 1,
+      escalated_at: new Date().toISOString(),
+      last_escalated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', ticketId);
+  if (fallback.error) throw toError(rpc.error, 'Could not escalate support ticket.');
+}
+
+export async function getAdminRoles(): Promise<AdminRole[]> {
+  const workspaceId = getWorkspaceIdOrNull();
+  if (workspaceId) {
+    const { data, error } = await supabase.rpc('admin_list_workspace_roles', {
+      p_workspace_id: workspaceId,
+    });
+
+    if (!error) {
+      return (data || []).map((row: any) => ({
+        id: String(row.role_key || 'support'),
+        roleKey: String(row.role_key || 'support'),
+        displayName: String(row.display_name || row.role_key || 'Support'),
+        description: row.description || null,
+        permissionKeys: Array.isArray(row.permission_keys) ? row.permission_keys.map(String) : [],
+      }));
+    }
   }
 
   // Legacy fallback for pre-foundation environments.
@@ -2394,7 +2846,10 @@ export async function getAdminRoles(): Promise<AdminRole[]> {
     .select('id, role_key, display_name, description')
     .order('display_name', { ascending: true });
 
-  if (legacy.error) throw toError(legacy.error, 'Could not load admin roles.');
+  if (legacy.error) {
+    if (isMissingRelationError(legacy.error)) return [];
+    throw toError(legacy.error, 'Could not load admin roles.');
+  }
 
   return (legacy.data || []).map((row: any) => ({
     id: String(row.id),
@@ -2406,47 +2861,73 @@ export async function getAdminRoles(): Promise<AdminRole[]> {
 }
 
 export async function getAdminPermissions(): Promise<AdminPermissionDefinition[]> {
-  const workspaceId = requireWorkspaceId();
-  const { data, error } = await supabase.rpc('admin_list_workspace_permissions', {
-    p_workspace_id: workspaceId,
-  });
-  if (error) throw toError(error, 'Could not load permissions.');
-  return (data || []).map((row: any) => ({
+  const workspaceId = getWorkspaceIdOrNull();
+  let rpcError: unknown = null;
+
+  if (workspaceId) {
+    const { data, error } = await supabase.rpc('admin_list_workspace_permissions', {
+      p_workspace_id: workspaceId,
+    });
+    if (!error) {
+      return (data || []).map((row: any) => ({
+        permissionKey: String(row.permission_key || ''),
+        description: row.description || null,
+      }));
+    }
+    rpcError = error;
+  }
+
+  // Legacy fallback for pre-foundation environments.
+  const legacy = await supabase
+    .from('admin_permissions')
+    .select('permission_key, description')
+    .order('permission_key', { ascending: true });
+
+  if (legacy.error) {
+    if (isMissingRelationError(legacy.error)) return [];
+    if (rpcError && !isMissingRelationError(rpcError)) {
+      throw toError(rpcError, 'Could not load permissions.');
+    }
+    throw toError(legacy.error, 'Could not load permissions.');
+  }
+
+  return (legacy.data || []).map((row: any) => ({
     permissionKey: String(row.permission_key || ''),
     description: row.description || null,
   }));
 }
 
 export async function getAdminUsersWithRoles(): Promise<AdminUserAccount[]> {
-  const workspaceId = requireWorkspaceId();
-  const [usersRes, roles] = await Promise.all([
-    supabase.rpc('admin_list_workspace_users', {
+  const workspaceId = getWorkspaceIdOrNull();
+  const roles = await getAdminRoles();
+
+  if (workspaceId) {
+    const usersRes = await supabase.rpc('admin_list_workspace_users', {
       p_workspace_id: workspaceId,
       p_limit: 400,
       p_offset: 0,
-    }),
-    getAdminRoles(),
-  ]);
-
-  if (!usersRes.error) {
-    const roleMap = new Map(roles.map((role) => [role.roleKey, role]));
-    return (usersRes.data || []).map((row: any) => {
-      const roleKey = String(row.role_key || 'support');
-      const role = roleMap.get(roleKey);
-      return {
-        userId: String(row.user_id),
-        email: row.email ? String(row.email) : String(row.user_id),
-        name: String(row.full_name || '-'),
-        roleId: roleKey,
-        roleKey,
-        roleName: role?.displayName || roleKey,
-        isActive: Boolean(row.is_active),
-        twoFactorRequired: Boolean(row.two_factor_required),
-        twoFactorEnabled: Boolean(row.two_factor_enabled),
-        lastLoginAt: row.last_login_at || null,
-        createdAt: String(row.created_at || new Date().toISOString()),
-      };
     });
+
+    if (!usersRes.error) {
+      const roleMap = new Map(roles.map((role) => [role.roleKey, role]));
+      return (usersRes.data || []).map((row: any) => {
+        const roleKey = String(row.role_key || 'support');
+        const role = roleMap.get(roleKey);
+        return {
+          userId: String(row.user_id),
+          email: row.email ? String(row.email) : String(row.user_id),
+          name: String(row.full_name || '-'),
+          roleId: roleKey,
+          roleKey,
+          roleName: role?.displayName || roleKey,
+          isActive: Boolean(row.is_active),
+          twoFactorRequired: Boolean(row.two_factor_required),
+          twoFactorEnabled: Boolean(row.two_factor_enabled),
+          lastLoginAt: row.last_login_at || null,
+          createdAt: String(row.created_at || new Date().toISOString()),
+        };
+      });
+    }
   }
 
   // Legacy fallback.
@@ -2455,7 +2936,10 @@ export async function getAdminUsersWithRoles(): Promise<AdminUserAccount[]> {
     .select('user_id, role_id, is_active, two_factor_enabled, last_login_at, created_at')
     .order('created_at', { ascending: false });
 
-  if (admins.error) throw toError(admins.error, 'Could not load admin users.');
+  if (admins.error) {
+    if (isMissingRelationError(admins.error)) return [];
+    throw toError(admins.error, 'Could not load admin users.');
+  }
 
   const roleMap = new Map(roles.map((role) => [role.id, role]));
   const userIds = (admins.data || []).map((row: any) => String(row.user_id));
@@ -2498,17 +2982,19 @@ export async function upsertAdminUserAccount(payload: {
   twoFactorEnabled?: boolean;
   reason?: string;
 }): Promise<void> {
-  const workspaceId = requireWorkspaceId();
-  const { error } = await supabase.rpc('admin_upsert_workspace_user', {
-    p_workspace_id: workspaceId,
-    p_user_id: payload.userId,
-    p_role_key: payload.roleId,
-    p_is_active: payload.isActive ?? true,
-    p_two_factor_required: payload.twoFactorRequired ?? payload.twoFactorEnabled ?? false,
-    p_reason: payload.reason ?? null,
-  });
+  const workspaceId = getWorkspaceIdOrNull();
+  if (workspaceId) {
+    const { error } = await supabase.rpc('admin_upsert_workspace_user', {
+      p_workspace_id: workspaceId,
+      p_user_id: payload.userId,
+      p_role_key: payload.roleId,
+      p_is_active: payload.isActive ?? true,
+      p_two_factor_required: payload.twoFactorRequired ?? payload.twoFactorEnabled ?? false,
+      p_reason: payload.reason ?? null,
+    });
 
-  if (!error) return;
+    if (!error) return;
+  }
 
   // Legacy fallback.
   const legacy = await supabase.from('admin_users').upsert(
@@ -2530,25 +3016,30 @@ export async function getAdminAuditLogs(params?: {
   limit?: number;
 }): Promise<AdminAuditLog[]> {
   const limit = Math.max(20, Math.min(params?.limit || 200, 500));
-  const workspaceId = requireWorkspaceId();
-  const { data, error } = await supabase.rpc('admin_list_workspace_audit_logs', {
-    p_workspace_id: workspaceId,
-    p_action: params?.action ?? null,
-    p_limit: limit,
-    p_offset: 0,
-  });
+  const workspaceId = getWorkspaceIdOrNull();
+  let rpcError: unknown = null;
 
-  if (!error) {
-    return (data || []).map((row: any) => ({
-      id: String(row.id),
-      adminUserId: String(row.admin_user_id || ''),
-      action: String(row.action || 'unknown'),
-      entityType: String(row.entity_type || 'unknown'),
-      entityId: row.entity_id || null,
-      reason: row.reason || null,
-      payload: (row.payload || {}) as Record<string, unknown>,
-      createdAt: String(row.created_at || new Date().toISOString()),
-    }));
+  if (workspaceId) {
+    const { data, error } = await supabase.rpc('admin_list_workspace_audit_logs', {
+      p_workspace_id: workspaceId,
+      p_action: params?.action ?? null,
+      p_limit: limit,
+      p_offset: 0,
+    });
+
+    if (!error) {
+      return (data || []).map((row: any) => ({
+        id: String(row.id),
+        adminUserId: String(row.admin_user_id || ''),
+        action: String(row.action || 'unknown'),
+        entityType: String(row.entity_type || 'unknown'),
+        entityId: row.entity_id || null,
+        reason: row.reason || null,
+        payload: (row.payload || {}) as Record<string, unknown>,
+        createdAt: String(row.created_at || new Date().toISOString()),
+      }));
+    }
+    rpcError = error;
   }
 
   let query = supabase
@@ -2561,6 +3052,9 @@ export async function getAdminAuditLogs(params?: {
   const fallback = await query;
   if (fallback.error) {
     if (isMissingRelationError(fallback.error)) return [];
+    if (rpcError && !isMissingRelationError(rpcError)) {
+      throw toError(rpcError, 'Could not load audit logs.');
+    }
     throw toError(fallback.error, 'Could not load audit logs.');
   }
 
@@ -2583,7 +3077,7 @@ const normalizeTwoFactorStatus = (raw: unknown): AdminTwoFactorStatus => {
       ? row.status
       : 'disabled';
   return {
-    workspaceId: String(row.workspaceId || requireWorkspaceId()),
+    workspaceId: String(row.workspaceId || getWorkspaceIdOrNull() || ''),
     userId: String(row.userId || ''),
     required: Boolean(row.required),
     status,
@@ -2641,7 +3135,8 @@ export async function touchAdminSecuritySession(): Promise<void> {
 }
 
 export async function getAdminSecuritySessions(targetUserId?: string): Promise<AdminSecuritySession[]> {
-  const workspaceId = requireWorkspaceId();
+  const workspaceId = getWorkspaceIdOrNull();
+  if (!workspaceId) return [];
   const { data, error } = await supabase.rpc('admin_list_security_sessions', {
     p_workspace_id: workspaceId,
     p_target_user_id: targetUserId || null,
@@ -2662,7 +3157,23 @@ export async function revokeAdminSecuritySession(sessionId: string, reason?: str
 }
 
 export async function getAdminTwoFactorStatus(targetUserId?: string): Promise<AdminTwoFactorStatus> {
-  const workspaceId = requireWorkspaceId();
+  const workspaceId = getWorkspaceIdOrNull();
+  if (!workspaceId) {
+    const currentUserId =
+      targetUserId ||
+      (await supabase.auth.getSession()).data.session?.user?.id ||
+      '';
+    return {
+      workspaceId: '',
+      userId: currentUserId,
+      required: false,
+      status: 'disabled',
+      enabled: false,
+      enabledAt: null,
+      lastVerifiedAt: null,
+      recoveryCodesRemaining: 0,
+    };
+  }
   const params: Record<string, unknown> = {
     p_workspace_id: workspaceId,
   };
@@ -3570,6 +4081,11 @@ const mapCrmComplaint = (
   const userId = String(row.user_id || '');
   const profile = profileMap.get(userId);
   const fullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim();
+  const resolutionDueAt = row.resolution_due_at ? String(row.resolution_due_at) : null;
+  const resolutionDueMs = resolutionDueAt ? new Date(resolutionDueAt).getTime() : Number.NaN;
+  const slaRemainingHours = Number.isFinite(resolutionDueMs)
+    ? Math.round((resolutionDueMs - Date.now()) / (60 * 60 * 1000))
+    : null;
   return {
     id: String(row.id),
     ticketNumber: String(row.ticket_number || `CMP-${String(row.id).slice(0, 8).toUpperCase()}`),
@@ -3583,6 +4099,21 @@ const mapCrmComplaint = (
     assignedTo: row.assigned_to ? String(row.assigned_to) : null,
     tags: toTagList(row.tags),
     resolutionNote: row.resolution_note ? String(row.resolution_note) : null,
+    firstResponseAt: row.first_response_at ? String(row.first_response_at) : null,
+    firstResponseDueAt: row.first_response_due_at ? String(row.first_response_due_at) : null,
+    resolutionDueAt,
+    closedAt: row.closed_at ? String(row.closed_at) : null,
+    slaStatus: ['on_track', 'due_soon', 'breached', 'paused', 'met'].includes(String(row.sla_status))
+      ? row.sla_status
+      : 'on_track',
+    escalated: Boolean(row.escalated),
+    escalationLevel: num(row.escalation_level),
+    escalationCount: num(row.escalation_count),
+    escalationReason: row.escalation_reason ? String(row.escalation_reason) : null,
+    escalatedAt: row.escalated_at ? String(row.escalated_at) : null,
+    nextEscalationAt: row.next_escalation_at ? String(row.next_escalation_at) : null,
+    breachCount: num(row.breach_count),
+    slaRemainingHours,
     createdAt: String(row.created_at || new Date().toISOString()),
     updatedAt: String(row.updated_at || row.created_at || new Date().toISOString()),
     resolvedAt: row.resolved_at ? String(row.resolved_at) : null,
@@ -3629,6 +4160,14 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
   const safeDays = Math.max(7, Math.min(days, 365));
   const nowIso = new Date().toISOString();
   const startIso = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    await supabase.rpc('support_run_sla_sweep', {
+      p_due_soon_hours: 6,
+      p_force_escalation: false,
+    });
+  } catch {
+    // Best-effort SLA refresh; CRM report should still render with existing state.
+  }
 
   const [
     contactsResult,
@@ -3649,7 +4188,7 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
     supabase.from('crm_tasks').select('*').order('updated_at', { ascending: false }).limit(600),
     supabase
       .from('support_tickets')
-      .select('id, ticket_number, user_id, subject, description, category, priority, status, assigned_to, tags, resolution_note, created_at, updated_at, resolved_at')
+      .select('id, ticket_number, user_id, subject, description, category, priority, status, assigned_to, tags, resolution_note, created_at, updated_at, resolved_at, first_response_at, first_response_due_at, resolution_due_at, closed_at, sla_status, escalated, escalation_level, escalation_count, escalation_reason, escalated_at, next_escalation_at, breach_count')
       .order('updated_at', { ascending: false })
       .limit(1200),
     supabase.from('crm_email_templates').select('*').order('updated_at', { ascending: false }).limit(200),
@@ -3926,6 +4465,9 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
   const openComplaints = complaints.filter((row) => !includesAny(row.status.toLowerCase(), ['resolved', 'closed'])).length;
   const resolvedComplaints = complaints.filter((row) => includesAny(row.status.toLowerCase(), ['resolved', 'closed'])).length;
   const highPriorityComplaints = complaints.filter((row) => includesAny(row.priority.toLowerCase(), ['high', 'urgent', 'critical'])).length;
+  const dueSoonComplaints = complaints.filter((row) => row.slaStatus === 'due_soon' && !includesAny(row.status.toLowerCase(), ['resolved', 'closed'])).length;
+  const breachedComplaints = complaints.filter((row) => row.slaStatus === 'breached' && !includesAny(row.status.toLowerCase(), ['resolved', 'closed'])).length;
+  const escalatedComplaints = complaints.filter((row) => Boolean(row.escalated) && !includesAny(row.status.toLowerCase(), ['resolved', 'closed'])).length;
 
   return {
     generatedAt: nowIso,
@@ -3952,6 +4494,9 @@ export async function getCrmOperationsReport(days = 30): Promise<AdminCrmReport>
       openComplaints,
       resolvedComplaints,
       highPriorityComplaints,
+      dueSoonComplaints,
+      breachedComplaints,
+      escalatedComplaints,
     },
     pipeline,
     contacts: contacts.slice(0, 350),

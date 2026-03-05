@@ -5,15 +5,18 @@ import {
   ArrowUp,
   AlertTriangle,
   CheckCircle2,
+  Copy,
   CreditCard,
   Eye,
   EyeOff,
+  Gift,
   Info,
   Lock,
   RefreshCw,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Target,
   TrendingUp,
   Users,
@@ -29,10 +32,36 @@ import { AppButton, SectionHeader, SurfaceCard, StatusPill } from './common/ui';
 interface DashboardProps {
   state: FinanceState;
   setView: (view: View) => void;
+  billingAccessState?: 'active' | 'limited' | 'blocked';
+  onOpenBilling?: () => void;
+  showProUpgradeCta?: boolean;
+  onOpenPricing?: () => void;
+  pointsBalance?: number;
+  pointsFrozen?: boolean;
+  pointsFormula?: string;
+  pointsEarnedEvents?: Array<{
+    eventType: string;
+    pointsPerEvent: number;
+    earnedPoints: number;
+    completionCount: number;
+    completed: boolean;
+  }>;
+  referralCode?: string | null;
+  referralRewardReferrer?: number;
+  referralRewardReferred?: number;
+  hasPaidSubscription?: boolean;
 }
 
 type DashboardMode = 'simple' | 'advanced';
-type WidgetId = 'cashflow' | 'obligations' | 'alerts' | 'insights' | 'allocation';
+type WidgetId =
+  | 'cashflow'
+  | 'obligations'
+  | 'alerts'
+  | 'insights'
+  | 'goals'
+  | 'investment-plan-widget'
+  | 'protection'
+  | 'allocation';
 
 type AttentionSeverity = 'high' | 'medium' | 'low';
 
@@ -45,9 +74,27 @@ interface AttentionItem {
   actionView: View;
 }
 
+interface RewardNudge {
+  id: string;
+  eventType: string;
+  message: string;
+  actionLabel: string;
+  actionView: View;
+  points: number;
+}
+
 const PREFS_KEY = 'finvantage.dashboard.preferences.v3';
-const ALL_WIDGETS: WidgetId[] = ['cashflow', 'obligations', 'alerts', 'insights', 'allocation'];
-const SIMPLE_WIDGETS: WidgetId[] = ['cashflow', 'obligations', 'alerts', 'insights'];
+const ALL_WIDGETS: WidgetId[] = [
+  'cashflow',
+  'goals',
+  'investment-plan-widget',
+  'obligations',
+  'alerts',
+  'insights',
+  'protection',
+  'allocation',
+];
+const SIMPLE_WIDGETS: WidgetId[] = ['cashflow', 'goals', 'investment-plan-widget', 'protection', 'alerts'];
 
 const WIDGET_META: Record<WidgetId, { title: string; description: string }> = {
   cashflow: {
@@ -66,6 +113,18 @@ const WIDGET_META: Record<WidgetId, { title: string; description: string }> = {
     title: 'Insights & Next Steps',
     description: 'What this means and what to do next.',
   },
+  goals: {
+    title: 'Goal Summary',
+    description: 'Funding coverage, next target, and cost impact.',
+  },
+  'investment-plan-widget': {
+    title: 'Investment Plan',
+    description: 'Risk level, return assumptions, and allocation actions.',
+  },
+  protection: {
+    title: 'Insurance & Protection',
+    description: 'Emergency reserve and insurance readiness snapshot.',
+  },
   allocation: {
     title: 'Allocation & Reallocation',
     description: 'Current mix vs risk-profile target and actions.',
@@ -73,6 +132,14 @@ const WIDGET_META: Record<WidgetId, { title: string; description: string }> = {
 };
 
 const clampPct = (value: number) => Math.max(0, Math.min(100, value));
+const REWARD_EVENT_FALLBACK_POINTS: Record<string, number> = {
+  daily_login: 1,
+  profile_completion: 5,
+  risk_profile_completed: 5,
+  goal_added: 5,
+  report_generated: 5,
+  subscription_payment_success: 50,
+};
 
 const normalizeWidgetOrder = (input: WidgetId[]): WidgetId[] => {
   const valid = input.filter((id, idx) => ALL_WIDGETS.includes(id) && input.indexOf(id) === idx);
@@ -104,11 +171,27 @@ const MiniTrend: React.FC<{ values: number[]; positive: boolean }> = ({ values, 
   );
 };
 
-const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
+const Dashboard: React.FC<DashboardProps> = ({
+  state,
+  setView,
+  billingAccessState = 'active',
+  onOpenBilling,
+  showProUpgradeCta = false,
+  onOpenPricing,
+  pointsBalance = 0,
+  pointsFrozen = false,
+  pointsFormula = '99 points = 30 days extension on monthly plan.',
+  pointsEarnedEvents = [],
+  referralCode = null,
+  referralRewardReferrer = 25,
+  referralRewardReferred = 50,
+  hasPaidSubscription = false,
+}) => {
   const [mode, setMode] = useState<DashboardMode>('simple');
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [widgetOrder, setWidgetOrder] = useState<WidgetId[]>(ALL_WIDGETS);
   const [hiddenWidgets, setHiddenWidgets] = useState<WidgetId[]>([]);
+  const [copiedRewardCode, setCopiedRewardCode] = useState(false);
 
   const journey = useMemo(() => getJourneyProgress(state), [state]);
   const reportSnapshot = useMemo(() => buildReportSnapshot(state), [state]);
@@ -152,6 +235,9 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
   );
 
   const emergencyMonthsCovered = monthlyExpenses > 0 ? liquidAssets / monthlyExpenses : 0;
+  const isOnboardingComplete = journey.completionPct === 100;
+  const financialNodeReady = isOnboardingComplete && monthlyIncome > 0 && monthlyExpenses > 0 && state.assets.length > 0;
+  const shouldPromptRiskProfile = financialNodeReady && !state.riskProfile;
 
   const monthlyNetTrend = useMemo(() => {
     const now = new Date();
@@ -277,12 +363,12 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
       });
     }
 
-    if (!state.riskProfile) {
+    if (shouldPromptRiskProfile) {
       items.push({
         id: 'risk-profile-missing',
         severity: 'medium',
         title: 'Risk profile is pending',
-        description: 'Complete risk profile to align allocation and expected returns.',
+        description: 'Financial node is ready. Complete risk profile to align allocation and expected returns.',
         actionLabel: 'Complete Risk Profile',
         actionView: 'risk-profile',
       });
@@ -300,7 +386,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
     }
 
     return items.slice(0, 4);
-  }, [dtiRatio, emergencyMonthsCovered, monthlyNetCashFlow, state.notifications, state.riskProfile]);
+  }, [dtiRatio, emergencyMonthsCovered, monthlyNetCashFlow, shouldPromptRiskProfile, state.notifications]);
 
   const insights = useMemo(() => {
     const items: Array<{ id: string; summary: string; action: string; view: View }> = [];
@@ -350,6 +436,138 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
 
     return items.slice(0, 3);
   }, [monthChangePct, reportSnapshot.goals.fundedCount, reportSnapshot.goals.totalGoals, state.loans.length]);
+
+  const goalFundingPct = reportSnapshot.goals.totalTargetToday > 0
+    ? (reportSnapshot.goals.totalCurrent / reportSnapshot.goals.totalTargetToday) * 100
+    : 0;
+  const unfundedGoals = Math.max(0, reportSnapshot.goals.totalGoals - reportSnapshot.goals.fundedCount);
+  const nextGoal = reportSnapshot.goals.nextGoal;
+  const recommendedReturn = reportSnapshot.goals.returnComparison.recommendedReturn;
+  const currentReturn = reportSnapshot.goals.returnComparison.currentReturn;
+  const returnGap = recommendedReturn - currentReturn;
+  const reallocationAmount = reallocationActions.reduce((sum, action) => sum + action.amount, 0);
+  const riskProfileLevel = state.riskProfile?.level || 'Balanced';
+  const allocationDriftPct = reallocationActions.reduce((sum, action) => sum + Math.abs(action.delta), 0) / 2;
+  const largestIncreaseAction = reallocationActions
+    .filter(action => action.delta > 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+  const largestReductionAction = reallocationActions
+    .filter(action => action.delta < 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+  const allocationHealth = allocationDriftPct < 2
+    ? 'Aligned'
+    : allocationDriftPct < 8
+      ? 'Needs minor rebalance'
+      : 'Needs active rebalance';
+  const allocationHealthClass = allocationDriftPct < 2
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : allocationDriftPct < 8
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-rose-200 bg-rose-50 text-rose-700';
+  const recommendationWhyLine = state.riskProfile
+    ? `This mix is tuned for a ${riskProfileLevel.toLowerCase()} risk profile so your volatility stays in line with your goal timeline.`
+    : 'Risk profile is not completed yet. A balanced default is used and should be personalized before major allocation moves.';
+  const recommendationMeaningLine = returnGap >= 0.25
+    ? `Current mix may trail the recommended mix by about ${returnGap.toFixed(2)}% expected return per year. This is an estimate, not a guaranteed outcome.`
+    : returnGap <= -0.25
+      ? `Current mix may be taking more risk than needed for your plan. You are about ${Math.abs(returnGap).toFixed(2)}% above recommended expected return.`
+      : 'Current mix is broadly in line with your plan. Rebalancing now is mainly for risk control consistency.';
+  const recommendationSteps = reallocationActions.length === 0
+    ? [
+        'No urgent buy/sell action is needed right now.',
+        'Keep SIP allocation aligned to the current target mix.',
+        'Review allocation once per quarter or after major cash events.',
+      ]
+    : [
+        largestReductionAction
+          ? `Reduce ${largestReductionAction.label} first by ${Math.abs(largestReductionAction.delta).toFixed(1)}% to remove overweight risk.`
+          : 'Trim overweight asset classes first.',
+        largestIncreaseAction
+          ? `Increase ${largestIncreaseAction.label} by ${Math.abs(largestIncreaseAction.delta).toFixed(1)}% to close the target gap.`
+          : 'Add to underweight asset classes next.',
+        'Execute in 2-3 staggered orders and review drift after 30 days.',
+      ];
+  const termPolicyCount = state.insurance.filter(item => item.type === 'Term').length;
+  const healthPolicyCount = state.insurance.filter(item => item.type === 'Health').length;
+  const projectedPointsDays = Math.floor(pointsBalance / 99) * 30;
+  const referralShareLink = referralCode
+    ? `${window.location.origin}/pricing?ref=${encodeURIComponent(referralCode)}`
+    : '';
+  const pointsEventMeta: Array<{ eventType: string; label: string }> = [
+    { eventType: 'daily_login', label: 'Daily Login' },
+    { eventType: 'profile_completion', label: 'Profile Completion' },
+    { eventType: 'risk_profile_completed', label: 'Risk Profile Completed' },
+    { eventType: 'goal_added', label: 'Goal Added' },
+    { eventType: 'report_generated', label: 'Report Generated' },
+    { eventType: 'subscription_payment_success', label: 'Subscription Payment Success' },
+  ];
+  const pointsEventMap = useMemo(() => {
+    return new Map(pointsEarnedEvents.map((row) => [row.eventType, row]));
+  }, [pointsEarnedEvents]);
+  const gamificationNudges = useMemo<RewardNudge[]>(() => {
+    const eventRow = (eventType: string) => pointsEventMap.get(eventType);
+    const eventPoints = (eventType: string) => Number(eventRow(eventType)?.pointsPerEvent || REWARD_EVENT_FALLBACK_POINTS[eventType] || 0);
+    const eventCompleted = (eventType: string) => Boolean(eventRow(eventType)?.completed);
+
+    const prompts: RewardNudge[] = [];
+
+    if (journey.completionPct < 100 && !eventCompleted('profile_completion')) {
+      prompts.push({
+        id: 'nudge-profile',
+        eventType: 'profile_completion',
+        message: `Complete your profile and earn ${eventPoints('profile_completion')} points.`,
+        actionLabel: 'Complete Profile',
+        actionView: journey.nextStep?.view || 'settings',
+        points: eventPoints('profile_completion'),
+      });
+    }
+
+    if (!state.riskProfile && !eventCompleted('risk_profile_completed')) {
+      prompts.push({
+        id: 'nudge-risk-profile',
+        eventType: 'risk_profile_completed',
+        message: `Finish your risk assessment to unlock ${eventPoints('risk_profile_completed')} points.`,
+        actionLabel: 'Complete Risk Profile',
+        actionView: 'risk-profile',
+        points: eventPoints('risk_profile_completed'),
+      });
+    }
+
+    if (state.goals.length === 0 && !eventCompleted('goal_added')) {
+      prompts.push({
+        id: 'nudge-goal',
+        eventType: 'goal_added',
+        message: `Add your first financial goal and earn ${eventPoints('goal_added')} points.`,
+        actionLabel: 'Add Goal',
+        actionView: 'goals',
+        points: eventPoints('goal_added'),
+      });
+    }
+
+    if (!eventCompleted('report_generated')) {
+      prompts.push({
+        id: 'nudge-report',
+        eventType: 'report_generated',
+        message: `Generate your financial report and earn ${eventPoints('report_generated')} points.`,
+        actionLabel: 'Generate Report',
+        actionView: 'goal-summary',
+        points: eventPoints('report_generated'),
+      });
+    }
+
+    if (!hasPaidSubscription && !eventCompleted('subscription_payment_success')) {
+      prompts.push({
+        id: 'nudge-subscription',
+        eventType: 'subscription_payment_success',
+        message: `Subscribe to a plan and earn ${eventPoints('subscription_payment_success')} points.`,
+        actionLabel: 'Subscribe Now',
+        actionView: 'pricing',
+        points: eventPoints('subscription_payment_success'),
+      });
+    }
+
+    return prompts.slice(0, 5);
+  }, [hasPaidSubscription, journey.completionPct, journey.nextStep?.view, pointsEventMap, state.goals.length, state.riskProfile]);
 
   const lastRefreshLabel = useMemo(() => {
     const now = new Date();
@@ -424,8 +642,8 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
   }, [mode, widgetOrder]);
 
   const visibleWidgets = modeScopedOrder.filter(id => !hiddenWidgets.includes(id));
+  const isDashboardBlocked = billingAccessState === 'blocked' || billingAccessState === 'limited';
 
-  const isOnboardingComplete = journey.completionPct === 100;
   const initializationStepIcons: Record<string, any> = {
     family: Users,
     inflow: Wallet,
@@ -451,13 +669,13 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
                 Initialization Required
               </div>
               <h2 className="text-4xl md:text-5xl font-black tracking-tight text-slate-900 leading-tight">
-                Your Strategy Terminal <br />
-                <span className="text-teal-600">is Offline.</span>
+                Your Plan Setup <br />
+                <span className="text-teal-600">is Incomplete.</span>
               </h2>
 
               <div className="space-y-2 pt-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Progress to Synchronization</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Profile Completion</span>
                   <span className="text-2xl font-black text-slate-900">{journey.completionPct}%</span>
                 </div>
                 <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
@@ -495,7 +713,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
               <p className="text-[10px] font-black uppercase tracking-widest text-teal-600">Why complete setup</p>
               <h3 className="text-2xl font-black text-slate-900 mt-1">Benefits of completing your data</h3>
               <p className="text-sm text-slate-600 font-medium mt-2">
-                Complete all nodes once to unlock personalized planning and accurate recommendations.
+                Complete all key sections once to unlock personalized planning and accurate recommendations.
               </p>
             </div>
             <div className="hidden sm:flex items-center justify-center px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 text-[10px] font-black uppercase tracking-widest border border-teal-100">
@@ -508,22 +726,22 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
               {
                 title: 'Accurate Goal Funding',
                 detail: 'See realistic goal costs and whether your current assets can fully fund them.',
-                action: { label: 'Complete Mission Targets', view: 'goals' as View },
+                action: { label: 'Complete Goals', view: 'goals' as View },
               },
               {
                 title: 'Smarter Investment Mix',
                 detail: 'Get allocation guidance aligned to your risk profile, cash flow, and liabilities.',
-                action: { label: 'Complete Inflow + Assets', view: 'assets' as View },
+                action: { label: 'Complete Income + Assets', view: 'assets' as View },
               },
               {
                 title: 'Better Loan Decisions',
                 detail: 'Run prepay/restructure scenarios with monthly impact before taking action.',
-                action: { label: 'Complete Liability Map', view: 'debt' as View },
+                action: { label: 'Complete Liabilities', view: 'debt' as View },
               },
               {
                 title: 'Lower Financial Anxiety',
                 detail: 'Track one clear dashboard with alerts, not scattered data across pages.',
-                action: { label: 'Complete Household Node', view: 'family' as View },
+                action: { label: 'Complete Family Profile', view: 'family' as View },
               },
             ].map(item => (
               <div key={item.title} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -716,6 +934,283 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
       );
     }
 
+    if (widgetId === 'rewards') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Rewards & Referral"
+            title="Points progress and extension impact"
+            action={<Gift size={18} className="text-slate-400 mt-1" />}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Points Balance</p>
+              <p className={`text-sm font-black mt-1 ${pointsFrozen ? 'text-amber-700' : 'text-emerald-700'}`}>
+                {pointsBalance} pts
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                Status: {pointsFrozen ? 'Frozen by admin' : 'Active'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Estimated Extension</p>
+              <p className="text-sm font-black text-slate-900 mt-1">
+                {projectedPointsDays} days
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                {pointsFormula}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Referral Rewards</p>
+              <p className="text-sm font-black text-slate-900 mt-1">
+                You {referralRewardReferrer} • Friend {referralRewardReferred}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                Reward triggers after first paid subscription.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-slate-200 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Referral Code</p>
+            {referralCode ? (
+              <div className="mt-2 space-y-2">
+                <p className="text-sm font-black text-slate-900">{referralCode}</p>
+                <p className="text-[11px] font-semibold text-teal-700 break-all">{referralShareLink}</p>
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(referralCode);
+                      setCopiedRewardCode(true);
+                      window.setTimeout(() => setCopiedRewardCode(false), 1400);
+                    } catch {
+                      // clipboard access is best effort only.
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-teal-700 hover:bg-teal-100 transition"
+                >
+                  <Copy size={12} />
+                  {copiedRewardCode ? 'Copied' : 'Copy Code'}
+                </button>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm font-semibold text-slate-600">
+                Referral code will appear after billing profile sync.
+              </p>
+            )}
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-slate-200 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Points Earned by Milestone</p>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {pointsEventMeta.map((item) => {
+                const row = pointsEventMap.get(item.eventType);
+                const earned = Number(row?.earnedPoints || 0);
+                const eventPoints = Number(row?.pointsPerEvent || 0);
+                const completed = Boolean(row?.completed);
+                return (
+                  <div key={item.eventType} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-black text-slate-900">{item.label}</p>
+                      <p className={`text-[11px] font-black ${completed ? 'text-emerald-700' : 'text-slate-500'}`}>
+                        {earned} pts
+                      </p>
+                    </div>
+                    <p className="mt-1 text-[10px] font-semibold text-slate-600">
+                      {completed ? 'Completed' : 'Not completed'} • {eventPoints} points per completion
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500 mt-4">
+            Points expire in 12 months and redemption is FIFO (oldest points are used first).
+          </p>
+
+          <AppButton
+            tone="ghost"
+            size="sm"
+            onClick={() => setView('billing-manage')}
+            className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+            trailingIcon={<ArrowRight size={13} />}
+          >
+            Open rewards and billing
+          </AppButton>
+        </SurfaceCard>
+      );
+    }
+
+    if (widgetId === 'goals') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Goal Summary"
+            title="Funding coverage and next target"
+            action={<Target size={18} className="text-slate-400 mt-1" />}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Funded Goals</p>
+              <p className="text-sm font-black text-slate-900 mt-1">
+                {reportSnapshot.goals.fundedCount} / {reportSnapshot.goals.totalGoals}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Funding Coverage</p>
+              <p className={`text-sm font-black mt-1 ${goalFundingPct >= 70 ? 'text-emerald-700' : goalFundingPct >= 40 ? 'text-amber-700' : 'text-rose-700'}`}>
+                {goalFundingPct.toFixed(1)}%
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Funding Gap</p>
+              <p className="text-sm font-black text-slate-900 mt-1">
+                {formatCurrency(Math.max(0, reportSnapshot.goals.totalTargetToday - reportSnapshot.goals.totalCurrent), state.profile.country)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-slate-200 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Next Target</p>
+            {nextGoal ? (
+              <div className="mt-2">
+                <p className="text-sm font-black text-slate-900">{nextGoal.label}</p>
+                <p className="text-xs font-semibold text-slate-600 mt-1">
+                  {nextGoal.year ? `Target year: ${nextGoal.year}` : 'Target year not set'} •
+                  {' '}
+                  {formatCurrency(nextGoal.amount || 0, state.profile.country)}
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm font-semibold text-slate-600">No upcoming goal timeline found.</p>
+            )}
+          </div>
+
+          <p className="text-xs text-slate-500 mt-4">
+            {unfundedGoals > 0
+              ? `${unfundedGoals} goals are still underfunded. Prioritize high-impact goals and map contributions.`
+              : 'All goals are funded based on current inputs.'}
+          </p>
+
+          <AppButton
+            tone="ghost"
+            size="sm"
+            onClick={() => setView('goal-summary')}
+            className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+            trailingIcon={<ArrowRight size={13} />}
+          >
+            Open goal summary
+          </AppButton>
+        </SurfaceCard>
+      );
+    }
+
+    if (widgetId === 'investment-plan-widget') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Investment Plan"
+            title="Risk-aligned strategy status"
+            action={<TrendingUp size={18} className="text-slate-400 mt-1" />}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Risk Profile</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{reportSnapshot.riskProfile.level || 'Pending'}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Expected Return</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{reportSnapshot.assumptions.returnAssumption.toFixed(1)}% p.a.</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Allocation Actions</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{reallocationActions.length}</p>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-slate-200 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Return Comparison</p>
+            <p className="mt-2 text-sm font-semibold text-slate-700">
+              Current: <span className="font-black">{currentReturn.toFixed(1)}%</span> • Recommended:{' '}
+              <span className="font-black">{recommendedReturn.toFixed(1)}%</span>
+            </p>
+            <p className={`text-xs font-black mt-1 ${returnGap >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+              Gap vs recommended: {returnGap >= 0 ? '+' : ''}{returnGap.toFixed(2)}%
+            </p>
+            <p className="text-xs font-semibold text-slate-600 mt-1">
+              Estimated reallocation required: {formatCurrency(reallocationAmount, state.profile.country)}
+            </p>
+          </div>
+
+          <p className="text-xs text-slate-500 mt-4">
+            Investment plan aligns return expectations with your risk profile and reduces avoidable drift.
+          </p>
+
+          <AppButton
+            tone="ghost"
+            size="sm"
+            onClick={() => setView('investment-plan')}
+            className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+            trailingIcon={<ArrowRight size={13} />}
+          >
+            Open investment plan
+          </AppButton>
+        </SurfaceCard>
+      );
+    }
+
+    if (widgetId === 'protection') {
+      return (
+        <SurfaceCard padding="lg">
+          <SectionHeader
+            eyebrow="Protection Readiness"
+            title="Emergency fund and insurance"
+            action={<ShieldCheck size={18} className="text-slate-400 mt-1" />}
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Emergency Buffer</p>
+              <p className={`text-sm font-black mt-1 ${emergencyMonthsCovered >= 12 ? 'text-emerald-700' : emergencyMonthsCovered >= 6 ? 'text-amber-700' : 'text-rose-700'}`}>
+                {emergencyMonthsCovered.toFixed(1)} months
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Term Need</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{formatCurrency(reportSnapshot.assumptions.termInsuranceAmount || 0, state.profile.country)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Health Need</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{formatCurrency(reportSnapshot.assumptions.healthInsuranceAmount || 0, state.profile.country)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Policies Added</p>
+              <p className="text-sm font-black text-slate-900 mt-1">{state.insurance.length} ({termPolicyCount} term, {healthPolicyCount} health)</p>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500 mt-4">
+            Protection readiness reduces liquidity shocks and keeps long-term goals on track during stress events.
+          </p>
+
+          <AppButton
+            tone="ghost"
+            size="sm"
+            onClick={() => setView('insurance')}
+            className="mt-4 !px-0 text-slate-700 hover:text-slate-900"
+            trailingIcon={<ArrowRight size={13} />}
+          >
+            Open insurance analysis
+          </AppButton>
+        </SurfaceCard>
+      );
+    }
+
     return (
       <SurfaceCard padding="lg">
         <SectionHeader
@@ -780,7 +1275,48 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
           )}
         </div>
 
-        <p className="text-xs text-slate-500 mt-4">Recommended mix comes from your risk profile and improves return-risk consistency.</p>
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Recommendation Explained</p>
+            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${allocationHealthClass}`}>
+              {allocationHealth}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Why this is suggested</p>
+              <p className="text-xs font-semibold text-slate-700 mt-2 leading-relaxed">{recommendationWhyLine}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">What this means for you</p>
+              <p className="text-xs font-semibold text-slate-700 mt-2 leading-relaxed">{recommendationMeaningLine}</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-3 mt-3">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Next best steps</p>
+            <ol className="mt-2 space-y-1.5">
+              {recommendationSteps.map(step => (
+                <li key={step} className="text-xs font-semibold text-slate-700">
+                  {step}
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Risk: {riskProfileLevel}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Return Assumption: {reportSnapshot.assumptions.returnAssumption.toFixed(1)}%
+            </span>
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+              Inflation: {reportSnapshot.assumptions.inflation.toFixed(1)}%
+            </span>
+          </div>
+        </div>
 
         <AppButton
           tone="ghost"
@@ -874,7 +1410,160 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
         </SurfaceCard>
       </div>
 
-      {showCustomizer && (
+      {showProUpgradeCta && !isDashboardBlocked && (
+        <SurfaceCard padding="none" className="relative overflow-hidden border-teal-200 bg-gradient-to-r from-teal-50 via-white to-cyan-50 p-5 md:p-6">
+          <div className="absolute -left-20 top-1/2 h-40 w-40 -translate-y-1/2 rounded-full bg-teal-200/70 blur-3xl animate-pulse" />
+          <div className="absolute -right-16 -top-12 h-40 w-40 rounded-full bg-cyan-200/70 blur-3xl animate-pulse" />
+
+          <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-teal-700">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-600" />
+                </span>
+                Upgrade Available
+              </div>
+              <h3 className="mt-2 text-2xl md:text-3xl font-black tracking-tight text-slate-900">Convert to Pro and unlock full planning insights</h3>
+              <p className="mt-2 max-w-3xl text-sm font-semibold text-slate-600">
+                Move from free access to Pro for full dashboard analytics, deeper projections, and uninterrupted planning workflows.
+              </p>
+            </div>
+            <AppButton
+              tone="primary"
+              size="md"
+              onClick={() => (onOpenPricing ? onOpenPricing() : (window.location.href = '/pricing'))}
+              className="self-start whitespace-nowrap"
+              leadingIcon={<Sparkles size={14} />}
+              trailingIcon={<ArrowRight size={14} />}
+            >
+              Convert to Pro
+            </AppButton>
+          </div>
+        </SurfaceCard>
+      )}
+
+      {gamificationNudges.length > 0 && !isDashboardBlocked && (
+        <SurfaceCard padding="none" className="border-teal-200 bg-gradient-to-br from-teal-50 via-white to-emerald-50 p-5 md:p-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-teal-700">Rewards Missions</p>
+              <h3 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Complete milestones and earn points</h3>
+              <p className="mt-1 text-sm font-semibold text-slate-600">
+                Finish pending actions to grow your rewards wallet and unlock more extension value.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {gamificationNudges.map((nudge) => (
+              <div key={nudge.id} className="rounded-2xl border border-teal-200/70 bg-white/90 p-4">
+                <p className="text-sm font-black text-slate-900">{nudge.message}</p>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => setView(nudge.actionView)}
+                    className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-teal-700 hover:text-teal-800"
+                  >
+                    {nudge.actionLabel} <ArrowRight size={12} />
+                  </button>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                    +{nudge.points} pts
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SurfaceCard>
+      )}
+
+      {shouldPromptRiskProfile && (
+        <SurfaceCard padding="none" className="relative overflow-hidden border-amber-200 bg-gradient-to-br from-amber-50 via-white to-teal-50 p-5 md:p-6">
+          <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-amber-100/70 blur-3xl" />
+          <div className="absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-teal-100/60 blur-3xl" />
+
+          <div className="relative z-10">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Investment Readiness</p>
+                <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">Calculate your risk profile before investing</h3>
+                <p className="text-sm font-semibold text-slate-600 max-w-3xl">
+                  Your financial profile is complete. Risk profile converts your data into a suitable allocation and clearer return expectations.
+                </p>
+              </div>
+
+              <AppButton
+                tone="primary"
+                size="md"
+                onClick={() => setView('risk-profile')}
+                className="self-start whitespace-nowrap"
+                leadingIcon={<Target size={14} />}
+              >
+                Calculate Risk Profile
+              </AppButton>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              {[
+                {
+                  title: 'Better Allocation',
+                  detail: 'Maps Equity, Debt, Gold and Liquid mix to your risk capacity.',
+                },
+                {
+                  title: 'Smarter Return Assumptions',
+                  detail: 'Prevents over-optimistic projections in goal and retirement planning.',
+                },
+                {
+                  title: 'Clear Rebalancing Actions',
+                  detail: 'Shows where to increase or reduce exposure with amount-level actions.',
+                },
+                {
+                  title: 'Lower Downside Stress',
+                  detail: 'Keeps portfolio volatility aligned to your comfort during market drawdowns.',
+                },
+              ].map((benefit) => (
+                <div key={benefit.title} className="rounded-2xl border border-white/80 bg-white/85 p-4 backdrop-blur-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{benefit.title}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-700 leading-relaxed">{benefit.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SurfaceCard>
+      )}
+
+      {isDashboardBlocked && (
+        <SurfaceCard padding="none" className="relative overflow-hidden border-rose-200 bg-gradient-to-br from-rose-50 via-white to-amber-50 p-5 md:p-6">
+          <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-rose-100/70 blur-3xl" />
+          <div className="relative z-10">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-rose-700">Subscription Required</p>
+                <h3 className="mt-1 text-2xl md:text-3xl font-black tracking-tight text-slate-900">Dashboard access is locked</h3>
+                <p className="mt-2 text-sm font-semibold text-slate-600 max-w-3xl">
+                  Your dashboard is in read-only preview. Subscribe to reactivate full dashboard analytics and live portfolio tracking.
+                </p>
+              </div>
+              <AppButton
+                tone="primary"
+                size="md"
+                onClick={() => (
+                  onOpenPricing
+                    ? onOpenPricing()
+                    : onOpenBilling
+                      ? onOpenBilling()
+                      : (window.location.href = '/pricing')
+                )}
+                className="self-start whitespace-nowrap"
+                leadingIcon={<Lock size={14} />}
+              >
+                Subscribe Now
+              </AppButton>
+            </div>
+          </div>
+        </SurfaceCard>
+      )}
+
+      {showCustomizer && !isDashboardBlocked && (
         <SurfaceCard padding="none" className="border-slate-200 p-5 md:p-6">
           <div className="flex items-center gap-2 mb-4">
             <SlidersHorizontal size={16} className="text-slate-500" />
@@ -937,7 +1626,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, setView }) => {
           </AppButton>
         </SurfaceCard>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 md:gap-6">
+        <div className={`grid grid-cols-1 xl:grid-cols-2 gap-5 md:gap-6 ${isDashboardBlocked ? 'pointer-events-none select-none opacity-60' : ''}`}>
           {visibleWidgets.map(widgetId => (
             <div key={`widget-${widgetId}`}>
               {renderWidget(widgetId)}

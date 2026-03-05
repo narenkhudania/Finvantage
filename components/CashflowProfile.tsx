@@ -118,11 +118,11 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12">
           <div className="space-y-6">
             <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
-              <Calculator size={14}/> Node Configuration
+              <Calculator size={14}/> Cashflow Setup
             </div>
             <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Cashflow <br/><span className="text-teal-500">Profile.</span></h2>
             <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
-              Consolidated node for configuring all <span className="text-white">Household Inflows</span> and <span className="text-white">Burn Rates</span>.
+              One place to configure all <span className="text-white">household income</span> and <span className="text-white">expenses</span>.
             </p>
           </div>
           
@@ -134,7 +134,7 @@ const CashflowProfile: React.FC<CashflowProfileProps> = ({ state, updateState })
                </h4>
                <div className={`flex items-center gap-2 mt-2 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full border ${(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-rose-400 bg-rose-500/10 border-rose-500/20'}`}>
                   {(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? <TrendingUp size={12}/> : <ArrowDownRight size={12}/>}
-                  {(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? 'Positive Liquidity' : 'Deficit Node'}
+                  {(totalMonthlyIncome - totalMonthlyOutflow) >= 0 ? 'Positive Liquidity' : 'Deficit'}
                </div>
             </div>
           </div>

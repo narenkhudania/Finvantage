@@ -54,6 +54,73 @@ const AdminAnalyticsModule: React.FC<AdminAnalyticsModuleProps> = ({
   formatNumber,
   formatCurrency,
 }) => {
+  const actionQueue: Array<{
+    label: string;
+    value: string;
+    tone: 'up' | 'down' | 'flat';
+    detail: string;
+    action: string;
+  }> = [
+    {
+      label: 'Revenue Momentum (30d)',
+      value: formatDeltaPct(analyticsGrowth?.deltas.revenuePct ?? null),
+      tone:
+        analyticsGrowth?.deltas.revenuePct == null
+          ? 'flat'
+          : analyticsGrowth.deltas.revenuePct < -10
+            ? 'down'
+            : analyticsGrowth.deltas.revenuePct < 0
+              ? 'flat'
+              : 'up',
+      detail: analyticsGrowth
+        ? `${formatCurrency(analyticsGrowth.current.revenue)} vs ${formatCurrency(analyticsGrowth.previous.revenue)}`
+        : 'No baseline yet',
+      action:
+        (analyticsGrowth?.deltas.revenuePct ?? 0) < 0
+          ? 'Review paywall conversion and failed payment recovery.'
+          : 'Sustain conversion quality and monitor next 7-day trend.',
+    },
+    {
+      label: 'Acquisition Momentum (30d)',
+      value: formatDeltaPct(analyticsGrowth?.deltas.newUsersPct ?? null),
+      tone: toneFromDelta(analyticsGrowth?.deltas.newUsersPct ?? null),
+      detail: analyticsGrowth
+        ? `${formatNumber(analyticsGrowth.current.newUsers)} vs ${formatNumber(analyticsGrowth.previous.newUsers)} new users`
+        : 'No baseline yet',
+      action:
+        (analyticsGrowth?.deltas.newUsersPct ?? 0) < 0
+          ? 'Prioritize landing-to-signup funnel fixes this week.'
+          : 'Scale top channels while keeping CAC guardrails.',
+    },
+    {
+      label: 'Engagement Momentum (Avg DAU)',
+      value: formatDeltaPct(analyticsGrowth?.deltas.dauPct ?? null),
+      tone: toneFromDelta(analyticsGrowth?.deltas.dauPct ?? null),
+      detail: analyticsGrowth
+        ? `${formatNumber(Math.round(analyticsGrowth.current.avgDau))} vs ${formatNumber(Math.round(analyticsGrowth.previous.avgDau))}`
+        : 'No baseline yet',
+      action:
+        (analyticsGrowth?.deltas.dauPct ?? 0) < 0
+          ? 'Ship activation nudges and bring users back to core flows.'
+          : 'Push retention campaigns for high-value cohorts.',
+    },
+    {
+      label: 'Revenue Quality (INR / txn)',
+      value: formatCurrency(analyticsGrowth?.efficiency.revenuePerTxn || 0),
+      tone:
+        (analyticsGrowth?.efficiency.revenuePerTxn || 0) < 50
+          ? 'down'
+          : (analyticsGrowth?.efficiency.revenuePerTxn || 0) < 100
+            ? 'flat'
+            : 'up',
+      detail: `${formatCurrency(analyticsGrowth?.efficiency.revenuePerDailyActive || 0)} per avg daily active user`,
+      action:
+        (analyticsGrowth?.efficiency.revenuePerTxn || 0) < 100
+          ? 'Inspect coupon impact and discount leakage.'
+          : 'Revenue per transaction is healthy.',
+    },
+  ];
+
   return (
     <div className="space-y-5">
       <SurfaceCard variant="elevated" padding="none" className="p-4">
@@ -79,6 +146,27 @@ const AdminAnalyticsModule: React.FC<AdminAnalyticsModuleProps> = ({
         </div>
       </SurfaceCard>
 
+      <SurfaceCard variant="elevated" padding="none" className="p-5">
+        <SectionHeader
+          title="Actionable KPI Priorities"
+          description="Primary decisions first. Use these signals to decide what to fix now."
+        />
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-4">
+          {actionQueue.map((item) => (
+            <div key={item.label} className={`rounded-2xl border p-3 ${toneClass(item.tone)}`}>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em]">{item.label}</p>
+              <p className="mt-2 text-xl font-black">{item.value}</p>
+              <p className="mt-1.5 text-xs font-semibold opacity-90">{item.detail}</p>
+              <p className="mt-2 text-xs font-black opacity-95">{item.action}</p>
+            </div>
+          ))}
+        </div>
+      </SurfaceCard>
+
+      <SectionHeader
+        title="Context Metrics"
+        description="Supporting numbers for deeper diagnosis after action priorities are reviewed."
+      />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
         <SurfaceCard variant="elevated" padding="none" className="p-4">
           <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">New Users</p>
@@ -136,7 +224,7 @@ const AdminAnalyticsModule: React.FC<AdminAnalyticsModuleProps> = ({
       </div>
 
       <SurfaceCard variant="elevated" padding="none" className="p-5">
-        <SectionHeader title="Growth Curves" />
+        <SectionHeader title="Trend Context (Drill-down)" />
         <div className="h-80 w-full mt-4">
           <SafeResponsiveContainer>
             <LineChart data={analytics?.series || []} margin={{ top: 10, right: 12, left: -10, bottom: 0 }}>

@@ -30,6 +30,8 @@ const UUID_REGEX =
 
 const isUuid = (value: string) => UUID_REGEX.test(value);
 const SELF_OWNER_REF = 'self';
+let incomeProfilesSupportsCompositeUpsert: boolean | null = null;
+let insuranceSupportsSplitColumns: boolean | null = null;
 
 const getErrorText = (error: any) => (
   `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`
@@ -55,6 +57,360 @@ const isOnConflictTargetError = (error: any) => {
 const isOwnerRefUuidError = (error: any) => {
   const text = getErrorText(error);
   return text.includes('owner_ref') && text.includes('uuid');
+};
+
+const isAtomicSaveUnavailableError = (error: any) => {
+  const text = getErrorText(error);
+  return (
+    text.includes('save_finance_data_atomic') && text.includes('does not exist')
+  ) || (
+    text.includes('function') && text.includes('save_finance_data_atomic')
+  ) || (
+    text.includes('column') && text.includes('does not exist')
+  );
+};
+
+const makeUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.random() * 16 | 0;
+    const value = char === 'x' ? random : (random & 0x3 | 0x8);
+    return value.toString(16);
+  });
+};
+
+const normalizeUuidList = <T extends { id: string }>(items: T[]) => {
+  let changed = false;
+  const idMap = new Map<string, string>();
+
+  const normalizedItems = items.map((item) => {
+    const originalId = String(item.id || '');
+    if (!isUuid(originalId)) {
+      const mappedId = makeUuid();
+      idMap.set(originalId, mappedId);
+      changed = true;
+      return { ...item, id: mappedId };
+    }
+    return item;
+  });
+
+  return { items: normalizedItems, changed, idMap };
+};
+
+const normalizeOwnerRef = (owner: string, familyIdMap: Map<string, string>) => {
+  const rawOwner = String(owner || '').trim();
+  if (!rawOwner || rawOwner === SELF_OWNER_REF) return SELF_OWNER_REF;
+  return familyIdMap.get(rawOwner) || rawOwner;
+};
+
+type AtomicSavePreparation = {
+  normalizedState: FinanceState;
+  dbUpdates: Partial<FinanceState>;
+  payload: Record<string, unknown>;
+};
+
+const prepareFinanceStateForAtomicSave = (uid: string, state: FinanceState): AtomicSavePreparation => {
+  const familyNormalized = normalizeUuidList(state.family);
+  const familyIdMap = familyNormalized.idMap;
+
+  const cashflowsNormalized = normalizeUuidList(
+    state.cashflows.map((row) => ({
+      ...row,
+      owner: normalizeOwnerRef(row.owner, familyIdMap),
+    }))
+  );
+  const commitmentsNormalized = normalizeUuidList(
+    state.investmentCommitments.map((row) => ({
+      ...row,
+      owner: normalizeOwnerRef(row.owner, familyIdMap),
+    }))
+  );
+  const assetsNormalized = normalizeUuidList(
+    state.assets.map((row) => ({
+      ...row,
+      owner: normalizeOwnerRef(row.owner, familyIdMap),
+    }))
+  );
+  const loansNormalized = normalizeUuidList(
+    state.loans.map((row) => ({
+      ...row,
+      owner: normalizeOwnerRef(row.owner, familyIdMap),
+    }))
+  );
+  const goalsNormalized = normalizeUuidList(state.goals);
+  const insuranceNormalized = normalizeUuidList(state.insurance);
+  const transactionsNormalized = normalizeUuidList(state.transactions);
+  const notificationsInput = state.notifications ?? [];
+  const notificationsNormalized = normalizeUuidList(notificationsInput);
+
+  const normalizedState: FinanceState = {
+    ...state,
+    family: familyNormalized.items,
+    cashflows: cashflowsNormalized.items,
+    investmentCommitments: commitmentsNormalized.items,
+    assets: assetsNormalized.items,
+    loans: loansNormalized.items,
+    goals: goalsNormalized.items,
+    insurance: insuranceNormalized.items,
+    transactions: transactionsNormalized.items,
+    notifications: notificationsNormalized.items,
+  };
+
+  const dbUpdates: Partial<FinanceState> = {};
+  if (familyNormalized.changed) dbUpdates.family = familyNormalized.items;
+  if (cashflowsNormalized.changed) dbUpdates.cashflows = cashflowsNormalized.items;
+  if (commitmentsNormalized.changed) dbUpdates.investmentCommitments = commitmentsNormalized.items;
+  if (assetsNormalized.changed) dbUpdates.assets = assetsNormalized.items;
+  if (loansNormalized.changed) dbUpdates.loans = loansNormalized.items;
+  if (goalsNormalized.changed) dbUpdates.goals = goalsNormalized.items;
+  if (insuranceNormalized.changed) dbUpdates.insurance = insuranceNormalized.items;
+  if (transactionsNormalized.changed) dbUpdates.transactions = transactionsNormalized.items;
+  if (notificationsNormalized.changed) dbUpdates.notifications = notificationsNormalized.items;
+
+  const safeInsuranceConfig = normalizedState.insuranceAnalysis || {
+    inflation: 0,
+    termInsuranceAmount: 0,
+    healthInsuranceAmount: 0,
+    liabilityCovers: {},
+    goalCovers: {},
+    assetCovers: { financial: 50, personal: 0, inheritance: 100 },
+    inheritanceValue: 0,
+  };
+
+  const payload = {
+    family_members: normalizedState.family.map((member) => ({
+      id: member.id,
+      name: member.name,
+      relation: member.relation,
+      age: member.age,
+      is_dependent: member.isDependent,
+      covered_under_primary_insurance: member.coveredUnderPrimaryInsurance ?? true,
+      has_separate_insurance: (member.coveredUnderPrimaryInsurance ?? true)
+        ? false
+        : (member.hasSeparateInsurance ?? false),
+      include_income_in_planning: member.includeIncomeInPlanning ?? true,
+      retirement_age: member.retirementAge ?? null,
+      monthly_expenses: member.monthlyExpenses,
+      ...incomeToColumns(member.income, true),
+    })),
+    income_profiles: [
+      {
+        owner_ref: SELF_OWNER_REF,
+        ...incomeToColumns(normalizedState.profile.income, true),
+      },
+      ...normalizedState.family.map((member) => ({
+        owner_ref: member.id,
+        ...incomeToColumns(member.income, true),
+      })),
+    ],
+    expenses: normalizedState.detailedExpenses.map((expense) => ({
+      category: expense.category,
+      amount: expense.amount,
+      inflation_rate: expense.inflationRate,
+      tenure: expense.tenure,
+      start_year: expense.startYear ?? null,
+      end_year: expense.endYear ?? null,
+      frequency: expense.frequency ?? null,
+      notes: expense.notes ?? null,
+    })),
+    cashflows: normalizedState.cashflows.map((flow) => ({
+      id: flow.id,
+      owner_ref: flow.owner,
+      label: flow.label,
+      amount: flow.amount,
+      frequency: flow.frequency,
+      growth_rate: flow.growthRate,
+      start_year: flow.startYear,
+      end_year: flow.endYear,
+      notes: flow.notes ?? null,
+      flow_type: flow.flowType ?? null,
+    })),
+    investment_commitments: normalizedState.investmentCommitments.map((commitment) => ({
+      id: commitment.id,
+      owner_ref: commitment.owner,
+      label: commitment.label,
+      amount: commitment.amount,
+      frequency: commitment.frequency,
+      step_up: commitment.stepUp,
+      start_year: commitment.startYear,
+      end_year: commitment.endYear,
+      notes: commitment.notes ?? null,
+    })),
+    assets: normalizedState.assets.map((asset) => ({
+      id: asset.id,
+      category: asset.category,
+      sub_category: asset.subCategory,
+      name: asset.name,
+      owner_ref: asset.owner,
+      current_value: asset.currentValue,
+      purchase_year: asset.purchaseYear,
+      growth_rate: asset.growthRate,
+      available_for_goals: asset.availableForGoals,
+      available_from: asset.availableFrom ?? null,
+      tenure: asset.tenure ?? null,
+      monthly_contribution: asset.monthlyContribution ?? null,
+      contribution_frequency: asset.contributionFrequency ?? null,
+      contribution_step_up: asset.contributionStepUp ?? null,
+      contribution_start_year: asset.contributionStartYear ?? null,
+      contribution_end_year: asset.contributionEndYear ?? null,
+    })),
+    loans: normalizedState.loans.map((loan) => ({
+      id: loan.id,
+      type: loan.type,
+      owner_ref: loan.owner,
+      source: loan.source,
+      source_type: loan.sourceType,
+      sanctioned_amount: loan.sanctionedAmount,
+      outstanding_amount: loan.outstandingAmount,
+      interest_rate: loan.interestRate,
+      remaining_tenure: loan.remainingTenure,
+      emi: loan.emi,
+      notes: loan.notes ?? null,
+      start_year: loan.startYear ?? null,
+      lump_sum_repayments: loan.lumpSumRepayments ?? [],
+    })),
+    goals: normalizedState.goals.map((goal) => ({
+      id: goal.id,
+      type: goal.type,
+      description: goal.description,
+      priority: goal.priority,
+      resource_buckets: goal.resourceBuckets,
+      is_recurring: goal.isRecurring,
+      frequency: goal.frequency ?? null,
+      frequency_interval_years: goal.frequencyIntervalYears ?? null,
+      start_date_type: goal.startDate.type,
+      start_date_value: goal.startDate.value,
+      end_date_type: goal.endDate.type,
+      end_date_value: goal.endDate.value,
+      target_amount_today: goal.targetAmountToday,
+      start_goal_amount: goal.startGoalAmount ?? null,
+      inflation_rate: goal.inflationRate,
+      current_amount: goal.currentAmount,
+      loan_details: goal.loan ?? null,
+      desired_retirement_age: goal.desiredRetirementAge ?? null,
+      expected_monthly_expenses_after_retirement: goal.expectedMonthlyExpensesAfterRetirement ?? null,
+      retirement_handling: goal.retirementHandling ?? null,
+      detailed_breakdown: goal.detailedBreakdown ?? null,
+    })),
+    insurances: normalizedState.insurance.map((insurance) => ({
+      id: insurance.id,
+      category: insurance.category,
+      type: insurance.type,
+      proposer: insurance.proposer,
+      insured: insurance.insured,
+      sum_assured: insurance.sumAssured,
+      premium: insurance.premium,
+      begin_year: insurance.beginYear ?? null,
+      ppt_end_year: insurance.pptEndYear ?? null,
+      maturity_type: insurance.maturityType ?? null,
+      annual_premiums_left: insurance.annualPremiumsLeft ?? null,
+      premium_end_year: insurance.premiumEndYear ?? null,
+      maturity_date: insurance.maturityDate ?? null,
+      is_money_back: insurance.isMoneyBack,
+      money_back_years: insurance.moneyBackYears ?? [],
+      money_back_amounts: insurance.moneyBackAmounts ?? [],
+      income_from: insurance.incomeFrom ?? null,
+      income_to: insurance.incomeTo ?? null,
+      income_growth: insurance.incomeGrowth ?? null,
+      income_type: insurance.incomeType ?? null,
+      income_year_1: insurance.incomeYear1 ?? null,
+      income_year_2: insurance.incomeYear2 ?? null,
+      income_year_3: insurance.incomeYear3 ?? null,
+      income_year_4: insurance.incomeYear4 ?? null,
+      sum_insured: insurance.sumInsured ?? null,
+      deductible: insurance.deductible ?? null,
+      things_covered: insurance.thingsCovered ?? null,
+    })),
+    transactions: normalizedState.transactions.map((txn) => ({
+      id: txn.id,
+      date: txn.date,
+      description: txn.description,
+      amount: txn.amount,
+      category: txn.category,
+      type: txn.type,
+    })),
+    notifications: notificationsNormalized.items.map((notification) => ({
+      id: notification.id,
+      title: notification.title,
+      message: notification.message,
+      type: notification.type,
+      read: notification.read,
+      timestamp: notification.timestamp,
+    })),
+    risk_profile: normalizedState.riskProfile
+      ? {
+          score: normalizedState.riskProfile.score,
+          level: normalizedState.riskProfile.level,
+          last_updated: normalizedState.riskProfile.lastUpdated,
+          questionnaire_version: normalizedState.riskProfile.questionnaireVersion ?? 1,
+          questionnaire_answers: normalizedState.riskProfile.questionnaireAnswers ?? [],
+          equity: normalizedState.riskProfile.recommendedAllocation.equity,
+          debt: normalizedState.riskProfile.recommendedAllocation.debt,
+          gold: normalizedState.riskProfile.recommendedAllocation.gold,
+          liquid: normalizedState.riskProfile.recommendedAllocation.liquid,
+        }
+      : null,
+    estate_flags: {
+      has_will: normalizedState.estate.hasWill,
+      nominations_updated: normalizedState.estate.nominationsUpdated,
+    },
+    insurance_analysis_config: {
+      inflation: Number.isFinite(Number(safeInsuranceConfig.inflation)) ? Number(safeInsuranceConfig.inflation) : 0,
+      term_insurance_amount: Number.isFinite(Number(safeInsuranceConfig.termInsuranceAmount)) ? Number(safeInsuranceConfig.termInsuranceAmount) : 0,
+      health_insurance_amount: Number.isFinite(Number(safeInsuranceConfig.healthInsuranceAmount)) ? Number(safeInsuranceConfig.healthInsuranceAmount) : 0,
+      liability_covers: safeInsuranceConfig.liabilityCovers && typeof safeInsuranceConfig.liabilityCovers === 'object' ? safeInsuranceConfig.liabilityCovers : {},
+      goal_covers: safeInsuranceConfig.goalCovers && typeof safeInsuranceConfig.goalCovers === 'object' ? safeInsuranceConfig.goalCovers : {},
+      asset_covers: safeInsuranceConfig.assetCovers && typeof safeInsuranceConfig.assetCovers === 'object' ? safeInsuranceConfig.assetCovers : { financial: 50, personal: 0, inheritance: 100 },
+      inheritance_value: Number.isFinite(Number(safeInsuranceConfig.inheritanceValue)) ? Number(safeInsuranceConfig.inheritanceValue) : 0,
+      insurance_type: Number(safeInsuranceConfig.termInsuranceAmount) > 0 ? 'Term' : 'Health',
+      insurance_amount: Number(safeInsuranceConfig.termInsuranceAmount) > 0
+        ? Number(safeInsuranceConfig.termInsuranceAmount)
+        : Number(safeInsuranceConfig.healthInsuranceAmount),
+      immediate_needs: Number.isFinite(Number(safeInsuranceConfig.termInsuranceAmount)) ? Number(safeInsuranceConfig.termInsuranceAmount) : 0,
+      existing_insurance: Number.isFinite(Number(safeInsuranceConfig.termInsuranceAmount)) ? Number(safeInsuranceConfig.termInsuranceAmount) : 0,
+    },
+    discount_settings: {
+      use_buckets: normalizedState.discountSettings.useBuckets,
+      default_discount_rate: normalizedState.discountSettings.defaultDiscountRate,
+      use_bucket_inflation: normalizedState.discountSettings.useBucketInflation,
+      default_inflation_rate: normalizedState.discountSettings.defaultInflationRate,
+      buckets: normalizedState.discountSettings.buckets,
+    },
+    report_snapshot: {
+      payload: buildReportSnapshot(normalizedState),
+    },
+  };
+
+  return { normalizedState, dbUpdates, payload };
+};
+
+// Test hook for contract validation against DB atomic function payload shape.
+export const __prepareFinanceStateForAtomicSaveForTests = (
+  uid: string,
+  state: FinanceState
+) => prepareFinanceStateForAtomicSave(uid, state);
+
+const trySaveFinanceDataAtomic = async (
+  uid: string,
+  state: FinanceState
+): Promise<{ applied: boolean; dbUpdates: Partial<FinanceState> }> => {
+  const prepared = prepareFinanceStateForAtomicSave(uid, state);
+  const { error } = await supabase.rpc('save_finance_data_atomic', {
+    p_user_id: uid,
+    p_payload: prepared.payload,
+  });
+
+  if (error) {
+    if (isAtomicSaveUnavailableError(error)) {
+      console.warn('[dbService] atomic save unavailable, using legacy saver:', error);
+      return { applied: false, dbUpdates: {} };
+    }
+    throw error;
+  }
+
+  return { applied: true, dbUpdates: prepared.dbUpdates };
 };
 
 const hasCompleteOnboardingSections = (profile: Record<string, any>) => {
@@ -126,6 +482,12 @@ function rowToFamilyMember(row: Record<string, any>): FamilyMember {
     relation:        row.relation,
     age:             Number(row.age              ?? 0),
     isDependent:     Boolean(row.is_dependent),
+    coveredUnderPrimaryInsurance: row.covered_under_primary_insurance == null
+      ? true
+      : Boolean(row.covered_under_primary_insurance),
+    hasSeparateInsurance: row.has_separate_insurance == null
+      ? false
+      : Boolean(row.has_separate_insurance),
     includeIncomeInPlanning: row.include_income_in_planning == null ? true : Boolean(row.include_income_in_planning),
     retirementAge:   row.retirement_age ?? undefined,
     monthlyExpenses: Number(row.monthly_expenses ?? 0),
@@ -464,18 +826,9 @@ export async function loadFinanceData(
 // ─────────────────────────────────────────────────────────────
 // SAVE — returns DB-assigned UUIDs so App.tsx can sync state
 //
-// WHY DELETE + REINSERT:
-//   Components generate short random IDs like "abc123def" (not UUIDs).
-//   Postgres UUID columns reject those. Attempting upsert on conflict=id
-//   with a non-UUID value causes a 400 Bad Request.
-//
-//   Solution: always delete existing rows then insert fresh ones.
-//   Postgres assigns proper UUIDs. We return them so the app state
-//   gets updated — subsequent saves then have real UUIDs.
-//
-// WHY SEQUENTIAL (not parallel):
-//   income_profiles.owner_ref references family member UUIDs.
-//   We must have the new family UUIDs before saving income_profiles.
+// Primary path: single RPC transaction (`save_finance_data_atomic`) to
+// prevent partial multi-table persistence. Legacy sequential save is
+// retained as a compatibility fallback when RPC/migration is unavailable.
 // ─────────────────────────────────────────────────────────────
 export async function saveFinanceData(
   state: FinanceState,
@@ -483,6 +836,12 @@ export async function saveFinanceData(
 ): Promise<Partial<FinanceState>> {
   const uid = userId || (await supabase.auth.getSession()).data.session?.user.id || null;
   if (!uid) throw new Error('No active auth session.');
+
+  const atomic = await trySaveFinanceDataAtomic(uid, state);
+  if (atomic.applied) {
+    return atomic.dbUpdates;
+  }
+
   const dbUpdates: Partial<FinanceState> = {};
 
   // ── Step 1: family_members (must be first — income_profiles needs UUIDs)
@@ -577,13 +936,21 @@ async function saveFamilyMembers(
 
   const hasOnlyUuidIds = family.every(m => isUuid(m.id));
 
-  const mapRows = (withPlanningFlag: boolean, withPension: boolean) => family.map(m => ({
+  const mapRows = (withPlanningFlag: boolean, withPension: boolean, withInsuranceFlags: boolean) => family.map(m => ({
     id:               hasOnlyUuidIds ? m.id : undefined,
     user_id:          uid,
     name:             m.name,
     relation:         m.relation,
     age:              m.age,
     is_dependent:     m.isDependent,
+    ...(withInsuranceFlags
+      ? {
+          covered_under_primary_insurance: m.coveredUnderPrimaryInsurance ?? true,
+          has_separate_insurance: (m.coveredUnderPrimaryInsurance ?? true)
+            ? false
+            : (m.hasSeparateInsurance ?? false),
+        }
+      : {}),
     ...(withPlanningFlag ? { include_income_in_planning: m.includeIncomeInPlanning ?? true } : {}),
     retirement_age:   m.retirementAge ?? null,
     monthly_expenses: m.monthlyExpenses,
@@ -596,15 +963,17 @@ async function saveFamilyMembers(
     && (
       error.message.includes("'include_income_in_planning'")
       || error.message.includes("'pension'")
+      || error.message.includes("'covered_under_primary_insurance'")
+      || error.message.includes("'has_separate_insurance'")
     );
 
   if (hasOnlyUuidIds) {
-    const rows = mapRows(true, true);
+    const rows = mapRows(true, true, true);
     let { error } = await supabase
       .from('family_members')
       .upsert(rows, { onConflict: 'id' });
     if (error && isMissingOptionalColumnError(error)) {
-      const fallbackRows = mapRows(false, false);
+      const fallbackRows = mapRows(false, false, false);
       const fallback = await supabase
         .from('family_members')
         .upsert(fallbackRows, { onConflict: 'id' });
@@ -629,13 +998,13 @@ async function saveFamilyMembers(
     .eq('user_id', uid);
   if (delErr) throw delErr;
 
-  const rows = mapRows(true, true);
+  const rows = mapRows(true, true, true);
   let { data, error } = await supabase
     .from('family_members')
     .insert(rows.map(({ id, ...rest }) => rest))
     .select();
   if (error && isMissingOptionalColumnError(error)) {
-    const fallbackRows = mapRows(false, false);
+    const fallbackRows = mapRows(false, false, false);
     const fallback = await supabase
       .from('family_members')
       .insert(fallbackRows.map(({ id, ...rest }) => rest))
@@ -664,22 +1033,29 @@ async function saveIncomeProfiles(
   ];
 
   const persistRows = async (rows: Record<string, any>[]) => {
-    let { error } = await supabase
-      .from('income_profiles')
-      .upsert(rows, { onConflict: 'user_id,owner_ref' });
-
-    if (error && isOnConflictTargetError(error)) {
-      const { error: deleteError } = await supabase
+    if (incomeProfilesSupportsCompositeUpsert !== false) {
+      let { error } = await supabase
         .from('income_profiles')
-        .delete()
-        .eq('user_id', uid);
-      if (deleteError) return deleteError;
-      const insertResult = await supabase
-        .from('income_profiles')
-        .insert(rows);
-      error = insertResult.error;
+        .upsert(rows, { onConflict: 'user_id,owner_ref' });
+      if (!error) {
+        incomeProfilesSupportsCompositeUpsert = true;
+        return null;
+      }
+      if (!isOnConflictTargetError(error)) {
+        return error;
+      }
+      incomeProfilesSupportsCompositeUpsert = false;
     }
-    return error ?? null;
+
+    const { error: deleteError } = await supabase
+      .from('income_profiles')
+      .delete()
+      .eq('user_id', uid);
+    if (deleteError) return deleteError;
+    const insertResult = await supabase
+      .from('income_profiles')
+      .insert(rows);
+    return insertResult.error ?? null;
   };
 
   let selfOwnerRef = SELF_OWNER_REF;
@@ -1241,6 +1617,15 @@ async function saveInsuranceAnalysis(
   config: InsuranceAnalysisConfig,
 ): Promise<void> {
   const nowIso = new Date().toISOString();
+  const safeInflation = Number.isFinite(Number(config.inflation)) ? Number(config.inflation) : 0;
+  const safeTermAmount = Number.isFinite(Number(config.termInsuranceAmount)) ? Number(config.termInsuranceAmount) : 0;
+  const safeHealthAmount = Number.isFinite(Number(config.healthInsuranceAmount)) ? Number(config.healthInsuranceAmount) : 0;
+  const safeInheritanceValue = Number.isFinite(Number(config.inheritanceValue)) ? Number(config.inheritanceValue) : 0;
+  const safeLiabilityCovers = config.liabilityCovers && typeof config.liabilityCovers === 'object' ? config.liabilityCovers : {};
+  const safeGoalCovers = config.goalCovers && typeof config.goalCovers === 'object' ? config.goalCovers : {};
+  const safeAssetCovers = config.assetCovers && typeof config.assetCovers === 'object'
+    ? config.assetCovers
+    : { financial: 50, personal: 0, inheritance: 100 };
   const fallbackType = config.termInsuranceAmount > 0 ? 'Term' : 'Health';
   const fallbackAmount = config.termInsuranceAmount > 0
     ? config.termInsuranceAmount
@@ -1248,40 +1633,68 @@ async function saveInsuranceAnalysis(
 
   const latestPayload = {
     user_id: uid,
-    inflation: config.inflation,
-    term_insurance_amount: config.termInsuranceAmount,
-    health_insurance_amount: config.healthInsuranceAmount,
-    liability_covers: config.liabilityCovers,
-    goal_covers: config.goalCovers,
-    asset_covers: config.assetCovers,
-    inheritance_value: config.inheritanceValue,
+    inflation: safeInflation,
+    term_insurance_amount: safeTermAmount,
+    health_insurance_amount: safeHealthAmount,
+    liability_covers: safeLiabilityCovers,
+    goal_covers: safeGoalCovers,
+    asset_covers: safeAssetCovers,
+    inheritance_value: safeInheritanceValue,
     updated_at: nowIso,
   };
 
   const fallbackPayload = {
     user_id: uid,
-    inflation: config.inflation,
+    inflation: safeInflation,
     insurance_type: fallbackType,
     insurance_amount: fallbackAmount,
-    immediate_needs: config.termInsuranceAmount,
-    existing_insurance: config.termInsuranceAmount,
-    liability_covers: config.liabilityCovers,
-    goal_covers: config.goalCovers,
-    asset_covers: config.assetCovers,
-    inheritance_value: config.inheritanceValue,
+    immediate_needs: safeTermAmount,
+    existing_insurance: safeTermAmount,
+    liability_covers: safeLiabilityCovers,
+    goal_covers: safeGoalCovers,
+    asset_covers: safeAssetCovers,
+    inheritance_value: safeInheritanceValue,
     updated_at: nowIso,
   };
 
   const olderFallbackPayload = {
     user_id: uid,
-    inflation: config.inflation,
-    immediate_needs: config.termInsuranceAmount,
-    existing_insurance: config.termInsuranceAmount,
-    liability_covers: config.liabilityCovers,
-    goal_covers: config.goalCovers,
-    asset_covers: config.assetCovers,
-    inheritance_value: config.inheritanceValue,
+    inflation: safeInflation,
+    immediate_needs: safeTermAmount,
+    existing_insurance: safeTermAmount,
+    liability_covers: safeLiabilityCovers,
+    goal_covers: safeGoalCovers,
+    asset_covers: safeAssetCovers,
+    inheritance_value: safeInheritanceValue,
     updated_at: nowIso,
+  };
+
+  const minimalFallbackPayload = {
+    user_id: uid,
+    inflation: safeInflation,
+    immediate_needs: safeTermAmount,
+    existing_insurance: safeTermAmount,
+    updated_at: nowIso,
+  };
+
+  const persistWithMissingColumnRetry = async (initialPayload: Record<string, any>) => {
+    let payload = { ...initialPayload };
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const error = await persistPayload(payload);
+      if (!error) return null;
+      const text = getErrorText(error);
+      const missingColumnMatch =
+        text.match(/could not find the ['"]?([a-z0-9_]+)['"]? column/i)
+        || text.match(/column ['"]?([a-z0-9_]+)['"]? does not exist/i);
+      const missingColumn = missingColumnMatch?.[1];
+      if (!missingColumn || !(missingColumn in payload)) {
+        return error;
+      }
+      const nextPayload = { ...payload };
+      delete nextPayload[missingColumn];
+      payload = nextPayload;
+    }
+    return new Error('Insurance analysis payload could not be persisted after schema fallback retries.');
   };
 
   const persistPayload = async (payload: Record<string, any>) => {
@@ -1304,20 +1717,30 @@ async function saveInsuranceAnalysis(
     return error ?? null;
   };
 
-  let error = await persistPayload(latestPayload);
+  const splitSupported = insuranceSupportsSplitColumns !== false;
+  let error = splitSupported
+    ? await persistWithMissingColumnRetry(latestPayload)
+    : await persistWithMissingColumnRetry(fallbackPayload);
 
   if (
     error &&
     (isMissingColumnError(error, 'term_insurance_amount') || isMissingColumnError(error, 'health_insurance_amount'))
   ) {
-    error = await persistPayload(fallbackPayload);
+    insuranceSupportsSplitColumns = false;
+    error = await persistWithMissingColumnRetry(fallbackPayload);
+  } else if (!error && splitSupported) {
+    insuranceSupportsSplitColumns = true;
   }
 
   if (
     error &&
     (isMissingColumnError(error, 'insurance_type') || isMissingColumnError(error, 'insurance_amount'))
   ) {
-    error = await persistPayload(olderFallbackPayload);
+    error = await persistWithMissingColumnRetry(olderFallbackPayload);
+  }
+
+  if (error && (isMissingColumnError(error, 'liability_covers') || isMissingColumnError(error, 'goal_covers') || isMissingColumnError(error, 'asset_covers') || isMissingColumnError(error, 'inheritance_value'))) {
+    error = await persistWithMissingColumnRetry(minimalFallbackPayload);
   }
 
   if (error) throw error;

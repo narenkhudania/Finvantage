@@ -25,6 +25,7 @@ import {
   signIn,
   saveOnboardingProfile,
 } from '../services/authService';
+import { supabase } from '../services/supabase';
 import {
   calculateAge,
   isFutureDate,
@@ -43,12 +44,89 @@ interface OnboardingProps {
 
 type AuthStep = 'identifier' | 'login' | 'signup' | 'onboarding';
 type MotionDirection = 'forward' | 'backward';
+type DobParts = { year: string; month: string; day: string };
+
+const normalizeReferralCode = (value?: string) => String(value || '').trim().toUpperCase();
+const DEFAULT_PHONE_COUNTRY_CODE = '+91';
+const normalizePhoneDigits = (value?: string) => String(value || '').replace(/\D/g, '');
+const parsePhoneParts = (value?: string) => {
+  const compact = String(value || '').trim().replace(/[\s-]/g, '');
+  const exact = compact.match(/^(\+\d{1,4})(\d{4,15})$/);
+  if (exact) {
+    return {
+      countryCode: exact[1],
+      phone: exact[2],
+    };
+  }
+  return {
+    countryCode: DEFAULT_PHONE_COUNTRY_CODE,
+    phone: normalizePhoneDigits(compact).slice(0, 15),
+  };
+};
 
 const normalizeIncomeSource = (value?: string | null): IncomeSource => (
   value === 'business' ? 'business' : 'salaried'
 );
 
+const parseNonNegativeAmount = (value: string) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+};
+
+const EMPTY_DOB_PARTS: DobParts = { year: '', month: '', day: '' };
+
+const parseDobToParts = (dob?: string) => {
+  const match = String(dob || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return EMPTY_DOB_PARTS;
+  return {
+    year: match[1],
+    month: String(Number(match[2])),
+    day: String(Number(match[3])),
+  };
+};
+
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+const composeDobFromParts = (parts: DobParts) => {
+  const day = Number(parts.day);
+  const month = Number(parts.month);
+  const year = Number(parts.year);
+  if (!day || !month || !year) return '';
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+};
+
+const DOB_MONTH_OPTIONS = [
+  { value: '1', label: 'Jan' },
+  { value: '2', label: 'Feb' },
+  { value: '3', label: 'Mar' },
+  { value: '4', label: 'Apr' },
+  { value: '5', label: 'May' },
+  { value: '6', label: 'Jun' },
+  { value: '7', label: 'Jul' },
+  { value: '8', label: 'Aug' },
+  { value: '9', label: 'Sep' },
+  { value: '10', label: 'Oct' },
+  { value: '11', label: 'Nov' },
+  { value: '12', label: 'Dec' },
+];
+
+const PHONE_COUNTRY_CODE_OPTIONS = [
+  { value: '+91', label: 'India (+91)' },
+  { value: '+1', label: 'USA/Canada (+1)' },
+  { value: '+44', label: 'UK (+44)' },
+  { value: '+61', label: 'Australia (+61)' },
+  { value: '+65', label: 'Singapore (+65)' },
+  { value: '+971', label: 'UAE (+971)' },
+];
+
 const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, initialAuthStep, resumeProfile }) => {
+  const initialPhone = useMemo(() => parsePhoneParts(resumeProfile?.mobile || ''), [resumeProfile?.mobile]);
+  const initialReferralCodeFromUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    const queryCode = new URLSearchParams(window.location.search).get('ref') || '';
+    return normalizeReferralCode(queryCode);
+  }, []);
   const [authStep, setAuthStep] = useState<AuthStep>(initialAuthStep ?? 'identifier');
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [motionDirection, setMotionDirection] = useState<MotionDirection>('forward');
@@ -59,7 +137,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [geoStatus, setGeoStatus] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [showSecurityDetails, setShowSecurityDetails] = useState(false);
-  const [skipOptionalRequests, setSkipOptionalRequests] = useState(false);
   const [openUsageKey, setOpenUsageKey] = useState<string | null>(null);
   const geoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -79,7 +156,18 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     state: resumeProfile?.state || '',
     country: resumeProfile?.country || 'India',
     incomeSource: normalizeIncomeSource(resumeProfile?.incomeSource as string | undefined),
+    phoneCountryCode: PHONE_COUNTRY_CODE_OPTIONS.some((option) => option.value === initialPhone.countryCode)
+      ? initialPhone.countryCode
+      : DEFAULT_PHONE_COUNTRY_CODE,
+    phoneNumber: initialPhone.phone,
+    hasReferralCode: Boolean(initialReferralCodeFromUrl),
+    referralCode: initialReferralCodeFromUrl,
+    hasTermInsurance: false,
+    termInsuranceAmount: 0,
+    hasHealthInsurance: false,
+    healthInsuranceAmount: 0,
   });
+  const [dobParts, setDobParts] = useState(() => parseDobToParts(resumeProfile?.dob || ''));
 
   const EMAIL_DOMAINS = [
     'gmail.com',
@@ -89,6 +177,34 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     'proton.me',
     'zoho.com',
   ];
+  const dobYearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 100 }, (_, index) => String(currentYear - index));
+  }, []);
+  const dobDayOptions = useMemo(() => {
+    const year = Number(dobParts.year);
+    const month = Number(dobParts.month);
+    const maxDays = year && month
+      ? new Date(year, month, 0).getDate()
+      : 31;
+    return Array.from({ length: maxDays }, (_, index) => String(index + 1));
+  }, [dobParts.month, dobParts.year]);
+
+  const handleDobPartChange = (part: keyof DobParts, value: string) => {
+    const nextParts: DobParts = { ...dobParts, [part]: value };
+    const year = Number(nextParts.year);
+    const month = Number(nextParts.month);
+    if (nextParts.day && year && month) {
+      const maxDays = new Date(year, month, 0).getDate();
+      if (Number(nextParts.day) > maxDays) {
+        nextParts.day = String(maxDays);
+      }
+    }
+    setDobParts(nextParts);
+    const nextDob = composeDobFromParts(nextParts);
+    setFormData(prev => (prev.dob === nextDob ? prev : { ...prev, dob: nextDob }));
+    if (error) setError(null);
+  };
 
   const stepConfig = [
     { title: 'Trust', icon: ShieldCheck },
@@ -166,6 +282,24 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
       return;
     }
     if (!formData.firstName.trim()) { setError('Name is required.'); return; }
+    const phoneDigits = normalizePhoneDigits(formData.phoneNumber);
+    if (!phoneDigits) {
+      setError('Phone number is required.');
+      return;
+    }
+    if (formData.phoneCountryCode === '+91' && phoneDigits.length !== 10) {
+      setError('Enter a valid 10-digit India mobile number.');
+      return;
+    }
+    if (phoneDigits.length < 6 || phoneDigits.length > 15) {
+      setError('Enter a valid mobile number.');
+      return;
+    }
+    const referralCode = formData.hasReferralCode ? normalizeReferralCode(formData.referralCode) : '';
+    if (formData.hasReferralCode && !referralCode) {
+      setError('Enter a valid referral code or turn off the referral toggle.');
+      return;
+    }
 
     setIsProcessing(true);
     setError(null);
@@ -175,6 +309,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
         password: formData.password,
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim() || undefined,
+        phoneCountryCode: formData.phoneCountryCode,
+        phoneNumber: phoneDigits,
+        referralCode: referralCode || undefined,
       });
       setFormData(prev => ({ ...prev, identifier: email }));
       setLoggedInFirstName(formData.firstName.trim());
@@ -276,6 +413,20 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
       setIsProcessing(false);
     }
   };
+
+  useEffect(() => {
+    setDobParts(prev => {
+      const parsed = parseDobToParts(formData.dob);
+      if (
+        prev.year === parsed.year &&
+        prev.month === parsed.month &&
+        prev.day === parsed.day
+      ) {
+        return prev;
+      }
+      return parsed;
+    });
+  }, [formData.dob]);
 
   const currentAge = useMemo(() => {
     if (!formData.dob) return 30;
@@ -402,7 +553,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     else if (retirementSpan >= 12) score += 4;
     else if (retirementSpan >= 8) score += 2;
 
-    score += formData.incomeSource === 'business' ? 3 : 2;
+    score += 2;
 
     if (formData.country.trim()) score += 1;
     if (formData.city.trim()) score += 1;
@@ -410,7 +561,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     if (formData.pincode.trim()) score += 1;
 
     return Math.min(98, Math.max(40, Math.round(score)));
-  }, [formData, currentAge]);
+  }, [formData.country, formData.city, formData.state, formData.pincode, formData.retirementAge, formData.lifeExpectancy, currentAge]);
 
   const toggleUsage = (key: string) => {
     setOpenUsageKey(prev => prev === key ? null : key);
@@ -532,6 +683,18 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
       }
 
       const normalizedIncomeSource = normalizeIncomeSource(formData.incomeSource);
+      const termInsuranceAmount = formData.hasTermInsurance ? Number(formData.termInsuranceAmount) : 0;
+      const healthInsuranceAmount = formData.hasHealthInsurance ? Number(formData.healthInsuranceAmount) : 0;
+      if (formData.hasTermInsurance && termInsuranceAmount <= 0) {
+        setError('Enter a valid term insurance amount.');
+        setIsProcessing(false);
+        return;
+      }
+      if (formData.hasHealthInsurance && healthInsuranceAmount <= 0) {
+        setError('Enter a valid health insurance amount.');
+        setIsProcessing(false);
+        return;
+      }
 
       await saveOnboardingProfile({
         dob: formData.dob,
@@ -543,9 +706,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
         country,
         incomeSource: normalizedIncomeSource,
         iqScore: baselineIq,
+        termInsuranceAmount,
+        healthInsuranceAmount,
       });
 
       const normalizedEmail = formData.identifier.trim().toLowerCase();
+      const normalizedPhone = normalizePhoneDigits(formData.phoneNumber);
+      const mobileE164 = normalizedPhone ? `${formData.phoneCountryCode}${normalizedPhone}` : '';
 
       onComplete({
         isRegistered: true,
@@ -554,7 +721,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
           firstName: formData.firstName,
           lastName: formData.lastName,
           email: normalizedEmail,
-          mobile: '',
+          mobile: mobileE164,
           lifeExpectancy: Number(formData.lifeExpectancy),
           retirementAge: Number(formData.retirementAge),
           pincode,
@@ -569,7 +736,27 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
           },
           monthlyExpenses: 0,
         },
+        insuranceAnalysis: {
+          inflation: 6,
+          termInsuranceAmount,
+          healthInsuranceAmount,
+          liabilityCovers: {},
+          goalCovers: {},
+          assetCovers: { financial: 50, personal: 0, inheritance: 100 },
+          inheritanceValue: 0,
+        },
       });
+
+      // Subscription-first entry: wait for auth session persistence before pricing redirect.
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token) break;
+        await supabase.auth.refreshSession().catch(() => undefined);
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 120);
+        });
+      }
+      window.location.href = '/pricing?entry=terminal&skip=1&skip_to=%2F';
     } catch (e: any) {
       setError(e.message ?? 'Failed to save profile. Please try again.');
     } finally {
@@ -591,7 +778,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
     'Control what is shared before we run any projections.',
     'Required details for age-accurate planning timelines.',
     'Set your planning horizon so recommendations stay realistic.',
-    'Optional context to localize assumptions and speed setup.',
+    'Optional location context improves local insurance requirement estimates and assumptions.',
     'Review controls and launch your planning workspace.',
   ];
   const activeOnboardingNarrative = onboardingNarratives[onboardingStep] || onboardingNarratives[0];
@@ -609,9 +796,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
       complete: hasLocationData,
     },
     {
-      label: 'Income context',
-      value: normalizeIncomeSource(formData.incomeSource) === 'business' ? 'Business' : 'Salaried',
-      complete: true,
+      label: 'Insurance snapshot',
+      value: (formData.hasTermInsurance || formData.hasHealthInsurance)
+        ? `Term: ${formData.hasTermInsurance ? 'Provided' : 'Not provided'} • Health: ${formData.hasHealthInsurance ? 'Provided' : 'Not provided'}`
+        : 'Not shared yet',
+      complete: formData.hasTermInsurance || formData.hasHealthInsurance,
     },
   ];
   const dataSharingStepLabel = onboardingStep <= 2
@@ -749,7 +938,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       <span className="text-teal-600">secure setup.</span>
                     </h1>
                     <p className="text-slate-500 text-sm font-medium leading-relaxed">
-                      Enter your email and we will route you to sign in or create a profile in one step.
+                      Enter your email to continue. If your email is already registered, we will take you to password login. If not, we will take you to signup.
                     </p>
                   </div>
                   <div className="space-y-5">
@@ -830,6 +1019,73 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       </div>
                     </div>
                     <div className="space-y-2">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone Number</label>
+                      <div className="grid grid-cols-[minmax(130px,170px)_1fr] gap-2">
+                        <select
+                          value={formData.phoneCountryCode}
+                          onChange={e => setFormData(prev => ({ ...prev, phoneCountryCode: e.target.value }))}
+                          className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600"
+                        >
+                          {PHONE_COUNTRY_CODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="tel"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          autoComplete="tel-national"
+                          placeholder="Mobile number"
+                          className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600"
+                          value={formData.phoneNumber}
+                          onChange={e => {
+                            const digits = normalizePhoneDigits(e.target.value).slice(0, 15);
+                            setFormData(prev => ({ ...prev, phoneNumber: digits }));
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({
+                          ...prev,
+                          hasReferralCode: !prev.hasReferralCode,
+                          referralCode: !prev.hasReferralCode ? prev.referralCode : '',
+                        }))}
+                        className="w-full flex items-center justify-between gap-3 text-left"
+                      >
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Referral</p>
+                          <p className="text-sm font-bold text-slate-900">I have a referral code</p>
+                        </div>
+                        <span
+                          className={`relative inline-flex h-6 w-11 rounded-full transition-colors ${
+                            formData.hasReferralCode ? 'bg-teal-600' : 'bg-slate-300'
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                              formData.hasReferralCode ? 'translate-x-5' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </span>
+                      </button>
+
+                      {formData.hasReferralCode && (
+                        <div className="space-y-2 onboarding-fade-expand">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Referral Code</label>
+                          <input
+                            type="text"
+                            placeholder="Enter code"
+                            className="w-full px-5 py-3.5 bg-white border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600"
+                            value={formData.referralCode}
+                            onChange={e => setFormData(prev => ({ ...prev, referralCode: normalizeReferralCode(e.target.value) }))}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2">
                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Choose Password</label>
                       <div className="relative">
                         <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -894,7 +1150,17 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       </div>
                     </div>
                     <button onClick={handleLogin} disabled={isProcessing} className="w-full py-4 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-teal-100 disabled:opacity-60">
-                      {isProcessing ? 'Authenticating...' : 'Access Terminal'} <ArrowRight size={18} />
+                      {isProcessing ? 'Authenticating...' : 'Continue'} <ArrowRight size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        transitionToAuthStep('signup');
+                        setError(null);
+                      }}
+                      className="w-full py-3 text-xs font-black uppercase tracking-widest text-teal-700 border border-teal-200 rounded-xl hover:bg-teal-50 transition-colors"
+                    >
+                      New user? Create account
                     </button>
                   </div>
                 </div>
@@ -928,7 +1194,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <button
                           onClick={() => {
-                            setSkipOptionalRequests(false);
                             setError(null);
                             transitionToOnboardingStep(1);
                           }}
@@ -938,7 +1203,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                         </button>
                         <button
                           onClick={() => {
-                            setSkipOptionalRequests(true);
                             setError(null);
                             transitionToOnboardingStep(1);
                           }}
@@ -967,7 +1231,54 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       <div className="grid grid-cols-1 md:grid-cols-[1.7fr_0.9fr] gap-3">
                         <div className="space-y-2">
                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date of birth</label>
-                          <input type="date" className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 transition-all text-teal-600" value={formData.dob} onChange={e => setFormData({ ...formData, dob: e.target.value })} />
+                          <div className="grid grid-cols-3 gap-2.5">
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Day</label>
+                              <select
+                                value={dobParts.day}
+                                onChange={e => handleDobPartChange('day', e.target.value)}
+                                className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 transition-all text-slate-900"
+                              >
+                                <option value="">DD</option>
+                                {dobDayOptions.map(day => (
+                                  <option key={day} value={day}>
+                                    {pad2(Number(day))}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Month</label>
+                              <select
+                                value={dobParts.month}
+                                onChange={e => handleDobPartChange('month', e.target.value)}
+                                className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 transition-all text-slate-900"
+                              >
+                                <option value="">MM</option>
+                                {DOB_MONTH_OPTIONS.map(month => (
+                                  <option key={month.value} value={month.value}>
+                                    {month.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Year</label>
+                              <select
+                                value={dobParts.year}
+                                onChange={e => handleDobPartChange('year', e.target.value)}
+                                className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-base outline-none focus:border-teal-600 transition-all text-slate-900"
+                              >
+                                <option value="">YYYY</option>
+                                {dobYearOptions.map(year => (
+                                  <option key={year} value={year}>
+                                    {year}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <p className="text-[11px] font-semibold text-slate-500 ml-1">Pick day, month, and year for smoother mobile entry.</p>
                         </div>
                         <div className={`rounded-xl border p-3.5 flex flex-col justify-center ${dobAge && !ageGateError ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
                           <p className={`text-[10px] font-black uppercase tracking-widest ${dobAge && !ageGateError ? 'text-emerald-700' : 'text-slate-500'}`}>Age detected</p>
@@ -1032,19 +1343,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                           </div>
                         </div>
 
-                        <div className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 inline-flex items-center gap-2">
-                            Income source (optional context)
-                            <span title="Used to personalize assumptions only. You can change or remove it later." className="text-slate-400 cursor-help">?</span>
-                          </label>
-                          <select
-                            value={normalizeIncomeSource(formData.incomeSource)}
-                            onChange={e => setFormData(prev => ({ ...prev, incomeSource: normalizeIncomeSource(e.target.value) }))}
-                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600"
-                          >
-                            <option value="salaried">Salaried</option>
-                            <option value="business">Business</option>
-                          </select>
+                        <div className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-1.5">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Planning horizon quality</p>
+                          <p className="text-xs font-semibold text-slate-700">
+                            These age sliders set your retirement start and end window. You can adjust them later in Planning Engine.
+                          </p>
                         </div>
                       </div>
 
@@ -1097,7 +1400,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       </button>
                       {openUsageKey === 'timeline' && (
                         <div className="p-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 space-y-2 onboarding-fade-expand">
-                          <p><span className="font-black text-slate-900">What we collect:</span> retirement age, life expectancy, and optional income source context.</p>
+                          <p><span className="font-black text-slate-900">What we collect:</span> retirement age and life expectancy.</p>
                           <p><span className="font-black text-slate-900">Why we need it:</span> to estimate your planning horizon and funding duration.</p>
                           <p><span className="font-black text-slate-900">How it improves your experience:</span> more relevant recommendations with less manual work.</p>
                           <p><span className="font-black text-slate-900">What we do not do:</span> we never sell it and never use it for ad targeting.</p>
@@ -1108,7 +1411,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                         <button onClick={() => transitionToOnboardingStep(1)} className="w-full py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
                           Back
                         </button>
-                        <button onClick={() => { setError(null); transitionToOnboardingStep(skipOptionalRequests ? 4 : 3); }} className="w-full py-3 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">
+                        <button onClick={() => { setError(null); transitionToOnboardingStep(3); }} className="w-full py-3 bg-teal-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-700 transition-all">
                           Continue
                         </button>
                       </div>
@@ -1132,7 +1435,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
 
                       <div className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50 space-y-1.5">
                         <p className="text-sm font-semibold text-slate-900">Location improves local assumptions and recommendation relevance.</p>
-                        <p className="text-sm font-semibold text-slate-700">Many users report less manual correction when this is connected.</p>
+                        <p className="text-sm font-semibold text-slate-700">
+                          We also use your location context to calibrate health insurance need estimates for regional treatment cost trends.
+                        </p>
                       </div>
 
                       <div className="rounded-2xl border border-slate-200 bg-white p-3.5 space-y-3">
@@ -1186,6 +1491,106 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                         )}
                       </div>
 
+                      <div className="rounded-2xl border border-teal-200 bg-teal-50/70 p-3.5 space-y-3">
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-teal-700">Insurance details for location-aware estimate</p>
+                          <p className="text-xs font-semibold text-slate-700">
+                            Tell us your current covers so we can estimate required insurance amount versus deficit with your location assumptions.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                          <div className="rounded-2xl border border-slate-200 bg-white p-3.5 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Term insurance</p>
+                                <p className="text-xs font-semibold text-slate-700 mt-1">Do you already have a term insurance cover?</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setFormData(prev => ({
+                                  ...prev,
+                                  hasTermInsurance: !prev.hasTermInsurance,
+                                  termInsuranceAmount: prev.hasTermInsurance ? 0 : prev.termInsuranceAmount,
+                                }))}
+                                className={`relative inline-flex h-6 w-11 rounded-full transition-colors ${
+                                  formData.hasTermInsurance ? 'bg-teal-600' : 'bg-slate-300'
+                                }`}
+                              >
+                                <span
+                                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                    formData.hasTermInsurance ? 'translate-x-5' : 'translate-x-0.5'
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                            {formData.hasTermInsurance ? (
+                              <div className="space-y-1.5">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Term insurance amount</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  inputMode="decimal"
+                                  placeholder="e.g. 10000000"
+                                  value={formData.termInsuranceAmount > 0 ? String(formData.termInsuranceAmount) : ''}
+                                  onChange={e => setFormData(prev => ({
+                                    ...prev,
+                                    termInsuranceAmount: e.target.value === '' ? 0 : parseNonNegativeAmount(e.target.value),
+                                  }))}
+                                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600"
+                                />
+                              </div>
+                            ) : (
+                              <p className="text-[11px] font-semibold text-slate-500">Turn this on if you already hold a term policy.</p>
+                            )}
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-3.5 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Health insurance</p>
+                                <p className="text-xs font-semibold text-slate-700 mt-1">Do you already have a health insurance cover?</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setFormData(prev => ({
+                                  ...prev,
+                                  hasHealthInsurance: !prev.hasHealthInsurance,
+                                  healthInsuranceAmount: prev.hasHealthInsurance ? 0 : prev.healthInsuranceAmount,
+                                }))}
+                                className={`relative inline-flex h-6 w-11 rounded-full transition-colors ${
+                                  formData.hasHealthInsurance ? 'bg-teal-600' : 'bg-slate-300'
+                                }`}
+                              >
+                                <span
+                                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                    formData.hasHealthInsurance ? 'translate-x-5' : 'translate-x-0.5'
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                            {formData.hasHealthInsurance ? (
+                              <div className="space-y-1.5">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Health insurance amount</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  inputMode="decimal"
+                                  placeholder="e.g. 500000"
+                                  value={formData.healthInsuranceAmount > 0 ? String(formData.healthInsuranceAmount) : ''}
+                                  onChange={e => setFormData(prev => ({
+                                    ...prev,
+                                    healthInsuranceAmount: e.target.value === '' ? 0 : parseNonNegativeAmount(e.target.value),
+                                  }))}
+                                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-teal-600"
+                                />
+                              </div>
+                            ) : (
+                              <p className="text-[11px] font-semibold text-slate-500">Turn this on if you already hold health coverage.</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
                       <button onClick={() => toggleUsage('location')} className="w-full text-left px-4 py-2.5 border border-slate-200 rounded-xl flex items-center justify-between text-xs font-black uppercase tracking-widest text-slate-600 hover:border-teal-200 hover:text-teal-700 transition-all">
                         <span>Why we ask</span>
                         <span className="inline-flex items-center gap-1">
@@ -1195,9 +1600,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       </button>
                       {openUsageKey === 'location' && (
                         <div className="p-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 space-y-2 onboarding-fade-expand">
-                          <p><span className="font-black text-slate-900">What we collect:</span> country, postal code, city, and state.</p>
-                          <p><span className="font-black text-slate-900">Why we need it:</span> to localize assumptions and service availability.</p>
-                          <p><span className="font-black text-slate-900">How it improves your experience:</span> faster setup and more relevant insights.</p>
+                          <p><span className="font-black text-slate-900">What we collect:</span> country, postal code, city, state, and optional insurance cover amounts.</p>
+                          <p><span className="font-black text-slate-900">Why we need it:</span> to localize assumptions and estimate required term/health cover more accurately.</p>
+                          <p><span className="font-black text-slate-900">How it improves your experience:</span> faster setup and better insurance deficit insights.</p>
                           <p><span className="font-black text-slate-900">What we do not do:</span> we never sell your location data or use it for ads.</p>
                         </div>
                       )}
@@ -1262,11 +1667,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
                       {error && <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-center gap-2 text-rose-600 text-xs font-bold text-left"><AlertCircle size={14} /> {error}</div>}
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button onClick={() => transitionToOnboardingStep(skipOptionalRequests ? 2 : 3)} className="w-full py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
+                        <button onClick={() => transitionToOnboardingStep(3)} className="w-full py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:border-teal-200 hover:text-teal-700 transition-all">
                           Back
                         </button>
                         <button onClick={handleFinishOnboarding} disabled={isProcessing} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-teal-600 transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2 group disabled:opacity-60">
-                          {isProcessing ? 'Saving...' : 'Enter Terminal'} <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                          {isProcessing ? 'Saving...' : 'Go to Dashboard'} <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                         </button>
                       </div>
                     </div>

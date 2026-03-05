@@ -91,8 +91,8 @@ const AdminAccessModule: React.FC<AdminAccessModuleProps> = ({
             <span className="text-xs font-black uppercase tracking-wider text-slate-500">{adminUsers.length} members</span>
           </div>
 
-          <div className="overflow-auto">
-            <table className="min-w-[620px] xl:min-w-[880px] 2xl:min-w-[980px] w-full text-sm">
+          <div className="admin-table-wrap">
+            <table className="admin-table">
               <thead className="bg-slate-50">
                 <tr>
                   {['User', 'Role', '2FA Required', '2FA Enabled', 'Active', 'Last Login', 'Actions'].map((header) => (
@@ -315,8 +315,8 @@ const AdminAccessModule: React.FC<AdminAccessModuleProps> = ({
             </AppButton>
           </div>
         </div>
-        <div className="overflow-auto">
-          <table className="min-w-[620px] xl:min-w-[900px] 2xl:min-w-[1080px] w-full text-sm">
+        <div className="admin-table-wrap">
+          <table className="admin-table">
             <thead className="bg-slate-50">
               <tr>
                 {['User', 'Role', 'Device', 'IP', 'Started', 'Last Seen', '2FA Verified', 'State', 'Actions'].map((header) => (

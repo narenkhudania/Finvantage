@@ -30,6 +30,16 @@ const mapTicket = (row: Record<string, any>): CustomerComplaintTicket => ({
     ? (row.status as CustomerComplaintTicket['status'])
     : 'open',
   resolutionNote: row.resolution_note ? String(row.resolution_note) : null,
+  firstResponseAt: row.first_response_at ? String(row.first_response_at) : null,
+  firstResponseDueAt: row.first_response_due_at ? String(row.first_response_due_at) : null,
+  resolutionDueAt: row.resolution_due_at ? String(row.resolution_due_at) : null,
+  closedAt: row.closed_at ? String(row.closed_at) : null,
+  slaStatus: ['on_track', 'due_soon', 'breached', 'paused', 'met'].includes(String(row.sla_status))
+    ? (row.sla_status as CustomerComplaintTicket['slaStatus'])
+    : 'on_track',
+  escalated: Boolean(row.escalated),
+  escalationLevel: Number.isFinite(Number(row.escalation_level)) ? Number(row.escalation_level) : 0,
+  escalationReason: row.escalation_reason ? String(row.escalation_reason) : null,
   createdAt: String(row.created_at || new Date().toISOString()),
   updatedAt: String(row.updated_at || row.created_at || new Date().toISOString()),
 });
@@ -46,7 +56,9 @@ export async function listMyComplaintTickets(limit = 100): Promise<CustomerCompl
 
   const { data, error } = await supabase
     .from('support_tickets')
-    .select('id, ticket_number, subject, description, category, priority, status, resolution_note, created_at, updated_at')
+    .select(
+      'id, ticket_number, subject, description, category, priority, status, resolution_note, created_at, updated_at, first_response_at, first_response_due_at, resolution_due_at, closed_at, sla_status, escalated, escalation_level, escalation_reason'
+    )
     .eq('user_id', userId)
     .eq('category', 'complaint')
     .order('updated_at', { ascending: false })

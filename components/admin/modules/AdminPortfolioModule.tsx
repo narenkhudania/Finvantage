@@ -44,8 +44,8 @@ const AdminPortfolioModule: React.FC<AdminPortfolioModuleProps> = ({
       </SurfaceCard>
 
       <SurfaceCard variant="elevated" padding="none" className="overflow-hidden">
-        <div className="overflow-auto">
-          <table className="min-w-[700px] xl:min-w-[900px] 2xl:min-w-[1100px] w-full text-sm">
+        <div className="admin-table-wrap">
+          <table className="admin-table">
             <thead className="bg-slate-50">
               <tr>
                 {['Customer', 'Assets', 'Liabilities', 'Net Worth', 'Goals', 'Txns', 'Risk', 'KYC', 'Last Txn', 'Actions'].map((header) => (

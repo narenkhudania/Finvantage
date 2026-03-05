@@ -2,25 +2,38 @@ import React, { useMemo, useState } from 'react';
 import {
   User,
   Shield,
-  Database,
+  Gift,
   LogOut,
   Copy,
   CheckCircle2,
-  Settings as SettingsIcon,
   Sparkles,
   Trash2,
   Download,
   ChevronDown,
   ChevronUp,
   Clock3,
+  ExternalLink,
+  AlertTriangle,
+  SlidersHorizontal,
+  CalendarRange,
+  Layers,
+  Plus,
 } from 'lucide-react';
-import { DiscountBucket, FinanceState, IncomeSource } from '../types';
+import { DiscountBucket, FinanceState, IncomeSource, View } from '../types';
 import { getLifeExpectancyYear, getRetirementYear } from '../lib/financeMath';
+import {
+  getBillingHistory,
+  getBillingSnapshot,
+  type BillingHistoryResponse,
+  type BillingSnapshot,
+} from '../services/billingService';
 
 interface SettingsProps {
   state: FinanceState;
   updateState: (data: Partial<FinanceState>) => void;
   onLogout: () => void;
+  setView?: (view: View) => void;
+  mode?: 'settings' | 'data-trust';
 }
 
 const buildBucket = (partial: Partial<DiscountBucket>, id: string): DiscountBucket => ({
@@ -53,9 +66,54 @@ const BUCKET_TEMPLATES: Record<'starter' | 'balanced' | 'growth', DiscountBucket
   ],
 };
 
-const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'planning' | 'datalab'>('profile');
+const REWARD_EVENT_META: Array<{ eventType: string; label: string }> = [
+  { eventType: 'daily_login', label: 'Daily Login' },
+  { eventType: 'profile_completion', label: 'Profile Completion' },
+  { eventType: 'risk_profile_completed', label: 'Risk Profile Completed' },
+  { eventType: 'goal_added', label: 'Goal Added' },
+  { eventType: 'report_generated', label: 'Report Generated' },
+  { eventType: 'subscription_payment_success', label: 'Subscription Payment Success' },
+];
+
+const MILESTONE_POINTS: Array<{ eventType: string; label: string; points: number }> = [
+  { eventType: 'daily_login', label: 'Daily Login', points: 10 },
+  { eventType: 'profile_completion', label: 'Profile Completion', points: 20 },
+  { eventType: 'risk_profile_completed', label: 'Risk Profile Completed', points: 10 },
+  { eventType: 'goal_added', label: 'Goal Added', points: 20 },
+  { eventType: 'report_generated', label: 'Report Generated', points: 10 },
+  { eventType: 'subscription_payment_success', label: 'Subscription Payment Success', points: 30 },
+];
+
+const MILESTONE_SEGMENT_CLASSES = [
+  'bg-teal-500',
+  'bg-cyan-500',
+  'bg-emerald-500',
+  'bg-sky-500',
+  'bg-teal-600',
+  'bg-slate-700',
+];
+
+const toTitleCase = (value: string) =>
+  String(value || '')
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const Settings: React.FC<SettingsProps> = ({
+  state,
+  updateState,
+  onLogout,
+  setView,
+  mode = 'settings',
+}) => {
+  const [activeTab, setActiveTab] = useState<'profile' | 'planning' | 'rewards'>('profile');
   const [copied, setCopied] = useState(false);
+  const [copiedReferralCode, setCopiedReferralCode] = useState(false);
+  const [rewardsLoading, setRewardsLoading] = useState(false);
+  const [rewardsError, setRewardsError] = useState('');
+  const [rewardsSnapshot, setRewardsSnapshot] = useState<BillingSnapshot | null>(null);
+  const [rewardsHistory, setRewardsHistory] = useState<BillingHistoryResponse | null>(null);
+  const [animateMilestoneBars, setAnimateMilestoneBars] = useState(false);
   const [expandedDataRow, setExpandedDataRow] = useState<string | null>(null);
   const [showSecurityDetails, setShowSecurityDetails] = useState(false);
   const [showPermissionDashboard, setShowPermissionDashboard] = useState(false);
@@ -76,6 +134,26 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
         ...patch,
       },
     });
+  };
+
+  const parseNumberInput = (value: string, fallback = 0) => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const parseIntegerInput = (value: string, fallback = 0) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const formatBucketBoundary = (type: DiscountBucket['startType'] | DiscountBucket['endType'], offset?: number) => {
+    if (type === 'Infinity') return '∞';
+    const safeOffset = Number.isFinite(Number(offset)) ? Number(offset) : 0;
+    if (type === 'Retirement') {
+      const sign = safeOffset > 0 ? '+' : safeOffset < 0 ? '' : '';
+      return `Retirement ${sign}${safeOffset}`.trim();
+    }
+    return `Year ${safeOffset}`;
   };
 
   const resolveBucketOffsets = (bucket: DiscountBucket) => {
@@ -214,6 +292,13 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
   );
 
   const isIncomeContextShared = normalizedIncomeSource === 'business';
+  const openProfileSettings = () => {
+    if (mode === 'data-trust' && setView) {
+      setView('settings');
+      return;
+    }
+    setActiveTab('profile');
+  };
 
   const permissionRows = [
     {
@@ -223,7 +308,7 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
       description: 'Improves region-specific assumptions and relevance.',
       connected: hasLocationData,
       onDisconnect: removeLocationData,
-      onConnect: () => setActiveTab('profile'),
+      onConnect: openProfileSettings,
     },
     {
       id: 'income-permission',
@@ -232,7 +317,7 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
       description: 'Improves recommendation tuning for salaried vs business context.',
       connected: isIncomeContextShared,
       onDisconnect: removeIncomeContext,
-      onConnect: () => setActiveTab('profile'),
+      onConnect: openProfileSettings,
     },
   ];
 
@@ -315,39 +400,153 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
     return Math.round((complete / checks.length) * 100);
   }, [state.profile]);
 
+  const rewardsSummary = useMemo(() => {
+    const fromSnapshot = new Map<string, { pointsPerEvent: number; earnedPoints: number; completed: boolean }>();
+    (rewardsSnapshot?.points?.earnedEvents || []).forEach((row) => {
+      fromSnapshot.set(String(row.eventType || ''), {
+        pointsPerEvent: Number(row.pointsPerEvent || 0),
+        earnedPoints: Number(row.earnedPoints || 0),
+        completed: Boolean(row.completed),
+      });
+    });
+
+    const fromHistory = (rewardsHistory?.pointsLedger || []).reduce<Record<string, number>>((acc, row) => {
+      const key = String(row.eventType || '');
+      if (!REWARD_EVENT_META.some((item) => item.eventType === key)) return acc;
+      const points = Number(row.points || 0);
+      if (points <= 0) return acc;
+      acc[key] = (acc[key] || 0) + points;
+      return acc;
+    }, {});
+
+    return REWARD_EVENT_META.map((item) => {
+      const snapshotRow = fromSnapshot.get(item.eventType);
+      const earnedPoints = Math.max(
+        Number(snapshotRow?.earnedPoints || 0),
+        Number(fromHistory[item.eventType] || 0),
+      );
+      return {
+        ...item,
+        pointsPerEvent: Number(snapshotRow?.pointsPerEvent || 0),
+        earnedPoints,
+        completed: Boolean(snapshotRow?.completed) || earnedPoints > 0,
+      };
+    });
+  }, [rewardsHistory?.pointsLedger, rewardsSnapshot?.points?.earnedEvents]);
+
+  const recentRewardActivity = useMemo(
+    () => (rewardsHistory?.pointsLedger || []).slice(0, 8),
+    [rewardsHistory?.pointsLedger],
+  );
+
+  const milestoneProgressRows = useMemo(() => {
+    const byEvent = new Map(rewardsSummary.map((row) => [row.eventType, row]));
+    return MILESTONE_POINTS.map((item) => {
+      const matched = byEvent.get(item.eventType);
+      const completed = Boolean(matched?.completed);
+      return {
+        ...item,
+        completed,
+        earnedPoints: completed ? item.points : 0,
+      };
+    });
+  }, [rewardsSummary]);
+
+  const milestoneTotalPoints = useMemo(
+    () => MILESTONE_POINTS.reduce((sum, item) => sum + item.points, 0),
+    [],
+  );
+
+  const milestoneEarnedPoints = useMemo(
+    () => milestoneProgressRows.reduce((sum, row) => sum + row.earnedPoints, 0),
+    [milestoneProgressRows],
+  );
+  const rewardsBalance = Number(rewardsSnapshot?.points?.balance || 0);
+  const rewardsCompletedCount = rewardsSummary.filter((row) => row.completed).length;
+  const rewardsInviteCap = Number((rewardsSnapshot?.referral as any)?.monthlyInviteCap || 100);
+  const rewardsActivePlanLabel = useMemo(() => {
+    const sub = rewardsSnapshot?.subscription;
+    if (!sub || sub.status !== 'active') return 'Not Active';
+    const matchedPlan = rewardsSnapshot?.plans?.find((plan) => plan.planCode === sub.planCode);
+    const months = Number(matchedPlan?.billingMonths || 0);
+    if (months === 1) return 'Monthly';
+    if (months > 1) return `${months} Months`;
+    return sub.billingCycle || 'Active';
+  }, [rewardsSnapshot?.plans, rewardsSnapshot?.subscription]);
+  const rewardsLifetimeEarnings = useMemo(
+    () => recentRewardActivity.reduce((sum, row) => sum + Math.max(0, Number(row.points || 0)), 0),
+    [recentRewardActivity],
+  );
+
+  const loadRewards = async () => {
+    try {
+      setRewardsLoading(true);
+      setRewardsError('');
+      const [snapshot, history] = await Promise.all([getBillingSnapshot(), getBillingHistory()]);
+      setRewardsSnapshot(snapshot);
+      setRewardsHistory(history);
+    } catch (err) {
+      setRewardsError((err as Error).message || 'Could not load rewards data.');
+    } finally {
+      setRewardsLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (mode !== 'settings') return;
+    if (activeTab !== 'rewards') return;
+    if (rewardsLoading) return;
+    void loadRewards();
+  }, [activeTab, mode]);
+
+  React.useEffect(() => {
+    if (mode !== 'settings' || activeTab !== 'rewards') return;
+    if (!rewardsSnapshot && !rewardsHistory) return;
+    setAnimateMilestoneBars(false);
+    const timer = window.setTimeout(() => setAnimateMilestoneBars(true), 90);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, mode, rewardsHistory, rewardsSnapshot]);
+
   return (
-    <div className="space-y-12 animate-in fade-in duration-700 pb-24">
-      <div className="surface-dark p-8 md:p-14 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
-        <div className="relative z-10">
-          <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20 mb-6">
-            <SettingsIcon size={14} /> Configuration Terminal
+    <div className="space-y-8 animate-in fade-in duration-700 pb-24">
+      {mode === 'settings' && (
+        <div className="-mx-4 md:-mx-6 px-4 md:px-6 py-3 bg-slate-50/95 border-y border-slate-200/70">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-1.5 bg-white rounded-2xl border border-slate-200 w-full max-w-5xl mx-auto">
+            <button onClick={() => setActiveTab('profile')} className={`px-4 md:px-6 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'profile' ? 'bg-teal-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}><User size={14}/> Profile</button>
+            <button onClick={() => setActiveTab('rewards')} className={`px-4 md:px-6 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'rewards' ? 'bg-teal-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}><Gift size={14}/> Referral &amp; Rewards</button>
+            <button onClick={() => setActiveTab('planning')} className={`px-4 md:px-6 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'planning' ? 'bg-teal-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}><Shield size={14}/> Planning Engine</button>
           </div>
-          <h2 className="text-4xl md:text-6xl font-black tracking-tight leading-tight">Profile + Planning Engine</h2>
-          <p className="text-sm md:text-base text-slate-300 font-medium mt-4 max-w-3xl">
-            Update onboarding profile fields anytime and control planning assumptions with bucket templates and validation.
-          </p>
         </div>
-      </div>
+      )}
 
-      <div className="sticky top-0 z-40 -mx-4 md:-mx-6 px-4 md:px-6 py-3 bg-slate-50/95 backdrop-blur border-y border-slate-200/70">
-        <div className="flex p-1.5 bg-white rounded-2xl border border-slate-200 w-full max-w-5xl mx-auto overflow-x-auto no-scrollbar">
-          <button onClick={() => setActiveTab('profile')} className={`flex-1 px-4 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'profile' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}><User size={14}/> Profile</button>
-          <button onClick={() => setActiveTab('planning')} className={`flex-1 px-4 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'planning' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}><Shield size={14}/> Planning Engine</button>
-          <button onClick={() => setActiveTab('datalab')} className={`flex-1 px-4 md:px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'datalab' ? 'bg-teal-600 text-white' : 'text-slate-500 hover:text-slate-900'}`}><Database size={14}/> Data &amp; Trust</button>
+      {mode === 'data-trust' && (
+        <div className="max-w-5xl mx-auto">
+          <div className="rounded-[2rem] border border-teal-100 bg-white p-5 md:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold tracking-wide text-teal-600">Data and Trust</p>
+              <h2 className="mt-1 text-2xl md:text-3xl font-black text-slate-900">Data Transparency Center</h2>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Dedicated page for permissions, controls, and transparency.</p>
+            </div>
+            <button
+              onClick={() => (setView ? setView('settings') : undefined)}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold tracking-wide text-slate-700 hover:border-teal-300 hover:text-teal-700"
+            >
+              Back to Settings
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {activeTab === 'profile' && (
+      {mode === 'settings' && activeTab === 'profile' && (
         <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
           <div className="bg-white p-8 md:p-12 rounded-[3rem] border border-slate-200 shadow-sm space-y-8">
             <div className="flex items-start justify-between gap-6">
               <div>
                 <h3 className="text-2xl font-black text-slate-900">Onboarding Profile Editor</h3>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">These values directly update planning logic and timelines.</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">These values directly update planning logic and timelines.</p>
               </div>
               <div className="px-4 py-2 rounded-2xl bg-teal-50 border border-teal-100 text-right">
-                <p className="text-[9px] font-black uppercase tracking-widest text-teal-600">Profile completeness</p>
+                <p className="text-[11px] font-semibold tracking-wide text-teal-700">Profile Completion</p>
                 <p className="text-xl font-black text-slate-900">{onboardingCompletion}%</p>
               </div>
             </div>
@@ -437,143 +636,557 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
           <div className="bg-rose-50 p-6 md:p-10 rounded-[3rem] border border-rose-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="space-y-1">
               <h4 className="text-lg font-black text-rose-900">Session Termination</h4>
-              <p className="text-sm font-medium text-rose-700">Logout will end the current terminal session.</p>
+              <p className="text-sm font-medium text-rose-700">Logout will end your current session.</p>
             </div>
-            <button onClick={onLogout} className="px-8 py-4 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all flex items-center justify-center gap-2">
-              <LogOut size={14} /> Terminate Access
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <a
+                href="/settings/billing"
+                className="px-8 py-4 bg-white text-slate-700 border border-slate-200 rounded-2xl text-sm font-semibold tracking-wide hover:bg-slate-50 transition-all inline-flex items-center justify-center gap-2"
+              >
+                Billing Management
+              </a>
+              <button onClick={onLogout} className="px-8 py-4 bg-rose-600 text-white rounded-2xl text-sm font-semibold tracking-wide hover:bg-rose-700 transition-all flex items-center justify-center gap-2">
+                <LogOut size={14} /> Terminate Access
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {activeTab === 'planning' && (
-        <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
-          <div className="bg-white p-8 md:p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-8">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-              <div>
-                <h3 className="text-2xl font-black text-slate-900">Planner Assumptions</h3>
-                <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mt-1">Controls goal inflation, discounting, and long-horizon projections.</p>
-              </div>
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-2xl border text-xs font-black uppercase tracking-widest ${bucketError ? 'border-rose-200 bg-rose-50 text-rose-600' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                <Sparkles size={14} />
-                {bucketError ? 'Bucket Health: Needs Fix' : 'Bucket Health: Valid'}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Use Bucketed Discount Rates</p>
-                    <p className="text-xs text-slate-400 font-medium">Apply horizon-specific return assumptions.</p>
-                  </div>
-                  <button type="button" onClick={() => updateDiscountSettings({ useBuckets: !discountSettings.useBuckets })} className={`w-16 h-9 rounded-full transition-all relative ${discountSettings.useBuckets ? 'bg-teal-600' : 'bg-slate-200'}`}>
-                    <div className={`absolute top-1 w-7 h-7 rounded-full bg-white transition-all shadow-md ${discountSettings.useBuckets ? 'left-8' : 'left-1'}`} />
-                  </button>
-                </div>
-                <div className="flex items-center gap-3">
-                  <input type="number" min={0} max={30} step={0.1} value={discountSettings.defaultDiscountRate} onChange={e => updateDiscountSettings({ defaultDiscountRate: parseFloat(e.target.value) || 0 })} className="w-28 px-3 py-2 rounded-xl border border-slate-200 text-sm font-black outline-none" />
-                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Default Discount %</span>
-                </div>
-              </div>
-
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Use Bucketed Inflation</p>
-                    <p className="text-xs text-slate-400 font-medium">Set different inflation assumptions by horizon.</p>
-                  </div>
-                  <button type="button" onClick={() => updateDiscountSettings({ useBucketInflation: !discountSettings.useBucketInflation })} className={`w-16 h-9 rounded-full transition-all relative ${discountSettings.useBucketInflation ? 'bg-teal-600' : 'bg-slate-200'}`}>
-                    <div className={`absolute top-1 w-7 h-7 rounded-full bg-white transition-all shadow-md ${discountSettings.useBucketInflation ? 'left-8' : 'left-1'}`} />
-                  </button>
-                </div>
-                <div className="flex items-center gap-3">
-                  <input type="number" min={0} max={30} step={0.1} value={discountSettings.defaultInflationRate} onChange={e => updateDiscountSettings({ defaultInflationRate: parseFloat(e.target.value) || 0 })} className="w-28 px-3 py-2 rounded-xl border border-slate-200 text-sm font-black outline-none" />
-                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Default Inflation %</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Bucket Templates</p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <button onClick={() => applyTemplate('starter')} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:border-teal-300 text-left transition-all">
-                  <p className="text-xs font-black text-slate-900">Starter</p>
-                  <p className="text-[10px] font-semibold text-slate-500 mt-1">Simple early/mid/long assumptions.</p>
-                </button>
-                <button onClick={() => applyTemplate('balanced')} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:border-teal-300 text-left transition-all">
-                  <p className="text-xs font-black text-slate-900">Balanced</p>
-                  <p className="text-[10px] font-semibold text-slate-500 mt-1">Pre and post-retirement split.</p>
-                </button>
-                <button onClick={() => applyTemplate('growth')} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 hover:border-teal-300 text-left transition-all">
-                  <p className="text-xs font-black text-slate-900">Growth</p>
-                  <p className="text-[10px] font-semibold text-slate-500 mt-1">Higher long-horizon return assumptions.</p>
-                </button>
-              </div>
-            </div>
-
-            {bucketError && (
-              <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-[10px] font-black uppercase tracking-widest text-rose-600">
-                {bucketError}
+      {mode === 'settings' && activeTab === 'rewards' && (
+        <div className="max-w-5xl mx-auto space-y-6 animate-in slide-in-from-bottom-6">
+          <div className="bg-white p-5 md:p-8 rounded-[2rem] border border-slate-200 shadow-sm space-y-5">
+            {rewardsError && (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
+                {rewardsError}
               </div>
             )}
 
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h4 className="text-lg font-black text-slate-900">Bucket Editor</h4>
-                <button onClick={addBucket} className="px-5 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition-all">+ Add Bucket</button>
-              </div>
+            {rewardsLoading && !rewardsSnapshot ? (
+              <section className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-6 md:px-7 md:py-7">
+                <p className="text-sm font-semibold text-slate-600">Loading rewards...</p>
+              </section>
+            ) : (
+              <>
+                <section className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-6 md:px-7 md:py-7">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+                    <div className="flex items-center gap-5">
+                      <div className="h-16 w-16 rounded-2xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-600">
+                        <Sparkles size={28} />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">Referral &amp; Rewards</h3>
+                        <p className="mt-1 text-sm font-semibold text-slate-600">
+                          Track points earned from milestones and referrals in one place.
+                        </p>
+                        <p className="mt-2 text-xs font-semibold text-slate-500">
+                          Completed Milestones: {rewardsCompletedCount}/{rewardsSummary.length}
+                        </p>
+                      </div>
+                    </div>
 
-              {discountSettings.buckets.map((bucket, index) => (
-                <div key={bucket.id} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end p-5 bg-slate-50 rounded-2xl border border-slate-200">
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Bucket Name</label>
-                    <input type="text" value={bucket.name} onChange={e => updateBucket(index, { name: e.target.value })} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold outline-none" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Start</label>
-                    <div className="flex gap-2">
-                      <select value={bucket.startType} onChange={e => updateBucket(index, { startType: e.target.value as DiscountBucket['startType'] })} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest">
-                        <option value="Offset">Offset</option>
-                        <option value="Retirement">Retirement</option>
-                      </select>
-                      <input type="number" value={bucket.startOffset} onChange={e => updateBucket(index, { startOffset: parseInt(e.target.value, 10) || 0 })} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none" />
+                    <div className="self-start md:self-auto rounded-2xl border border-teal-200 bg-teal-50 px-6 py-5 min-w-[170px] text-center">
+                      <p className="text-xs font-bold tracking-wide text-teal-700">Total Points</p>
+                      <p className="mt-1 text-4xl font-black text-slate-900">{rewardsBalance}</p>
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">End</label>
-                    <div className="flex gap-2">
-                      <select value={bucket.endType} onChange={e => updateBucket(index, { endType: e.target.value as DiscountBucket['endType'] })} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest">
-                        <option value="Offset">Offset</option>
-                        <option value="Retirement">Retirement</option>
-                        <option value="Infinity">∞</option>
-                      </select>
-                      {bucket.endType !== 'Infinity' && (
-                        <input type="number" value={bucket.endOffset ?? 0} onChange={e => updateBucket(index, { endOffset: parseInt(e.target.value, 10) || 0 })} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none" />
-                      )}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Discount %</label>
-                    <input type="number" step={0.1} value={bucket.discountRate ?? ''} onChange={e => updateBucket(index, { discountRate: parseFloat(e.target.value) })} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Inflation %</label>
-                    <div className="flex gap-2">
-                      <input type="number" step={0.1} value={bucket.inflationRate ?? ''} onChange={e => updateBucket(index, { inflationRate: parseFloat(e.target.value) })} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 font-bold outline-none" />
-                      <button onClick={() => removeBucket(index)} className="p-3 bg-rose-50 text-rose-500 rounded-xl">
-                        <Trash2 size={16} />
+                </section>
+
+                <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 md:p-7 min-h-[220px] flex flex-col">
+                    <p className="text-xs font-bold tracking-wide text-slate-500">Your Referral Code</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <p className="text-2xl md:text-3xl font-black tracking-[0.04em] text-teal-600 break-all">
+                        {rewardsSnapshot?.referral?.myCode || '—'}
+                      </p>
+                      <button
+                        onClick={async () => {
+                          const code = rewardsSnapshot?.referral?.myCode || '';
+                          if (!code) return;
+                          try {
+                            await navigator.clipboard.writeText(code);
+                            setCopiedReferralCode(true);
+                            window.setTimeout(() => setCopiedReferralCode(false), 1200);
+                          } catch {
+                            // clipboard access is best effort
+                          }
+                        }}
+                        disabled={!rewardsSnapshot?.referral?.myCode}
+                        className="rounded-xl border border-slate-200 bg-white p-2 text-slate-600 disabled:opacity-50"
+                        aria-label="Copy referral code"
+                      >
+                        {copiedReferralCode ? <CheckCircle2 size={16} className="text-emerald-600" /> : <Copy size={16} />}
                       </button>
                     </div>
+                    <p className="mt-4 text-sm leading-relaxed font-semibold text-slate-600">
+                      Share this code with your friends. On first paid subscription, you get
+                      {' '}
+                      <span className="font-black text-teal-600">
+                        {rewardsSnapshot?.referral?.referralReward?.referrer || 0} points
+                      </span>
+                      {' '}and they get
+                      {' '}
+                      <span className="font-black text-teal-600">
+                        {rewardsSnapshot?.referral?.referralReward?.referred || 0} points.
+                      </span>
+                    </p>
+                    <p className="mt-auto pt-4 text-[11px] font-semibold text-slate-500">
+                      Monthly invite cap: {rewardsInviteCap}
+                    </p>
                   </div>
-                </div>
-              ))}
-            </div>
+
+                  <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-7 min-h-[220px] flex flex-col">
+                    <p className="text-xs font-bold tracking-wide text-slate-500">Subscription Status</p>
+                    <p className="mt-3 text-xl md:text-2xl font-black text-slate-900">
+                      Active Plan: {rewardsActivePlanLabel}
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-slate-600">
+                      Expires: {rewardsSnapshot?.subscription?.endAt ? new Date(rewardsSnapshot.subscription.endAt).toLocaleDateString() : '—'}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold text-slate-600">
+                      Status: {toTitleCase(rewardsSnapshot?.subscription?.status || 'inactive')}
+                    </p>
+                    <button
+                      onClick={() => (setView ? setView('billing-manage') : undefined)}
+                      className="mt-auto inline-flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-5 py-2.5 text-xs font-bold text-teal-700 hover:bg-teal-100"
+                    >
+                      Manage Billing <ExternalLink size={12} />
+                    </button>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5 md:p-7">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <h4 className="text-2xl font-black tracking-tight text-slate-900">Points Earned by Milestone</h4>
+                      <p className="mt-1 text-xs font-semibold text-slate-600">Milestone completion progress and points unlocked.</p>
+                    </div>
+                    <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-bold text-teal-700 w-fit">
+                      {milestoneEarnedPoints}/{milestoneTotalPoints} Points
+                    </span>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="h-4 rounded-full bg-slate-200 overflow-hidden flex">
+                      {milestoneProgressRows.map((row, index) => (
+                        <div
+                          key={row.eventType}
+                          className="relative h-full"
+                          style={{ width: `${(row.points / Math.max(1, milestoneTotalPoints)) * 100}%` }}
+                        >
+                          <div
+                            className={`h-full transition-all duration-700 ease-out ${MILESTONE_SEGMENT_CLASSES[index % MILESTONE_SEGMENT_CLASSES.length]} ${row.completed ? 'opacity-100' : 'opacity-30'}`}
+                            style={{
+                              width: animateMilestoneBars ? (row.completed ? '100%' : '0%') : '0%',
+                              transitionDelay: `${index * 110}ms`,
+                            }}
+                          />
+                          {index < milestoneProgressRows.length - 1 && (
+                            <span className="absolute top-0 right-0 h-full w-px bg-white/70" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {milestoneProgressRows.map((row, index) => (
+                        <div key={row.eventType} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`h-2.5 w-2.5 rounded-full ${MILESTONE_SEGMENT_CLASSES[index % MILESTONE_SEGMENT_CLASSES.length]}`} />
+                            <p className="text-xs font-black text-slate-800 truncate">{row.label}</p>
+                          </div>
+                          <p className={`text-[11px] font-black whitespace-nowrap ${row.completed ? 'text-emerald-700' : 'text-slate-500'}`}>
+                            {row.earnedPoints}/{row.points} pts
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5 md:p-7">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <h4 className="text-2xl font-black tracking-tight text-slate-900">Points History</h4>
+                    <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-bold text-teal-700 w-fit">
+                      Lifetime Earnings {rewardsLifetimeEarnings}
+                    </span>
+                  </div>
+
+                  <div className="mt-5 rounded-[1.6rem] border border-slate-200 bg-white overflow-hidden">
+                    <div className="grid grid-cols-[1.2fr_0.8fr_0.5fr] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs font-semibold text-slate-500">Event</p>
+                      <p className="text-xs font-semibold text-slate-500">Date</p>
+                      <p className="text-xs font-semibold text-slate-500 text-right">Points</p>
+                    </div>
+
+                    {recentRewardActivity.length === 0 ? (
+                      <div className="px-4 py-6 text-sm font-semibold text-slate-600">No points activity yet.</div>
+                    ) : (
+                      <div className="divide-y divide-slate-200">
+                        {recentRewardActivity.map((item) => {
+                          const points = Number(item.points || 0);
+                          const label = REWARD_EVENT_META.find((row) => row.eventType === item.eventType)?.label || item.eventType;
+                          return (
+                            <div key={item.id} className="grid grid-cols-[1.2fr_0.8fr_0.5fr] gap-2 items-center px-4 py-4">
+                              <div className="flex items-center gap-3">
+                                <span className="h-9 w-9 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-500">
+                                  <Sparkles size={14} />
+                                </span>
+                                <p className="text-sm font-black tracking-wide text-slate-900">{label}</p>
+                              </div>
+                              <p className="text-sm font-semibold text-slate-600">{new Date(item.createdAt).toLocaleDateString()}</p>
+                              <p className={`text-sm font-black text-right ${points >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                {points >= 0 ? '+' : ''}{points}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {activeTab === 'datalab' && (
+      {mode === 'settings' && activeTab === 'planning' && (
+        <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
+          <div className="bg-white p-6 md:p-8 rounded-[3rem] border border-slate-200 shadow-sm space-y-6">
+            <section className="rounded-[2rem] border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-5 md:p-6">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div>
+                  <h3 className="text-2xl md:text-3xl font-black text-slate-900">Planner Assumptions</h3>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">
+                    Set core return and inflation assumptions, then shape them by timeline buckets.
+                  </p>
+                </div>
+                <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black tracking-wide ${
+                  bucketError ? 'border-rose-200 bg-rose-50 text-rose-600' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}>
+                  <Sparkles size={14} />
+                  {bucketError ? 'Bucket health needs attention' : 'Bucket health is valid'}
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+                  <p className="text-[11px] font-semibold text-slate-500">Buckets Configured</p>
+                  <p className="mt-1 text-xl font-black text-slate-900">{discountSettings.buckets.length}</p>
+                </div>
+                <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+                  <p className="text-[11px] font-semibold text-slate-500">Discount Mode</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{discountSettings.useBuckets ? 'Bucketed' : 'Single Default'}</p>
+                </div>
+                <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+                  <p className="text-[11px] font-semibold text-slate-500">Inflation Mode</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{discountSettings.useBucketInflation ? 'Bucketed' : 'Single Default'}</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-2 text-[11px] font-black tracking-wide text-slate-600">
+                      <SlidersHorizontal size={14} />
+                      Discount Settings
+                    </div>
+                    <p className="text-sm font-semibold text-slate-600">
+                      Use timeline-based discount rates or a single default rate across all years.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={discountSettings.useBuckets}
+                    onClick={() => updateDiscountSettings({ useBuckets: !discountSettings.useBuckets })}
+                    className={`relative inline-flex h-8 w-14 shrink-0 rounded-full transition-colors ${
+                      discountSettings.useBuckets ? 'bg-teal-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all ${
+                        discountSettings.useBuckets ? 'left-7' : 'left-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                  <label className="text-[11px] font-semibold text-slate-500">Default Discount Rate</label>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={30}
+                      step={0.1}
+                      value={discountSettings.defaultDiscountRate}
+                      onChange={(e) => updateDiscountSettings({ defaultDiscountRate: parseNumberInput(e.target.value, 0) })}
+                      className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-slate-900 outline-none"
+                    />
+                    <span className="text-xs font-black text-slate-500">%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-2 text-[11px] font-black tracking-wide text-slate-600">
+                      <Layers size={14} />
+                      Inflation Settings
+                    </div>
+                    <p className="text-sm font-semibold text-slate-600">
+                      Apply separate inflation curves by timeline bucket when long-horizon prices vary.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={discountSettings.useBucketInflation}
+                    onClick={() => updateDiscountSettings({ useBucketInflation: !discountSettings.useBucketInflation })}
+                    className={`relative inline-flex h-8 w-14 shrink-0 rounded-full transition-colors ${
+                      discountSettings.useBucketInflation ? 'bg-teal-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all ${
+                        discountSettings.useBucketInflation ? 'left-7' : 'left-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                  <label className="text-[11px] font-semibold text-slate-500">Default Inflation Rate</label>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={30}
+                      step={0.1}
+                      value={discountSettings.defaultInflationRate}
+                      onChange={(e) => updateDiscountSettings({ defaultInflationRate: parseNumberInput(e.target.value, 0) })}
+                      className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-slate-900 outline-none"
+                    />
+                    <span className="text-xs font-black text-slate-500">%</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="inline-flex items-center gap-2 text-lg font-black text-slate-900">
+                  <CalendarRange size={18} />
+                  Bucket Templates
+                </h4>
+                <p className="text-xs font-semibold text-slate-500">Click a template to auto-fill bucket setup</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => applyTemplate('starter')}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-teal-300 hover:bg-teal-50/40"
+                >
+                  <p className="text-sm font-black text-slate-900">Starter</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Simple near/mid/long assumptions.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyTemplate('balanced')}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-teal-300 hover:bg-teal-50/40"
+                >
+                  <p className="text-sm font-black text-slate-900">Balanced</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Pre and post-retirement split assumptions.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyTemplate('growth')}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-teal-300 hover:bg-teal-50/40"
+                >
+                  <p className="text-sm font-black text-slate-900">Growth</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Higher long-horizon return assumptions.</p>
+                </button>
+              </div>
+            </section>
+
+            {bucketError && (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                <p className="inline-flex items-center gap-2 text-sm font-black text-rose-700">
+                  <AlertTriangle size={16} />
+                  {bucketError}
+                </p>
+              </div>
+            )}
+
+            <section className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h4 className="text-xl font-black text-slate-900">Bucket Editor</h4>
+                  <p className="text-xs font-semibold text-slate-500 mt-1">Define year coverage, rates, and inflation per horizon block.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addBucket}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-black tracking-wide text-white transition hover:bg-teal-600"
+                >
+                  <Plus size={14} />
+                  Add Bucket
+                </button>
+              </div>
+
+              {discountSettings.buckets.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-[11px] font-semibold text-slate-500">Coverage Preview</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {discountSettings.buckets.map((bucket) => {
+                      const { start, end } = resolveBucketOffsets(bucket);
+                      return (
+                        <div key={`chip-${bucket.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <p className="text-xs font-black text-slate-800">{bucket.name}</p>
+                          <p className="text-[11px] font-semibold text-slate-500">
+                            {start}Y → {end === Infinity ? '∞' : `${end}Y`}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {discountSettings.buckets.length === 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600">
+                  No buckets configured yet. Add your first bucket to start timeline-based assumptions.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {discountSettings.buckets.map((bucket, index) => {
+                    const { start, end } = resolveBucketOffsets(bucket);
+                    return (
+                      <div key={bucket.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:p-5">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] font-black text-slate-500">Bucket {index + 1}</p>
+                            <p className="mt-1 text-sm font-black text-slate-900">
+                              Coverage: {start}Y to {end === Infinity ? '∞' : `${end}Y`}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeBucket(index)}
+                            className="inline-flex items-center gap-2 self-start rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 transition hover:bg-rose-100"
+                          >
+                            <Trash2 size={14} />
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-semibold text-slate-500">Bucket Name</label>
+                            <input
+                              type="text"
+                              value={bucket.name}
+                              onChange={(e) => updateBucket(index, { name: e.target.value })}
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none"
+                              placeholder="Eg. Early Career"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-semibold text-slate-500">Start Boundary</label>
+                            <div className="grid grid-cols-[1fr_90px] gap-2">
+                              <select
+                                value={bucket.startType}
+                                onChange={(e) => updateBucket(index, { startType: e.target.value as DiscountBucket['startType'] })}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
+                              >
+                                <option value="Offset">Offset</option>
+                                <option value="Retirement">Retirement</option>
+                              </select>
+                              <input
+                                type="number"
+                                value={bucket.startOffset}
+                                onChange={(e) => updateBucket(index, { startOffset: parseIntegerInput(e.target.value, 0) })}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none"
+                              />
+                            </div>
+                            <p className="text-[11px] font-semibold text-slate-500">
+                              {formatBucketBoundary(bucket.startType, bucket.startOffset)}
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-semibold text-slate-500">End Boundary</label>
+                            <div className="grid grid-cols-[1fr_90px] gap-2">
+                              <select
+                                value={bucket.endType}
+                                onChange={(e) => updateBucket(index, { endType: e.target.value as DiscountBucket['endType'] })}
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
+                              >
+                                <option value="Offset">Offset</option>
+                                <option value="Retirement">Retirement</option>
+                                <option value="Infinity">Infinity</option>
+                              </select>
+                              {bucket.endType !== 'Infinity' ? (
+                                <input
+                                  type="number"
+                                  value={bucket.endOffset ?? 0}
+                                  onChange={(e) => updateBucket(index, { endOffset: parseIntegerInput(e.target.value, 0) })}
+                                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none"
+                                />
+                              ) : (
+                                <div className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm font-black text-slate-500">
+                                  ∞
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-[11px] font-semibold text-slate-500">
+                              {formatBucketBoundary(bucket.endType, bucket.endOffset)}
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-semibold text-slate-500">Discount Rate</label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step={0.1}
+                                value={bucket.discountRate ?? ''}
+                                onChange={(e) => updateBucket(index, { discountRate: parseNumberInput(e.target.value, discountSettings.defaultDiscountRate) })}
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-sm font-bold text-slate-900 outline-none"
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-500">%</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-semibold text-slate-500">Inflation Rate</label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step={0.1}
+                                value={bucket.inflationRate ?? ''}
+                                onChange={(e) => updateBucket(index, { inflationRate: parseNumberInput(e.target.value, discountSettings.defaultInflationRate) })}
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-sm font-bold text-slate-900 outline-none"
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-500">%</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
+
+      {mode === 'data-trust' && (
         <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
           <div className="bg-white p-6 md:p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-8">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -729,6 +1342,31 @@ const Settings: React.FC<SettingsProps> = ({ state, updateState, onLogout }) => 
             </div>
           </div>
         </div>
+      )}
+
+      {mode === 'settings' && (
+        <footer className="max-w-5xl mx-auto rounded-[2rem] border border-slate-200 bg-white p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Data and Trust Page</p>
+            <p className="text-xs font-semibold text-slate-600 mt-1">
+              Data transparency and permission controls now live on a dedicated URL.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => (setView ? setView('data-trust') : undefined)}
+              className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-xs font-black uppercase tracking-widest text-teal-700"
+            >
+              Open Data and Trust
+            </button>
+            <a
+              href="/data-and-trust"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700"
+            >
+              /data-and-trust
+            </a>
+          </div>
+        </footer>
       )}
     </div>
   );

@@ -4,8 +4,8 @@ import {
   LayoutDashboard, Target, ShieldCheck, 
   TrendingUp, X, Users, Calculator, 
   Landmark, BrainCircuit, ChevronRight, Zap,
-  BarChartHorizontal, ClipboardList, Wallet, ListChecks, CalendarRange,
-  ArrowDownRight, Receipt, CreditCard, Shield
+  BarChartHorizontal, ClipboardList, ListChecks, CalendarRange,
+  ArrowDownRight, Receipt, CreditCard
 } from 'lucide-react';
 import { View, FinanceState } from '../types';
 import { getJourneyProgress } from '../lib/journey';
@@ -36,24 +36,23 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onClose, state 
 
   const navGroups = [
     {
-      label: 'Main Ops',
+      label: 'Main',
       items: [
-        { id: 'dashboard', label: 'Command Center', icon: LayoutDashboard },
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       ]
     },
     {
-      label: 'Financial Node',
+      label: 'Financial Profile',
       items: [
         { id: 'family', label: 'Household', icon: Users },
-        { id: 'inflow', label: 'Inflow (Income)', icon: TrendingUp },
-        { id: 'outflow', label: 'Outflow (Burn)', icon: ArrowDownRight },
+        { id: 'inflow', label: 'Income', icon: TrendingUp },
+        { id: 'outflow', label: 'Expenses', icon: ArrowDownRight },
         { id: 'assets', label: 'Assets', icon: Landmark },
         { id: 'debt', label: 'Liabilities', icon: CreditCard },
-        { id: 'insurance', label: 'Insurance', icon: Shield },
       ]
     },
     {
-      label: 'Future Missions',
+      label: 'Goals',
       items: [
         { id: 'goals', label: 'Life Goals', icon: Target },
       ]

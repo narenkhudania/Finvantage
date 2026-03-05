@@ -30,6 +30,7 @@ import {
 import { clampNumber, parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencyConfig, getCurrencySymbol } from '../lib/currency';
 import { getRiskReturnAssumption } from '../lib/financeMath';
+import PlanningAssistStrip from './common/PlanningAssistStrip';
 
 const ASSET_CLASSES: { name: AssetType; icon: any; subCategories: string[] }[] = [
   { name: 'Liquid', icon: Landmark, subCategories: ['Savings Account', 'Cash', 'Liquid Mutual Funds', 'Overnight Funds'] },
@@ -102,6 +103,11 @@ const Assets: React.FC<{ state: FinanceState; updateState: (data: Partial<Financ
   const [goldGrams, setGoldGrams] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [equityShockPct, setEquityShockPct] = useState(-20);
+  const [debtShockPct, setDebtShockPct] = useState(0);
+  const [realEstateShockPct, setRealEstateShockPct] = useState(-10);
+  const [goldShockPct, setGoldShockPct] = useState(5);
+  const [personalShockPct, setPersonalShockPct] = useState(-15);
   const [newAsset, setNewAsset] = useState<Partial<Asset>>(buildDefaultDraft());
 
   const currentYear = new Date().getFullYear();
@@ -164,6 +170,103 @@ const Assets: React.FC<{ state: FinanceState; updateState: (data: Partial<Financ
       pct: (value: number) => (total > 0 ? (value / total) * 100 : 0),
     };
   }, [summary.byCategory, totalLiabilities]);
+
+  const assetAnalysis = useMemo(() => {
+    const shockMap: Record<AssetType, number> = {
+      Liquid: 0,
+      Debt: debtShockPct,
+      Equity: equityShockPct,
+      'Real Estate': realEstateShockPct,
+      'Gold/Silver': goldShockPct,
+      Personal: personalShockPct,
+    };
+
+    const stressedByCategory = (Object.keys(summary.byCategory) as AssetType[]).reduce((acc, category) => {
+      const baseValue = summary.byCategory[category];
+      const shockedValue = Math.max(0, baseValue * (1 + shockMap[category] / 100));
+      acc[category] = shockedValue;
+      return acc;
+    }, {
+      Liquid: 0,
+      Debt: 0,
+      Equity: 0,
+      'Real Estate': 0,
+      'Gold/Silver': 0,
+      Personal: 0,
+    } as Record<AssetType, number>);
+
+    const stressedAssets = Object.values(stressedByCategory).reduce((sum, value) => sum + value, 0);
+    const stressedNetWorth = stressedAssets - totalLiabilities;
+
+    const goalReadyAssets = state.assets
+      .filter(asset => asset.availableForGoals)
+      .reduce((sum, asset) => sum + Math.max(0, Number(asset.currentValue || 0)), 0);
+
+    const liquidCoverageBase = summary.byCategory.Liquid + summary.byCategory.Debt;
+    const monthlyBurn =
+      state.detailedExpenses.reduce((sum, item) => sum + Math.max(0, Number(item.amount || 0)), 0)
+      + state.loans.reduce((sum, loan) => sum + Math.max(0, Number(loan.emi || 0)), 0);
+    const liquidityRunwayMonths = monthlyBurn > 0 ? liquidCoverageBase / monthlyBurn : 0;
+
+    const categoryRows = (Object.entries(summary.byCategory) as [AssetType, number][])
+      .filter(([, value]) => value > 0)
+      .sort((a, b) => b[1] - a[1]);
+    const topCategory = categoryRows[0];
+    const concentrationPct = topCategory && summary.total > 0 ? (topCategory[1] / summary.total) * 100 : 0;
+    const liquidValue = summary.byCategory.Liquid + summary.byCategory.Debt;
+    const nearLiquidValue = summary.byCategory['Gold/Silver'] + summary.byCategory.Equity;
+    const illiquidValue = summary.byCategory['Real Estate'] + summary.byCategory.Personal;
+    const goalLinkedAvailabilityPct = summary.total > 0 ? (goalReadyAssets / summary.total) * 100 : 0;
+    const weightedGrowth = state.assets.reduce((sum, asset) => {
+      const value = Math.max(0, Number(asset.currentValue || 0));
+      const growth = Number(asset.growthRate || 0);
+      return sum + value * growth;
+    }, 0);
+    const weightedGrowthRate = summary.total > 0 ? weightedGrowth / summary.total : 0;
+    const inflationAssumption = Number(state.discountSettings?.defaultInflationRate ?? state.insuranceAnalysis?.inflation ?? 6);
+    const realReturnEstimate = weightedGrowthRate - inflationAssumption;
+    const depreciatingAssets = state.assets.filter(asset => Number(asset.growthRate || 0) < 0);
+    const depreciatingValue = depreciatingAssets.reduce((sum, asset) => sum + Math.max(0, Number(asset.currentValue || 0)), 0);
+    const annualDepreciationDrag = depreciatingAssets.reduce((sum, asset) => {
+      const value = Math.max(0, Number(asset.currentValue || 0));
+      const rate = Math.abs(Number(asset.growthRate || 0));
+      return sum + (value * rate) / 100;
+    }, 0);
+
+    return {
+      stressedByCategory,
+      stressedAssets,
+      stressedNetWorth,
+      goalReadyAssets,
+      liquidityRunwayMonths,
+      monthlyBurn,
+      topCategory,
+      concentrationPct,
+      liquidValue,
+      nearLiquidValue,
+      illiquidValue,
+      goalLinkedAvailabilityPct,
+      weightedGrowthRate,
+      inflationAssumption,
+      realReturnEstimate,
+      depreciatingValue,
+      annualDepreciationDrag,
+    };
+  }, [
+    summary.byCategory,
+    summary.total,
+    totalLiabilities,
+    state.assets,
+    state.detailedExpenses,
+    state.loans,
+    state.discountSettings?.defaultInflationRate,
+    state.insuranceAnalysis?.inflation,
+    equityShockPct,
+    debtShockPct,
+    realEstateShockPct,
+    goldShockPct,
+    personalShockPct,
+  ]);
 
   const projectedEquity = useMemo(() => {
     const assumedReturn = getRiskReturnAssumption(state.riskProfile?.level);
@@ -325,6 +428,44 @@ const Assets: React.FC<{ state: FinanceState; updateState: (data: Partial<Financ
     updateState({ assets: state.assets.filter(asset => asset.id !== id) });
   };
 
+  const assetAssistStats = useMemo(() => {
+    const liquidityTone = assetAnalysis.liquidityRunwayMonths >= 12
+      ? 'positive'
+      : assetAnalysis.liquidityRunwayMonths >= 6
+        ? 'warning'
+        : 'critical';
+    const realReturnTone = assetAnalysis.realReturnEstimate >= 0 ? 'positive' : 'critical';
+    const concentrationTone = assetAnalysis.concentrationPct <= 45 ? 'positive' : 'warning';
+
+    return [
+      {
+        label: 'Net Worth',
+        value: formatCurrency(netWorthSummary.netWorth, currencyCountry),
+        tone: netWorthSummary.netWorth >= 0 ? 'positive' : 'critical',
+      },
+      {
+        label: 'Goal-Linked Assets',
+        value: `${assetAnalysis.goalLinkedAvailabilityPct.toFixed(1)}%`,
+        tone: assetAnalysis.goalLinkedAvailabilityPct >= 60 ? 'positive' : 'warning',
+      },
+      {
+        label: 'Liquidity Runway',
+        value: `${assetAnalysis.liquidityRunwayMonths.toFixed(1)} months`,
+        tone: liquidityTone,
+      },
+      {
+        label: 'Concentration',
+        value: `${assetAnalysis.concentrationPct.toFixed(1)}%`,
+        tone: concentrationTone,
+      },
+      {
+        label: 'Real Return',
+        value: `${assetAnalysis.realReturnEstimate >= 0 ? '+' : ''}${assetAnalysis.realReturnEstimate.toFixed(1)}%`,
+        tone: realReturnTone,
+      },
+    ] as const;
+  }, [assetAnalysis, netWorthSummary.netWorth, currencyCountry]);
+
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-24">
       {notice && (
@@ -333,31 +474,29 @@ const Assets: React.FC<{ state: FinanceState; updateState: (data: Partial<Financ
         </div>
       )}
 
-      <div className="surface-dark p-10 md:p-14 rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[340px] h-[340px] bg-teal-600/10 blur-[90px] rounded-full translate-x-1/3 -translate-y-1/3" />
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
-          <div className="space-y-3 text-left">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
-              <Sparkles size={14} /> Asset Inventory
-            </div>
-            <h2 className="text-4xl md:text-5xl font-black tracking-tight">Assets & Investments</h2>
-            <p className="text-slate-300 text-sm md:text-base font-medium max-w-xl">
-              Add core asset details first. Advanced assumptions are optional and can be adjusted later.
-            </p>
-          </div>
-
+      <PlanningAssistStrip
+        title="Balance growth, liquidity, and goal usability"
+        description="This page helps you test allocation quality and understand which assets can actually fund goals."
+        tip="Mark only truly redeemable assets as goal-available to avoid overestimating funding strength."
+        actions={(
           <button
+            type="button"
             onClick={() => {
               setShowAdd(prev => !prev);
               if (!showAdd) resetDraft();
             }}
-            className="px-8 py-5 bg-teal-600 hover:bg-teal-500 text-white rounded-[1.75rem] transition-all flex items-center gap-3 font-black uppercase text-[11px] tracking-[0.2em] shadow-xl"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-2xl hover:bg-teal-500 transition-colors font-black uppercase text-[10px] tracking-widest shadow-lg"
           >
-            <Plus size={18} />
+            <Plus size={14} />
             {showAdd ? 'Close Form' : 'Add Asset'}
           </button>
-        </div>
-      </div>
+        )}
+        stats={assetAssistStats.map((stat) => ({
+          label: stat.label,
+          value: stat.value,
+          tone: stat.tone,
+        }))}
+      />
 
       {showAdd && (
         <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden">
@@ -669,6 +808,137 @@ const Assets: React.FC<{ state: FinanceState; updateState: (data: Partial<Financ
             <h4 className="text-lg font-black text-slate-900">{formatCurrency(summary.byCategory[group.name], currencyCountry)}</h4>
           </div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_1fr] gap-6">
+        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6 text-left">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Asset Stress Lab</p>
+              <h3 className="text-2xl font-black text-slate-900">Play with Market Scenarios</h3>
+            </div>
+            <div className="px-3 py-2 rounded-2xl border border-slate-200 bg-slate-50 text-right">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Concentration</p>
+              <p className="text-lg font-black text-slate-900">{assetAnalysis.concentrationPct.toFixed(1)}%</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Equity shock</label>
+                <span className="text-sm font-black text-slate-900">{equityShockPct}%</span>
+              </div>
+              <input type="range" min={-60} max={20} step={1} value={equityShockPct} onChange={event => setEquityShockPct(Number(event.target.value))} className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-rose-500 cursor-pointer" />
+            </div>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Debt shock</label>
+                <span className="text-sm font-black text-slate-900">{debtShockPct}%</span>
+              </div>
+              <input type="range" min={-20} max={20} step={1} value={debtShockPct} onChange={event => setDebtShockPct(Number(event.target.value))} className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-amber-500 cursor-pointer" />
+            </div>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Real estate shock</label>
+                <span className="text-sm font-black text-slate-900">{realEstateShockPct}%</span>
+              </div>
+              <input type="range" min={-40} max={20} step={1} value={realEstateShockPct} onChange={event => setRealEstateShockPct(Number(event.target.value))} className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-orange-500 cursor-pointer" />
+            </div>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gold shock</label>
+                <span className="text-sm font-black text-slate-900">{goldShockPct}%</span>
+              </div>
+              <input type="range" min={-30} max={40} step={1} value={goldShockPct} onChange={event => setGoldShockPct(Number(event.target.value))} className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-yellow-500 cursor-pointer" />
+            </div>
+            <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Personal assets shock</label>
+                <span className="text-sm font-black text-slate-900">{personalShockPct}%</span>
+              </div>
+              <input type="range" min={-50} max={10} step={1} value={personalShockPct} onChange={event => setPersonalShockPct(Number(event.target.value))} className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-slate-500 cursor-pointer" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stressed assets</p>
+              <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(assetAnalysis.stressedAssets, currencyCountry)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stressed net worth</p>
+              <p className={`text-lg font-black mt-1 ${assetAnalysis.stressedNetWorth >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {formatCurrency(assetAnalysis.stressedNetWorth, currencyCountry)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Goal-ready assets</p>
+              <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(assetAnalysis.goalReadyAssets, currencyCountry)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Liquidity runway</p>
+              <p className="text-lg font-black text-slate-900 mt-1">{assetAnalysis.liquidityRunwayMonths.toFixed(1)} months</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="surface-dark p-6 md:p-8 rounded-[2.5rem] text-white space-y-5 shadow-xl text-left">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Risk Signal</p>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Largest concentration</p>
+            <p className="text-xl font-black text-teal-400">
+              {assetAnalysis.topCategory ? `${assetAnalysis.topCategory[0]} (${assetAnalysis.concentrationPct.toFixed(1)}%)` : 'No concentration data'}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-1.5">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Liquidity tiers</p>
+            <p className="text-xs font-semibold text-slate-200">Liquid/Near-liquid: {formatCurrency(assetAnalysis.liquidValue + assetAnalysis.nearLiquidValue, currencyCountry)}</p>
+            <p className="text-xs font-semibold text-slate-200">Illiquid: {formatCurrency(assetAnalysis.illiquidValue, currencyCountry)}</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-1.5">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Goal-linked assets</p>
+            <p className="text-lg font-black text-emerald-300">{assetAnalysis.goalLinkedAvailabilityPct.toFixed(1)}%</p>
+            <p className="text-xs font-semibold text-slate-200">Available for goals: {formatCurrency(assetAnalysis.goalReadyAssets, currencyCountry)}</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-1.5">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Real return estimate</p>
+            <p className={`text-lg font-black ${assetAnalysis.realReturnEstimate >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {assetAnalysis.realReturnEstimate >= 0 ? '+' : ''}{assetAnalysis.realReturnEstimate.toFixed(2)}%
+            </p>
+            <p className="text-xs font-semibold text-slate-200">
+              Weighted growth {assetAnalysis.weightedGrowthRate.toFixed(2)}% - inflation {assetAnalysis.inflationAssumption.toFixed(2)}%.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-1.5">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Depreciating asset drag</p>
+            <p className="text-xs font-semibold text-slate-200">Depreciating base: {formatCurrency(assetAnalysis.depreciatingValue, currencyCountry)}</p>
+            <p className="text-xs font-semibold text-amber-300">Annual drag: {formatCurrency(assetAnalysis.annualDepreciationDrag, currencyCountry)}</p>
+          </div>
+          <div className="space-y-3">
+            {(Object.entries(assetAnalysis.stressedByCategory) as [AssetType, number][])
+              .filter(([, value]) => value > 0)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .map(([category, value]) => (
+                <div key={category} className="space-y-1">
+                  <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <span>{category}</span>
+                    <span>{formatCurrency(value, currencyCountry)}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                    <div className="h-full rounded-full bg-teal-400" style={{ width: `${Math.min(100, (value / (assetAnalysis.stressedAssets || 1)) * 100)}%` }} />
+                  </div>
+                </div>
+              ))}
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Action cue</p>
+            <p className="text-sm font-semibold text-slate-200 mt-2">
+              Use this stress view to decide what portion stays protected vs available for goals during volatility.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

@@ -24,8 +24,8 @@ const AdminComplianceModule: React.FC<AdminComplianceModuleProps> = ({
         action={<span className="text-xs font-black uppercase tracking-wider text-slate-500">{kycQueue.length} records</span>}
       />
 
-      <div className="mt-4 overflow-auto">
-        <table className="min-w-[620px] xl:min-w-[820px] 2xl:min-w-[920px] w-full text-sm">
+      <div className="mt-4 admin-table-wrap">
+        <table className="admin-table">
           <thead className="bg-slate-50">
             <tr>
               {['Customer', 'Status', 'Risk Score', 'Risk Band', 'Updated', 'Actions'].map((header) => (

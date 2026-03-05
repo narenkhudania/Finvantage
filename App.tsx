@@ -2,7 +2,7 @@
 // Updated: saveFinanceData() now returns DB-assigned UUIDs which
 // are merged back into state so subsequent saves use real UUIDs.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
@@ -26,9 +26,10 @@ import ActionPlan from './components/ActionPlan';
 import MonthlySavingsPlan from './components/MonthlySavingsPlan';
 import Settings from './components/Settings';
 import Notifications from './components/Notifications';
-import AIAdvisor from './components/AIAdvisor';
 import Cashflow from './components/Cashflow';
 import SupportCenter from './components/SupportCenter';
+import { StaticInfoPage, SupportDeskPage } from './components/site/PublicInfoPages';
+import RewardCelebration, { type RewardCelebrationPayload } from './components/RewardCelebration';
 import { FinanceState, View, DetailedIncome, IncomeSource } from './types';
 import { LayoutDashboard, Bell, ListChecks, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { supabase } from './services/supabase';
@@ -36,6 +37,7 @@ import { signOut } from './services/authService';
 import { saveFinanceData, loadFinanceData } from './services/dbService';
 import { getSelfAdminFlag } from './services/admin/adminService';
 import { flushActivityEvents, setUsageTrackingUserId, trackEvent } from './services/usageTracking';
+import { awardUsagePoints, getBillingSnapshot, type BillingSnapshot } from './services/billingService';
 import { getJourneyProgress } from './lib/journey';
 import { setActiveCountry } from './lib/currency';
 import { applySeoMeta } from './services/seoMeta';
@@ -48,6 +50,16 @@ import {
 
 const LOCAL_KEY        = 'finvantage_active_session';
 const SAVE_DEBOUNCE_MS = 1500;
+
+const AIAdvisor = lazy(() => import('./components/AIAdvisor'));
+const BillingManagePage = lazy(async () => ({
+  default: (await import('./components/site/BillingPages')).BillingManagePage,
+}));
+const BillingLegalPage = lazy(async () => ({
+  default: (await import('./components/site/BillingPages')).BillingLegalPage,
+}));
+const BlogIndexPage = lazy(() => import('./components/blog/BlogIndexPage'));
+const BlogPostPage = lazy(() => import('./components/blog/BlogPostPage'));
 
 const INITIAL_INCOME: DetailedIncome = {
   salary: 0, bonus: 0, reimbursements: 0,
@@ -157,6 +169,103 @@ const normalizeState = (raw: Partial<FinanceState> | null | undefined): FinanceS
   };
 };
 
+const BILLING_APP_PATHS = new Set([
+  '/pricing',
+  '/billing/manage',
+  '/settings/billing',
+  '/data-and-trust',
+  '/subscription-terms',
+  '/refund-policy',
+  '/cancellation-policy',
+  '/legal/terms',
+  '/legal/refund-policy',
+  '/legal/cancellation-policy',
+]);
+
+const PUBLIC_INFO_PATHS = new Set([
+  '/support',
+  '/contact-us',
+  '/faq',
+  '/privacy-policy',
+  '/terms-and-condition',
+  '/legal',
+  '/site-map',
+  '/about',
+  '/blog',
+]);
+
+const normalizePathname = (value: string) => value.replace(/\/+$/, '').toLowerCase() || '/';
+
+const getBillingViewFromPath = (pathname: string): View | null => {
+  const normalized = normalizePathname(pathname);
+  if (normalized === '/pricing') return 'pricing';
+  if (normalized === '/billing/manage' || normalized === '/settings/billing') return 'billing-manage';
+  if (normalized === '/data-and-trust') return 'data-trust';
+  if (normalized === '/subscription-terms' || normalized === '/legal/terms') return 'subscription-terms';
+  if (normalized === '/refund-policy' || normalized === '/legal/refund-policy') return 'refund-policy';
+  if (normalized === '/cancellation-policy' || normalized === '/legal/cancellation-policy') return 'cancellation-policy';
+  return null;
+};
+
+const getPathForBillingView = (view: View): string | null => {
+  if (view === 'pricing') return '/pricing';
+  if (view === 'billing-manage') return '/billing/manage';
+  if (view === 'data-trust') return '/data-and-trust';
+  if (view === 'subscription-terms') return '/legal/terms';
+  if (view === 'refund-policy') return '/legal/refund-policy';
+  if (view === 'cancellation-policy') return '/legal/cancellation-policy';
+  return null;
+};
+
+const getPublicViewFromPath = (pathname: string): { view: View | null; blogSlug: string | null } => {
+  const normalized = normalizePathname(pathname);
+  if (normalized === '/support' || normalized === '/contact-us') return { view: 'support', blogSlug: null };
+  if (normalized === '/faq') return { view: 'faq', blogSlug: null };
+  if (normalized === '/privacy-policy') return { view: 'privacy-policy', blogSlug: null };
+  if (normalized === '/terms-and-condition') return { view: 'terms-and-condition', blogSlug: null };
+  if (normalized === '/legal') return { view: 'legal', blogSlug: null };
+  if (normalized === '/site-map') return { view: 'site-map', blogSlug: null };
+  if (normalized === '/about') return { view: 'about', blogSlug: null };
+  if (normalized === '/blog') return { view: 'blog', blogSlug: null };
+  if (normalized.startsWith('/blog/')) {
+    const raw = pathname.replace(/\/+$/, '').split('/').slice(2).join('/');
+    const slug = decodeURIComponent(raw || '').trim();
+    if (slug) return { view: 'blog-post', blogSlug: slug };
+  }
+  return { view: null, blogSlug: null };
+};
+
+const getPathForPublicView = (view: View, blogSlug: string | null): string | null => {
+  if (view === 'support') return '/support';
+  if (view === 'faq') return '/faq';
+  if (view === 'privacy-policy') return '/privacy-policy';
+  if (view === 'terms-and-condition') return '/terms-and-condition';
+  if (view === 'legal') return '/legal';
+  if (view === 'site-map') return '/site-map';
+  if (view === 'about') return '/about';
+  if (view === 'blog') return '/blog';
+  if (view === 'blog-post' && blogSlug) return `/blog/${encodeURIComponent(blogSlug)}`;
+  return null;
+};
+
+const isRoutedAppPath = (pathname: string) => {
+  if (BILLING_APP_PATHS.has(pathname)) return true;
+  if (PUBLIC_INFO_PATHS.has(pathname)) return true;
+  return pathname.startsWith('/blog/');
+};
+
+const PUBLIC_INFO_VIEWS = new Set<View>([
+  'support',
+  'faq',
+  'privacy-policy',
+  'terms-and-condition',
+  'legal',
+  'site-map',
+  'about',
+  'blog',
+  'blog-post',
+]);
+
 // ── Cloud sync pill ───────────────────────────────────────────
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -183,12 +292,21 @@ const SyncPill: React.FC<{ status: SaveStatus }> = ({ status }) => {
 
 // ── App ───────────────────────────────────────────────────────
 const App: React.FC = () => {
-  const [view, setViewState]              = useState<View>('dashboard');
+  const [view, setViewState]              = useState<View>(() => {
+    const path = window.location.pathname;
+    return getBillingViewFromPath(path) || getPublicViewFromPath(path).view || 'dashboard';
+  });
+  const [publicBlogSlug, setPublicBlogSlug] = useState<string | null>(() => getPublicViewFromPath(window.location.pathname).blogSlug);
   const [showAuth, setShowAuth]           = useState(false);
   const [resumeProfile, setResumeProfile] = useState<FinanceState['profile'] | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRestoring, setIsRestoring]     = useState(true);
   const [saveStatus, setSaveStatus]       = useState<SaveStatus>('idle');
+  const [billingSnapshot, setBillingSnapshot] = useState<BillingSnapshot | null>(null);
+  const [advisorLaunchPrompt, setAdvisorLaunchPrompt] = useState<{ id: number; query: string } | null>(null);
+  const [chatLaunchAnimating, setChatLaunchAnimating] = useState(false);
+  const [rewardQueue, setRewardQueue] = useState<RewardCelebrationPayload[]>([]);
+  const [activeReward, setActiveReward] = useState<RewardCelebrationPayload | null>(null);
 
   const saveTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstRender = useRef(true);
@@ -203,6 +321,8 @@ const App: React.FC = () => {
     insuranceCount: number;
     hasRiskProfile: boolean;
   } | null>(null);
+  const advisorPromptIdRef = useRef(0);
+  const rewardToastIdRef = useRef(0);
 
   const [financeState, setFinanceState] = useState<FinanceState>(() => {
     const saved = localStorage.getItem(LOCAL_KEY);
@@ -211,8 +331,13 @@ const App: React.FC = () => {
     }
     return INITIAL_STATE;
   });
+  const journey = useMemo(() => getJourneyProgress(financeState), [financeState]);
+  const isPublicInfoView = PUBLIC_INFO_VIEWS.has(view);
 
   const setView = useCallback((nextView: View) => {
+    if (nextView !== 'blog-post') {
+      setPublicBlogSlug(null);
+    }
     setViewState((currentView) => {
       if (currentView === nextView) return currentView;
       viewHistoryRef.current = [...viewHistoryRef.current.slice(-24), currentView];
@@ -220,16 +345,90 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleGoBack = useCallback(() => {
-    setViewState((currentView) => {
-      if (currentView === 'dashboard') return currentView;
-      const history = viewHistoryRef.current;
-      if (!history.length) return 'dashboard';
-      const previous = history[history.length - 1];
-      viewHistoryRef.current = history.slice(0, -1);
-      return previous || 'dashboard';
-    });
+  const openAiAdvisorWithQuery = useCallback((query: string) => {
+    setChatLaunchAnimating(false);
+    window.requestAnimationFrame(() => setChatLaunchAnimating(true));
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setView('ai-advisor');
+      return;
+    }
+    advisorPromptIdRef.current += 1;
+    setAdvisorLaunchPrompt({ id: advisorPromptIdRef.current, query: trimmed });
+    setView('ai-advisor');
+  }, [setView]);
+
+  const refreshBillingSnapshot = useCallback(async (clearOnError = false) => {
+    try {
+      const snapshot = await getBillingSnapshot();
+      setBillingSnapshot(snapshot);
+      return snapshot;
+    } catch {
+      if (clearOnError) {
+        setBillingSnapshot(null);
+      }
+      return null;
+    }
   }, []);
+
+  const awardUsagePointsAndSync = useCallback(async (
+    eventType: string,
+    sourceRef?: string,
+    metadata?: Record<string, unknown>,
+  ) => {
+    try {
+      const result = await awardUsagePoints(eventType, sourceRef, metadata);
+      if (!result.skipped && Number(result.awarded || 0) > 0) {
+        const awarded = Number(result.awarded || 0);
+        setBillingSnapshot(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            points: {
+              ...prev.points,
+              balance: Number(prev.points?.balance || 0) + awarded,
+            },
+          };
+        });
+        rewardToastIdRef.current += 1;
+        setRewardQueue(prev => [
+          ...prev,
+          { id: rewardToastIdRef.current, eventType, points: awarded },
+        ]);
+        await refreshBillingSnapshot();
+      }
+    } catch {
+      // points awards are best effort and should not block app flows
+    }
+  }, [refreshBillingSnapshot]);
+
+  useEffect(() => {
+    if (!chatLaunchAnimating) return;
+    const timer = window.setTimeout(() => setChatLaunchAnimating(false), 540);
+    return () => window.clearTimeout(timer);
+  }, [chatLaunchAnimating]);
+
+  useEffect(() => {
+    if (activeReward || rewardQueue.length === 0) return;
+    const [next, ...rest] = rewardQueue;
+    setRewardQueue(rest);
+    setActiveReward(next);
+  }, [activeReward, rewardQueue]);
+
+  useEffect(() => {
+    const currentPath = normalizePathname(window.location.pathname);
+    const targetPath = getPathForBillingView(view) || getPathForPublicView(view, publicBlogSlug);
+    if (targetPath) {
+      const normalizedTarget = normalizePathname(targetPath);
+      if (currentPath !== normalizedTarget) {
+        window.history.replaceState({}, '', targetPath);
+      }
+      return;
+    }
+    if (isRoutedAppPath(currentPath)) {
+      window.history.replaceState({}, '', '/');
+    }
+  }, [publicBlogSlug, view]);
 
   // ── On mount: restore full state from all 6 DB tables ────────
   useEffect(() => {
@@ -260,6 +459,7 @@ const App: React.FC = () => {
               setResumeProfile(normalized.profile);
             } else {
               setResumeProfile(null);
+              await refreshBillingSnapshot(true);
             }
           }
         } else {
@@ -269,6 +469,7 @@ const App: React.FC = () => {
             localStorage.removeItem(LOCAL_KEY);
             setFinanceState({ ...INITIAL_STATE });
           }
+          setBillingSnapshot(null);
         }
       } catch (err) {
         console.error('Session restore error:', err);
@@ -291,12 +492,33 @@ const App: React.FC = () => {
         setFinanceState({ ...INITIAL_STATE });
         setShowAuth(false);
         setResumeProfile(null);
+        setBillingSnapshot(null);
         viewHistoryRef.current = [];
       }
     });
 
     return () => subscription.unsubscribe();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refreshBillingSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!financeState.isRegistered) return;
+    let active = true;
+
+    const refreshBilling = async () => {
+      const snapshot = await refreshBillingSnapshot();
+      if (!active || snapshot) return;
+    };
+
+    void refreshBilling();
+    const timer = window.setInterval(() => {
+      void refreshBilling();
+    }, 60_000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [financeState.isRegistered, refreshBillingSnapshot]);
 
   // ── Auto-save: debounced write to all 6 DB tables ────────────
   // saveFinanceData() returns DB-assigned UUIDs (Postgres generates
@@ -383,7 +605,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!financeState.isRegistered) return;
     void trackEvent('app.view_opened', { view }, 'app.navigation');
-  }, [financeState.isRegistered, view]);
+
+    if (view === 'goal-summary') {
+      void awardUsagePointsAndSync('report_generated', 'goal_summary_view');
+    }
+  }, [financeState.isRegistered, view, awardUsagePointsAndSync]);
 
   useEffect(() => {
     if (!financeState.isRegistered) {
@@ -410,6 +636,7 @@ const App: React.FC = () => {
     }
     if (current.goalCount > previous.goalCount) {
       void trackEvent('goal.created', { added: current.goalCount - previous.goalCount, total: current.goalCount }, 'app.goals');
+      void awardUsagePointsAndSync('goal_added', `goals:${current.goalCount}`, { added: current.goalCount - previous.goalCount });
     }
     if (current.assetCount > previous.assetCount) {
       void trackEvent('asset.added', { added: current.assetCount - previous.assetCount, total: current.assetCount }, 'app.assets');
@@ -432,6 +659,7 @@ const App: React.FC = () => {
         },
         'app.risk'
       );
+      void awardUsagePointsAndSync('risk_profile_completed', financeState.riskProfile?.level || 'unknown');
     }
   }, [
     financeState.isRegistered,
@@ -442,7 +670,19 @@ const App: React.FC = () => {
     financeState.transactions.length,
     financeState.insurance.length,
     financeState.riskProfile,
+    awardUsagePointsAndSync,
   ]);
+
+  useEffect(() => {
+    if (!financeState.isRegistered) return;
+    void awardUsagePointsAndSync('daily_login', new Date().toISOString().slice(0, 10));
+  }, [financeState.isRegistered, awardUsagePointsAndSync]);
+
+  useEffect(() => {
+    if (!financeState.isRegistered) return;
+    if (journey.completionPct < 100) return;
+    void awardUsagePointsAndSync('profile_completion', 'journey_100');
+  }, [financeState.isRegistered, journey.completionPct, awardUsagePointsAndSync]);
 
   // ── Logout ────────────────────────────────────────────────────
   const handleLogout = async () => {
@@ -483,9 +723,32 @@ const App: React.FC = () => {
     });
   };
 
-  const journey = getJourneyProgress(financeState);
   const gateUnlocked = journey.completionPct === 100;
   const isTerminalOnline = financeState.isRegistered && gateUnlocked && saveStatus !== 'error';
+  const effectiveBillingAccessState = billingSnapshot?.accessState || 'blocked';
+  const shouldShowFreeToProUpgrade = useMemo(() => {
+    if (!billingSnapshot) return false;
+
+    const planCode = String(billingSnapshot.subscription?.planCode || '').toLowerCase();
+    const planAmount = Number(billingSnapshot.subscription?.amount || 0);
+    const hasFreePlanCode =
+      planCode.includes('free') || planCode.includes('trial') || planCode.includes('legacy');
+    const hasZeroAmountSubscription =
+      Boolean(billingSnapshot.subscription) && Number.isFinite(planAmount) && planAmount <= 0;
+
+    return (
+      hasFreePlanCode ||
+      hasZeroAmountSubscription ||
+      billingSnapshot.trial.active ||
+      billingSnapshot.lifecycleState === 'trial'
+    );
+  }, [billingSnapshot]);
+  const hasPaidSubscription = useMemo(() => {
+    const sub = billingSnapshot?.subscription;
+    if (!sub) return false;
+    const status = String(sub.status || '').toLowerCase();
+    return ['active', 'trialing', 'past_due'].includes(status) && Number(sub.amount || 0) > 0;
+  }, [billingSnapshot]);
   const gatedViews = new Set<View>([
     'action-plan',
     'monthly-savings',
@@ -495,6 +758,14 @@ const App: React.FC = () => {
     'insurance',
     'tax-estate',
   ]);
+
+  const openBillingManage = useCallback(() => {
+    setView('pricing');
+  }, [setView]);
+
+  const openPricing = useCallback(() => {
+    setView('pricing');
+  }, [setView]);
 
   useEffect(() => {
     if (!gateUnlocked && gatedViews.has(view)) {
@@ -549,6 +820,24 @@ const App: React.FC = () => {
         'strategy',
       );
     }
+
+    if (billingSnapshot?.accessState === 'limited') {
+      ensureNotification(
+        'billing-access-limited',
+        'Dashboard Limited',
+        'Payment retries are in progress. Dashboard is locked until payment is completed.',
+        'strategy',
+      );
+    }
+
+    if (billingSnapshot?.accessState === 'blocked') {
+      ensureNotification(
+        'billing-access-blocked',
+        'Dashboard Locked',
+        'Subscription is required to unlock dashboard analytics. Use Billing Manage to reactivate access.',
+        'critical',
+      );
+    }
   }, [
     financeState.isRegistered,
     financeState.profile,
@@ -560,6 +849,7 @@ const App: React.FC = () => {
     financeState.insurance.length,
     financeState.riskProfile,
     journey.completionPct,
+    billingSnapshot?.accessState,
   ]);
 
   useEffect(() => {
@@ -601,12 +891,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const canonicalRoot = `${window.location.origin}/`;
 
-    if (!financeState.isRegistered && !showAuth) {
+    if (!financeState.isRegistered && !showAuth && !isPublicInfoView) {
       // Landing page handles indexable SEO metadata in Landing.tsx.
       return;
     }
 
-    if (!financeState.isRegistered && showAuth) {
+    if (!financeState.isRegistered && showAuth && !isPublicInfoView) {
       applySeoMeta({
         title: 'Start Financial Onboarding | FinVantage',
         description: 'Set up your profile, planning horizon, and intelligence baseline to start financial planning.',
@@ -617,10 +907,35 @@ const App: React.FC = () => {
       return;
     }
 
+    if (isPublicInfoView) {
+      // Public info pages set their own canonical/SEO meta.
+      return;
+    }
+
     const viewMeta: Record<View, { title: string; description: string }> = {
       dashboard: {
         title: 'Financial Dashboard | FinVantage',
         description: 'Monitor net worth, goal progress, and household financial trajectory in one command view.',
+      },
+      pricing: {
+        title: 'Pricing | FinVantage',
+        description: 'Choose a subscription plan to unlock dashboard access and continue planning.',
+      },
+      'billing-manage': {
+        title: 'Subscription Management | FinVantage',
+        description: 'Manage renewal, retries, coupons, referrals, and plan upgrades.',
+      },
+      'subscription-terms': {
+        title: 'Subscription Terms | FinVantage',
+        description: 'Review subscription legal terms for FinVantage billing.',
+      },
+      'refund-policy': {
+        title: 'Refund Policy | FinVantage',
+        description: 'Understand refund eligibility, timeline, and approval policy.',
+      },
+      'cancellation-policy': {
+        title: 'Cancellation Policy | FinVantage',
+        description: 'Review cancellation-at-period-end and resume policy.',
       },
       family: {
         title: 'Family Financial Profile | FinVantage',
@@ -682,6 +997,10 @@ const App: React.FC = () => {
         title: 'Settings | FinVantage',
         description: 'Manage account preferences and planning configuration.',
       },
+      'data-trust': {
+        title: 'Data and Trust | FinVantage',
+        description: 'Review data transparency, permissions, and trust controls.',
+      },
       notifications: {
         title: 'Notifications | FinVantage',
         description: 'View strategy alerts, risk prompts, and planning notifications.',
@@ -733,11 +1052,11 @@ const App: React.FC = () => {
     );
   }
 
-  if (!financeState.isRegistered && !showAuth) {
+  if (!financeState.isRegistered && !showAuth && !isPublicInfoView) {
     return <Landing onStart={() => setShowAuth(true)} />;
   }
 
-  if (!financeState.isRegistered && showAuth) {
+  if (!financeState.isRegistered && showAuth && !isPublicInfoView) {
     return (
       <Onboarding
         onComplete={(data) => {
@@ -767,7 +1086,12 @@ const App: React.FC = () => {
 
   const renderView = () => {
     switch (view) {
-      case 'dashboard':       return <Dashboard state={financeState} setView={setView} />;
+      case 'dashboard':       return <Dashboard state={financeState} setView={setView} billingAccessState={effectiveBillingAccessState} onOpenBilling={openBillingManage} showProUpgradeCta={shouldShowFreeToProUpgrade} onOpenPricing={openPricing} pointsBalance={billingSnapshot?.points?.balance || 0} pointsFrozen={Boolean(billingSnapshot?.points?.frozen)} pointsFormula={billingSnapshot?.points?.formula || undefined} pointsEarnedEvents={billingSnapshot?.points?.earnedEvents || []} referralCode={billingSnapshot?.referral?.myCode || null} referralRewardReferrer={billingSnapshot?.referral?.referralReward?.referrer || 25} referralRewardReferred={billingSnapshot?.referral?.referralReward?.referred || 50} hasPaidSubscription={hasPaidSubscription} />;
+      case 'pricing':         return <BillingManagePage mode="pricing" />;
+      case 'billing-manage':  return <BillingManagePage mode="manage" />;
+      case 'subscription-terms': return <BillingLegalPage type="subscription-terms" />;
+      case 'refund-policy':      return <BillingLegalPage type="refund-policy" />;
+      case 'cancellation-policy': return <BillingLegalPage type="cancellation-policy" />;
       case 'family':          return <Family state={financeState} updateState={handleUpdateState} setView={setView} />;
       case 'inflow':          return <InflowProfile state={financeState} updateState={handleUpdateState} />;
       case 'outflow':         return <OutflowProfile state={financeState} updateState={handleUpdateState} />;
@@ -782,56 +1106,91 @@ const App: React.FC = () => {
       case 'investment-plan': return <InvestmentPlan state={financeState} />;
       case 'action-plan':     return <ActionPlan state={financeState} />;
       case 'monthly-savings': return <MonthlySavingsPlan state={financeState} />;
-      case 'settings':        return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} />;
+      case 'settings':        return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} setView={setView} mode="settings" />;
+      case 'data-trust':      return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} setView={setView} mode="data-trust" />;
       case 'notifications':   return <Notifications state={financeState} updateState={handleUpdateState} setView={setView} />;
-      case 'support':         return <SupportCenter state={financeState} updateState={handleUpdateState} />;
+      case 'support':         return <SupportDeskPage />;
+      case 'faq':             return <StaticInfoPage page="faq" />;
+      case 'privacy-policy':  return <StaticInfoPage page="privacy" />;
+      case 'terms-and-condition': return <StaticInfoPage page="terms" />;
+      case 'legal':           return <StaticInfoPage page="legal" />;
+      case 'site-map':        return <StaticInfoPage page="sitemap" />;
+      case 'about':           return <StaticInfoPage page="about" />;
+      case 'blog':            return <BlogIndexPage />;
+      case 'blog-post':       return publicBlogSlug ? <BlogPostPage slug={publicBlogSlug} /> : <BlogIndexPage />;
       case 'tax-estate':      return <TaxEstate state={financeState} />;
       case 'projections':     return <RetirementPlan state={financeState} />;
-      case 'ai-advisor':      return <AIAdvisor state={financeState} />;
-      default:                return <Dashboard state={financeState} setView={setView} />;
+      case 'ai-advisor':      return <AIAdvisor state={financeState} launchPrompt={advisorLaunchPrompt} />;
+      default:                return <Dashboard state={financeState} setView={setView} billingAccessState={effectiveBillingAccessState} onOpenBilling={openBillingManage} showProUpgradeCta={shouldShowFreeToProUpgrade} onOpenPricing={openPricing} pointsBalance={billingSnapshot?.points?.balance || 0} pointsFrozen={Boolean(billingSnapshot?.points?.frozen)} pointsFormula={billingSnapshot?.points?.formula || undefined} pointsEarnedEvents={billingSnapshot?.points?.earnedEvents || []} referralCode={billingSnapshot?.referral?.myCode || null} referralRewardReferrer={billingSnapshot?.referral?.referralReward?.referrer || 25} referralRewardReferred={billingSnapshot?.referral?.referralReward?.referred || 50} hasPaidSubscription={hasPaidSubscription} />;
     }
   };
 
   return (
-    <div className="app-shell font-sans flex overflow-hidden">
-      <div className="hidden lg:block fixed left-0 top-0 h-full w-[260px] z-50 shrink-0">
-        <Sidebar currentView={view} setView={setView} state={financeState} />
-      </div>
-
-      <div className={`fixed inset-0 z-[60] lg:hidden transition-all duration-500 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />
-        <div className={`absolute left-0 top-0 h-full w-[260px] transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-          <Sidebar currentView={view} setView={setView} onClose={() => setIsSidebarOpen(false)} state={financeState} />
+    <div className="app-shell app-layout-root font-sans flex overflow-hidden">
+      {financeState.isRegistered && (
+        <div className="app-sidebar-rail hidden lg:block fixed left-0 top-0 h-full z-50 shrink-0">
+          <Sidebar currentView={view} setView={setView} state={financeState} />
         </div>
-      </div>
+      )}
 
-      <main className="flex-1 lg:ml-[260px] flex flex-col min-h-screen relative h-screen">
+      {financeState.isRegistered && (
+        <div className={`fixed inset-0 z-[60] lg:hidden transition-all duration-500 ${isSidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />
+          <div className={`absolute left-0 top-0 h-full w-[var(--app-sidebar-w)] transition-transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+            <Sidebar currentView={view} setView={setView} onClose={() => setIsSidebarOpen(false)} state={financeState} />
+          </div>
+        </div>
+      )}
+
+      <main className="app-main-shell flex-1 flex flex-col relative">
         <Header
-          onMenuClick={() => setIsSidebarOpen(true)}
+          onMenuClick={() => {
+            if (!financeState.isRegistered) return;
+            setIsSidebarOpen(true);
+          }}
           title={view}
           state={financeState}
           setView={setView}
-          onBack={handleGoBack}
-          onLogout={handleLogout}
+          onLogout={financeState.isRegistered ? handleLogout : () => setShowAuth(true)}
           isTerminalOnline={isTerminalOnline}
+          referralCode={billingSnapshot?.referral?.myCode || null}
+          pointsBalance={billingSnapshot?.points?.balance || 0}
+          pointsFrozen={Boolean(billingSnapshot?.points?.frozen)}
+          onAskQuery={openAiAdvisorWithQuery}
         />
-        <div className="flex-1 overflow-y-auto overflow-x-auto md:overflow-x-hidden p-4 pb-24 md:p-6 md:pb-10 w-full no-scrollbar scroll-smooth">
-          <div key={view} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-            {renderView()}
+        <div className="app-content-scroll flex-1 w-full no-scrollbar scroll-smooth">
+          <div
+            key={view}
+            className={`w-full min-w-0 animate-in fade-in slide-in-from-bottom-2 duration-500 ${
+              view === 'ai-advisor' && chatLaunchAnimating ? 'chat-launch-enter' : ''
+            }`}
+          >
+            <Suspense
+              fallback={
+                <div className="px-6 py-10 text-sm font-semibold text-slate-500">
+                  Loading module...
+                </div>
+              }
+            >
+              {renderView()}
+            </Suspense>
           </div>
         </div>
 
-        <div className="lg:hidden fixed bottom-0 left-0 w-full bg-white/80 backdrop-blur-xl border-t border-white/60 h-16 flex items-center justify-around px-4 z-40 pb-safe shadow-2xl">
-          <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'dashboard' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
-            <LayoutDashboard size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Dash</span>
-          </button>
-          <button onClick={() => setView('notifications')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'notifications' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
-            <Bell size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Alerts</span>
-          </button>
-        </div>
+        {financeState.isRegistered && (
+          <div className="app-mobile-nav lg:hidden fixed bottom-0 left-0 w-full bg-white/80 backdrop-blur-xl border-t border-white/60 flex items-center justify-around px-4 z-40 shadow-2xl">
+            <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'dashboard' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
+              <LayoutDashboard size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Dash</span>
+            </button>
+            <button onClick={() => setView('notifications')} className={`flex flex-col items-center gap-1 shrink-0 px-3 py-1.5 rounded-xl transition-all ${view === 'notifications' ? 'text-teal-600 bg-teal-50 shadow-inner' : 'text-slate-400'}`}>
+              <Bell size={18} /><span className="text-[7px] font-black uppercase tracking-widest">Alerts</span>
+            </button>
+          </div>
+        )}
       </main>
 
       <SyncPill status={saveStatus} />
+      <RewardCelebration reward={activeReward} onDone={() => setActiveReward(null)} />
     </div>
   );
 };

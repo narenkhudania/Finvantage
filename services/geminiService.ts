@@ -1,13 +1,31 @@
 import { FinanceState } from "../types";
+import { supabase } from "./supabase";
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
-export const getFinancialAdvice = async (state: FinanceState, userPrompt: string) => {
+export const getFinancialAdvice = async (_state: FinanceState, userPrompt: string) => {
   try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+
     const response = await fetch(`${baseUrl}/api/ai-advice`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state, prompt: userPrompt }),
+      headers,
+      body: JSON.stringify({
+        prompt: userPrompt,
+        requestId:
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      }),
     });
 
     if (!response.ok) {

@@ -14,7 +14,7 @@ import {
 import { 
   Plus, Trash2, Home, CreditCard, Car, Landmark, User, 
   ArrowUpRight, TrendingDown,
-  ChevronDown, Activity, Calculator,
+  ChevronDown, Calculator,
   Zap, MessageSquare,
   Lightbulb, BarChart3, Search, Columns3, Wand2, ArrowLeft, ArrowRight
 } from 'lucide-react';
@@ -22,7 +22,10 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 import { buildAmortizationSchedule, buildYearlyAmortization } from '../lib/loanMath';
+import { monthlyIncomeFromDetailed } from '../lib/incomeMath';
+import { getRiskReturnAssumption } from '../lib/financeMath';
 import SafeResponsiveContainer from './common/SafeResponsiveContainer';
+import PlanningAssistStrip from './common/PlanningAssistStrip';
 
 const LOAN_TYPES: { type: LoanType, icon: any }[] = [
   { type: 'Home Loan', icon: Home },
@@ -116,6 +119,8 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
   const [formError, setFormError] = useState<string | null>(null);
   const [formWarning, setFormWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [portfolioRateShockPct, setPortfolioRateShockPct] = useState(1);
+  const [portfolioPrepayBudget, setPortfolioPrepayBudget] = useState(0);
   const [declaredNoObligations, setDeclaredNoObligations] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(NO_OBLIGATIONS_FLAG_KEY) === '1';
@@ -164,6 +169,14 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     if (monthlyRate <= 0) return emi * months;
     const pv = emi * ((1 - Math.pow(1 + monthlyRate, -months)) / monthlyRate);
     return Math.max(0, pv);
+  };
+
+  const estimateEmiFromOutstanding = (principal: number, annualRate: number, months: number) => {
+    if (principal <= 0 || months <= 0) return 0;
+    const monthlyRate = annualRate / 12 / 100;
+    if (monthlyRate <= 0) return principal / months;
+    const factor = Math.pow(1 + monthlyRate, months);
+    return principal * monthlyRate * factor / (factor - 1);
   };
 
   const buildScenarioDefaults = (loan: Loan): ScenarioInput => ({
@@ -442,6 +455,13 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
 
   const totalOutstanding = state.loans.reduce((sum, l) => sum + l.outstandingAmount, 0);
   const totalEMI = state.loans.reduce((sum, l) => sum + l.emi, 0);
+  const totalAssets = state.assets.reduce((sum, asset) => sum + Math.max(0, Number(asset.currentValue || 0)), 0);
+  const totalPlanningIncome = monthlyIncomeFromDetailed(state.profile.income)
+    + state.family.reduce((sum, member) => {
+      if (member.isDependent) return sum;
+      if (!(member.includeIncomeInPlanning ?? false)) return sum;
+      return sum + monthlyIncomeFromDetailed(member.income);
+    }, 0);
 
   const getLoanScheduleOptions = (loan: Loan) => ({
     installmentType: loan.installmentType || 'EMI',
@@ -450,6 +470,92 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
     dueDay: loan.dueDay || 5,
     brokenInterestCharged: loan.brokenInterestCharged !== false,
   });
+
+  const liabilityAnalysis = useMemo(() => {
+    if (state.loans.length === 0) {
+      return {
+        weightedRate: 0,
+        nearTermOutstanding: 0,
+        shockedTotalEmi: 0,
+        deltaEmi: 0,
+        estimatedInterestDelta: 0,
+        currentDti: 0,
+        shockedDti: 0,
+      };
+    }
+
+    const weightedRateNumerator = state.loans.reduce(
+      (sum, loan) => sum + Math.max(0, Number(loan.outstandingAmount || 0)) * Math.max(0, Number(loan.interestRate || 0)),
+      0,
+    );
+    const weightedRate = totalOutstanding > 0 ? weightedRateNumerator / totalOutstanding : 0;
+    const annualInterestBurden = (totalOutstanding * weightedRate) / 100;
+    const debtToAssetRatio = totalAssets > 0 ? (totalOutstanding / totalAssets) * 100 : 0;
+    const baseWeightedMonths = totalOutstanding > 0
+      ? state.loans.reduce((sum, loan) => {
+          const months = (loan.tenureUnit || 'Months') === 'Years'
+            ? Math.max(1, Math.round(Number(loan.remainingTenure || 0) * 12))
+            : Math.max(1, Math.round(Number(loan.remainingTenure || 0)));
+          const weight = Math.max(0, Number(loan.outstandingAmount || 0));
+          return sum + months * weight;
+        }, 0) / totalOutstanding
+      : 0;
+    const prepayImpactFactor = totalOutstanding > 0 ? Math.min(0.6, (portfolioPrepayBudget / totalOutstanding) * 0.8) : 0;
+    const projectedClosureMonths = baseWeightedMonths > 0 ? baseWeightedMonths * (1 - prepayImpactFactor) : 0;
+    const closureGainMonths = Math.max(0, baseWeightedMonths - projectedClosureMonths);
+    const investmentReturnAssumption = getRiskReturnAssumption(state.riskProfile?.level);
+    const estimatedPrepayBenefitAnnual = (portfolioPrepayBudget * weightedRate) / 100;
+    const estimatedInvestBenefitAnnual = (portfolioPrepayBudget * investmentReturnAssumption) / 100;
+    const prepayVsInvestDelta = estimatedPrepayBenefitAnnual - estimatedInvestBenefitAnnual;
+
+    let nearTermOutstanding = 0;
+    let shockedTotalEmi = 0;
+    let baseTotalEmi = 0;
+    let baseEstimatedInterest = 0;
+    let stressedEstimatedInterest = 0;
+
+    state.loans.forEach((loan) => {
+      const tenureMonths = (loan.tenureUnit || 'Months') === 'Years'
+        ? Math.max(1, Math.round(Number(loan.remainingTenure || 0) * 12))
+        : Math.max(1, Math.round(Number(loan.remainingTenure || 0)));
+      if (tenureMonths <= 36) nearTermOutstanding += Math.max(0, Number(loan.outstandingAmount || 0));
+
+      const outstanding = Math.max(0, Number(loan.outstandingAmount || 0));
+      const baseRate = Math.max(0, Number(loan.interestRate || 0));
+      const baseEmi = loan.emi > 0 ? Number(loan.emi) : estimateEmiFromOutstanding(outstanding, baseRate, tenureMonths);
+      baseTotalEmi += baseEmi;
+      baseEstimatedInterest += Math.max(0, baseEmi * tenureMonths - outstanding);
+
+      const shockedRate = Math.min(45, baseRate + portfolioRateShockPct);
+      const allocatedPrepay = totalOutstanding > 0 ? portfolioPrepayBudget * (outstanding / totalOutstanding) : 0;
+      const shockedOutstanding = Math.max(0, outstanding - allocatedPrepay);
+      const shockedEmi = estimateEmiFromOutstanding(shockedOutstanding, shockedRate, tenureMonths);
+      shockedTotalEmi += shockedEmi;
+      stressedEstimatedInterest += Math.max(0, shockedEmi * tenureMonths - shockedOutstanding);
+    });
+
+    const deltaEmi = shockedTotalEmi - baseTotalEmi;
+    const estimatedInterestDelta = stressedEstimatedInterest - baseEstimatedInterest;
+
+    return {
+      weightedRate,
+      nearTermOutstanding,
+      shockedTotalEmi,
+      deltaEmi,
+      estimatedInterestDelta,
+      currentDti: totalPlanningIncome > 0 ? (baseTotalEmi / totalPlanningIncome) * 100 : 0,
+      shockedDti: totalPlanningIncome > 0 ? (shockedTotalEmi / totalPlanningIncome) * 100 : 0,
+      annualInterestBurden,
+      debtToAssetRatio,
+      baseWeightedMonths,
+      projectedClosureMonths,
+      closureGainMonths,
+      investmentReturnAssumption,
+      estimatedPrepayBenefitAnnual,
+      estimatedInvestBenefitAnnual,
+      prepayVsInvestDelta,
+    };
+  }, [state.loans, totalOutstanding, totalPlanningIncome, totalAssets, portfolioRateShockPct, portfolioPrepayBudget, state.riskProfile?.level]);
 
   // Amortization Calculator with Lump Sum Projection
   const calculateProjections = (loan: Loan) => {
@@ -592,6 +698,46 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
   );
   const hasOutstandingPreview = outstandingPreview > 0;
 
+  const liabilityAssistStats = useMemo(() => {
+    const dtiTone = liabilityAnalysis.currentDti <= 30
+      ? 'positive'
+      : liabilityAnalysis.currentDti <= 45
+        ? 'warning'
+        : 'critical';
+    const debtAssetTone = liabilityAnalysis.debtToAssetRatio <= 25
+      ? 'positive'
+      : liabilityAnalysis.debtToAssetRatio <= 45
+        ? 'warning'
+        : 'critical';
+
+    return [
+      {
+        label: 'Active Loans',
+        value: String(state.loans.length),
+      },
+      {
+        label: 'Total EMI',
+        value: formatCurrency(totalEMI, currencyCountry),
+        tone: dtiTone,
+      },
+      {
+        label: 'Current DTI',
+        value: `${liabilityAnalysis.currentDti.toFixed(1)}%`,
+        tone: dtiTone,
+      },
+      {
+        label: 'Weighted Rate',
+        value: `${liabilityAnalysis.weightedRate.toFixed(2)}%`,
+        tone: liabilityAnalysis.weightedRate <= 9 ? 'positive' : 'warning',
+      },
+      {
+        label: 'Debt / Asset',
+        value: `${liabilityAnalysis.debtToAssetRatio.toFixed(1)}%`,
+        tone: debtAssetTone,
+      },
+    ] as const;
+  }, [state.loans.length, totalEMI, currencyCountry, liabilityAnalysis]);
+
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-24">
       {notice && (
@@ -599,6 +745,43 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           {notice}
         </div>
       )}
+
+      <PlanningAssistStrip
+        title="Control debt pressure before it impacts goals"
+        description="Review obligation load, interest exposure, and repayment sustainability at portfolio level."
+        tip="If DTI rises above 40%, prioritize refinance or prepayment before increasing discretionary goals."
+        actions={(
+          <div className="flex flex-col sm:flex-row gap-2.5">
+            {state.loans.length === 0 && !declaredNoObligations && (
+              <button
+                type="button"
+                onClick={declareNoLoans}
+                className="px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-2xl hover:border-slate-300 transition-colors font-black uppercase text-[10px] tracking-widest"
+              >
+                I Don&apos;t Have Loans
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={declaredNoObligations}
+              onClick={() => setShowAdd(prev => !prev)}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl transition-colors font-black uppercase text-[10px] tracking-widest shadow-lg ${
+                declaredNoObligations
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-teal-600 text-white hover:bg-teal-500'
+              }`}
+            >
+              <Plus size={14} /> {showAdd ? 'Close Form' : 'Add Loan Profile'}
+            </button>
+          </div>
+        )}
+        stats={liabilityAssistStats.map((stat) => ({
+          label: stat.label,
+          value: stat.value,
+          tone: stat.tone,
+        }))}
+      />
+
       {declaredNoObligations && state.loans.length === 0 && (
         <div className="bg-slate-900 border border-slate-700 text-white rounded-2xl px-6 py-4 text-left flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-1">
@@ -613,42 +796,6 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
           </button>
         </div>
       )}
-      {/* Header Strategy Block */}
-      <div className="surface-dark p-12 md:p-16 rounded-[4rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12 text-left">
-          <div className="space-y-6">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
-              <Activity size={14}/> Liability Architecture
-            </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Debt <br/><span className="text-teal-500">Inventory.</span></h2>
-            <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
-              Monitoring <span className="text-white font-bold">{state.loans.length} active lines</span> for <span className="text-white font-bold">{state.profile.firstName} {state.profile.lastName}</span>.
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3 shrink-0">
-            {state.loans.length === 0 && !declaredNoObligations && (
-              <button
-                onClick={declareNoLoans}
-                className="px-6 py-4 bg-white/10 hover:bg-white/20 text-white rounded-[1.5rem] transition-all font-black uppercase text-[10px] tracking-[0.2em] border border-white/20"
-              >
-                I Don&apos;t Have Loans/Obligations
-              </button>
-            )}
-            <button 
-              disabled={declaredNoObligations}
-              onClick={() => setShowAdd(prev => !prev)}
-              className={`px-12 py-8 rounded-[2.5rem] transition-all flex items-center gap-4 font-black uppercase text-sm tracking-[0.25em] shadow-2xl ${
-                declaredNoObligations
-                  ? 'bg-slate-700 text-slate-300 cursor-not-allowed'
-                  : 'bg-teal-600 hover:bg-teal-50 text-white hover:text-teal-600 active:scale-95'
-              }`}
-            >
-              <Plus size={22} /> {showAdd ? 'Close Form' : 'Add Loan Profile'}
-            </button>
-          </div>
-        </div>
-      </div>
 
       {showAdd && !declaredNoObligations && (
         <div className="bg-white rounded-[2.5rem] md:rounded-[4rem] w-full shadow-2xl ring-1 ring-slate-200/70 overflow-hidden border border-white/20">
@@ -939,15 +1086,146 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
            <div className="absolute top-0 right-0 p-4 opacity-10"><TrendingDown size={80}/></div>
            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Debt-to-Income</p>
            <h4 className="text-3xl font-black text-teal-400 tracking-tighter">
-             {state.profile.income.salary > 0 ? ((totalEMI / state.profile.income.salary) * 100).toFixed(1) : 0}%
+             {liabilityAnalysis.currentDti.toFixed(1)}%
            </h4>
         </div>
         <div className="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100 flex flex-col justify-center text-left">
            <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Status</p>
-           <h4 className="text-2xl font-black text-emerald-700 tracking-tighter">Serviceable</h4>
-           <p className="text-[9px] font-bold text-emerald-500 uppercase mt-1">Within Safe Limits</p>
+           <h4 className="text-2xl font-black text-emerald-700 tracking-tighter">
+             {liabilityAnalysis.currentDti > 45 ? 'Stressed' : liabilityAnalysis.currentDti > 30 ? 'Watchlist' : 'Serviceable'}
+           </h4>
+           <p className="text-[9px] font-bold text-emerald-500 uppercase mt-1">
+             {liabilityAnalysis.currentDti > 45 ? 'High Debt Load' : liabilityAnalysis.currentDti > 30 ? 'Monitor Closely' : 'Within Safe Limits'}
+           </p>
         </div>
       </div>
+
+      {state.loans.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Debt-to-asset ratio</p>
+            <p className={`text-2xl font-black mt-1 ${liabilityAnalysis.debtToAssetRatio > 40 ? 'text-rose-600' : liabilityAnalysis.debtToAssetRatio > 25 ? 'text-amber-600' : 'text-emerald-600'}`}>
+              {liabilityAnalysis.debtToAssetRatio.toFixed(1)}%
+            </p>
+          </div>
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Annual interest burden</p>
+            <p className="text-2xl font-black text-slate-900 mt-1">
+              {formatCurrency(liabilityAnalysis.annualInterestBurden, currencyCountry)}
+            </p>
+          </div>
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Closure timeline</p>
+            <p className="text-2xl font-black text-slate-900 mt-1">
+              {liabilityAnalysis.projectedClosureMonths > 0 ? `${Math.round(liabilityAnalysis.projectedClosureMonths)} mo` : 'N/A'}
+            </p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 mt-1">
+              {liabilityAnalysis.closureGainMonths > 0 ? `~${Math.round(liabilityAnalysis.closureGainMonths)} mo faster` : 'No reduction yet'}
+            </p>
+          </div>
+          <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Prepay vs invest (1Y)</p>
+            <p className={`text-2xl font-black mt-1 ${liabilityAnalysis.prepayVsInvestDelta >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+              {liabilityAnalysis.prepayVsInvestDelta >= 0 ? '+' : ''}{formatCurrency(liabilityAnalysis.prepayVsInvestDelta, currencyCountry)}
+            </p>
+            <p className="text-[10px] font-semibold text-slate-500 mt-1">
+              Prepay @{liabilityAnalysis.weightedRate.toFixed(2)}% vs invest @{liabilityAnalysis.investmentReturnAssumption.toFixed(1)}%.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {state.loans.length > 0 && (
+        <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_1fr] gap-6">
+          <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-6 text-left">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Portfolio Debt Analysis</p>
+                <h3 className="text-2xl font-black text-slate-900">Rate and Prepay Simulator</h3>
+              </div>
+              <div className="px-3 py-2 rounded-2xl border border-slate-200 bg-slate-50 text-right">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Weighted rate</p>
+                <p className="text-lg font-black text-slate-900">{liabilityAnalysis.weightedRate.toFixed(2)}%</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Rate shock</label>
+                  <span className="text-sm font-black text-slate-900">+{portfolioRateShockPct.toFixed(1)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={0.1}
+                  value={portfolioRateShockPct}
+                  onChange={(event) => setPortfolioRateShockPct(Number(event.target.value))}
+                  className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-rose-500 cursor-pointer"
+                />
+              </div>
+              <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">One-time prepay budget</label>
+                  <span className="text-sm font-black text-slate-900">{formatCurrency(portfolioPrepayBudget, currencyCountry)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(1000, Math.round(totalOutstanding * 0.25))}
+                  step={1000}
+                  value={portfolioPrepayBudget}
+                  onChange={(event) => setPortfolioPrepayBudget(Number(event.target.value))}
+                  className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-teal-600 cursor-pointer"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Near-term maturity (≤36m)</p>
+                <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(liabilityAnalysis.nearTermOutstanding, currencyCountry)}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Scenario EMI</p>
+                <p className="text-lg font-black text-slate-900 mt-1">{formatCurrency(liabilityAnalysis.shockedTotalEmi, currencyCountry)}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">EMI delta</p>
+                <p className={`text-lg font-black mt-1 ${liabilityAnalysis.deltaEmi <= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {formatCurrency(liabilityAnalysis.deltaEmi, currencyCountry)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Scenario DTI</p>
+                <p className={`text-lg font-black mt-1 ${liabilityAnalysis.shockedDti > 45 ? 'text-rose-600' : liabilityAnalysis.shockedDti > 30 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                  {liabilityAnalysis.shockedDti.toFixed(1)}%
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="surface-dark p-6 md:p-8 rounded-[2.5rem] text-white space-y-5 shadow-xl text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Portfolio Signal</p>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Estimated lifetime interest impact</p>
+              <p className={`text-xl font-black mt-1 ${liabilityAnalysis.estimatedInterestDelta <= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {liabilityAnalysis.estimatedInterestDelta <= 0 ? 'Save ' : 'Add '}
+                {formatCurrency(Math.abs(liabilityAnalysis.estimatedInterestDelta), currencyCountry)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Action cue</p>
+              <p className="text-sm font-semibold text-slate-200 mt-2">
+                {liabilityAnalysis.shockedDti > 45
+                  ? 'Scenario DTI is stressed. Prioritize high-rate loan prepayment or refinance to restore debt capacity.'
+                  : 'Debt load remains manageable in this scenario. Use per-loan what-if blocks below for execution planning.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {state.loans.length === 0 && (
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-6 text-left">

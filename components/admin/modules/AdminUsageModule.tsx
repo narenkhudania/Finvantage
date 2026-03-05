@@ -2,7 +2,7 @@ import React from 'react';
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AdminUsageReport } from '../../../services/admin/types';
 import SafeResponsiveContainer from '../../common/SafeResponsiveContainer';
-import { AppButton, SurfaceCard } from '../../common/ui';
+import { AppButton, SectionHeader, SurfaceCard } from '../../common/ui';
 
 interface UsageGrowthSnapshot {
   onboardingUsers: number;
@@ -51,6 +51,80 @@ const AdminUsageModule: React.FC<AdminUsageModuleProps> = ({
   formatDate,
   round,
 }) => {
+  const actionQueue: Array<{
+    label: string;
+    value: string;
+    tone: 'up' | 'down' | 'flat';
+    detail: string;
+    action: string;
+  }> = [
+    {
+      label: 'Activation Rate',
+      value: usageGrowth?.activationRatePct == null ? 'N/A' : `${round(usageGrowth.activationRatePct, 1).toFixed(1)}%`,
+      tone:
+        usageGrowth?.activationRatePct == null
+          ? 'flat'
+          : usageGrowth.activationRatePct < 20
+            ? 'down'
+            : usageGrowth.activationRatePct < 35
+              ? 'flat'
+              : 'up',
+      detail: usageGrowth
+        ? `${formatNumber(usageGrowth.goalUsers)} / ${formatNumber(usageGrowth.onboardingUsers)} users reached goals`
+        : 'No activation baseline yet',
+      action:
+        (usageGrowth?.activationRatePct ?? 0) < 35
+          ? 'Improve onboarding-to-goal prompts and simplify first goal creation.'
+          : 'Activation is healthy; focus on retention levers next.',
+    },
+    {
+      label: 'Risk Profile Completion',
+      value: usageGrowth?.riskCompletionRatePct == null ? 'N/A' : `${round(usageGrowth.riskCompletionRatePct, 1).toFixed(1)}%`,
+      tone:
+        usageGrowth?.riskCompletionRatePct == null
+          ? 'flat'
+          : usageGrowth.riskCompletionRatePct < 25
+            ? 'down'
+            : usageGrowth.riskCompletionRatePct < 45
+              ? 'flat'
+              : 'up',
+      detail: usageGrowth ? `${formatNumber(usageGrowth.riskUsers)} users completed risk profile` : 'No completion baseline yet',
+      action:
+        (usageGrowth?.riskCompletionRatePct ?? 0) < 45
+          ? 'Trigger dashboard nudge explaining why risk profile improves plan quality.'
+          : 'Completion is good; keep reassessment reminders active.',
+    },
+    {
+      label: 'Liability Coverage Adoption',
+      value: usageGrowth?.liabilityAdoptionRatePct == null ? 'N/A' : `${round(usageGrowth.liabilityAdoptionRatePct, 1).toFixed(1)}%`,
+      tone:
+        usageGrowth?.liabilityAdoptionRatePct == null
+          ? 'flat'
+          : usageGrowth.liabilityAdoptionRatePct < 10
+            ? 'down'
+            : usageGrowth.liabilityAdoptionRatePct < 20
+              ? 'flat'
+              : 'up',
+      detail: usageGrowth ? `${formatNumber(usageGrowth.liabilityUsers)} users added liabilities` : 'No liability baseline yet',
+      action:
+        (usageGrowth?.liabilityAdoptionRatePct ?? 0) < 20
+          ? 'Surface debt-impact insights to increase liability data completion.'
+          : 'Coverage is stable; monitor quality of entered loan details.',
+    },
+    {
+      label: 'Weekly Event Momentum',
+      value: formatDeltaPct(usageGrowth?.eventsMomentumPct ?? null),
+      tone: toneFromDelta(usageGrowth?.eventsMomentumPct ?? null),
+      detail: usageGrowth
+        ? `${formatNumber(usageGrowth.currentEvents7d)} vs ${formatNumber(usageGrowth.previousEvents7d)} events`
+        : 'Need two weeks of trend data',
+      action:
+        (usageGrowth?.eventsMomentumPct ?? 0) < 0
+          ? 'Identify drop-off modules and run targeted product nudges.'
+          : 'Engagement trend is positive; scale top-performing journeys.',
+    },
+  ];
+
   return (
     <div className="space-y-5">
       <SurfaceCard variant="elevated" padding="none" className="p-4">
@@ -77,6 +151,27 @@ const AdminUsageModule: React.FC<AdminUsageModuleProps> = ({
         </div>
       </SurfaceCard>
 
+      <SurfaceCard variant="elevated" padding="none" className="p-5">
+        <SectionHeader
+          title="Actionable KPI Priorities"
+          description="Focus this section first for product and growth decisions."
+        />
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-4">
+          {actionQueue.map((item) => (
+            <div key={item.label} className={`rounded-2xl border p-3 ${toneClass(item.tone)}`}>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em]">{item.label}</p>
+              <p className="mt-2 text-xl font-black">{item.value}</p>
+              <p className="mt-1.5 text-xs font-semibold opacity-90">{item.detail}</p>
+              <p className="mt-2 text-xs font-black opacity-95">{item.action}</p>
+            </div>
+          ))}
+        </div>
+      </SurfaceCard>
+
+      <SectionHeader
+        title="Context Metrics"
+        description="Supporting telemetry for deeper diagnosis after the priority actions."
+      />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
         <SurfaceCard variant="elevated" padding="none" className="p-4">
           <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Events</p>
@@ -240,8 +335,8 @@ const AdminUsageModule: React.FC<AdminUsageModuleProps> = ({
       <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[1fr_1fr]">
         <SurfaceCard variant="elevated" padding="none" className="p-5">
           <h3 className="mb-3 text-lg font-black tracking-tight text-slate-900">Power Users</h3>
-          <div className="overflow-auto">
-            <table className="min-w-[620px] lg:min-w-[640px] w-full text-sm">
+          <div className="admin-table-wrap">
+            <table className="admin-table">
               <thead className="bg-slate-50">
                 <tr>
                   {['User', 'Events', 'Top Action', 'Last Seen'].map((header) => (

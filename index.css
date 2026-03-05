@@ -16,6 +16,12 @@
   --accent-700: #0f766e;
   --accent-800: #115e59;
   --accent-900: #134e4a;
+  --fv-sidebar-width: 260px;
+  --fv-header-height-mobile: 96px;
+  --fv-header-height-desktop: 64px;
+  --fv-mobile-nav-height: 64px;
+  --fv-content-pad-mobile: 1rem;
+  --fv-content-pad-desktop: 1.5rem;
 }
 
 * {
@@ -60,7 +66,7 @@ body::after {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 ::selection {
@@ -130,6 +136,86 @@ h4 {
 
 .fade-up {
   animation: fade-up 0.6s ease-out both;
+}
+
+@keyframes chat-launch-enter {
+  0% {
+    opacity: 0.5;
+    transform: translateY(16px) scale(0.985);
+    filter: saturate(0.86);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.004);
+    filter: saturate(1);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: saturate(1);
+  }
+}
+
+.chat-launch-enter {
+  animation: chat-launch-enter 0.46s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+@keyframes reward-toast-pop {
+  0% {
+    opacity: 0;
+    transform: translate3d(12px, 16px, 0) scale(0.95);
+  }
+  12% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  82% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.98);
+  }
+}
+
+.reward-toast-pop {
+  animation: reward-toast-pop 1.9s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.reward-coins-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+@keyframes reward-coin-flight {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.35);
+  }
+  12% {
+    opacity: 1;
+    transform: translate3d(0, -6px, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--tx, -100px), var(--ty, -100px), 0) scale(0.85);
+  }
+}
+
+.reward-coin-flight {
+  position: absolute;
+  right: 72px;
+  bottom: 20px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, #fde68a 0%, #f59e0b 60%, #b45309 100%);
+  box-shadow: 0 0 0 1px rgba(180, 83, 9, 0.22);
+  animation: reward-coin-flight 1.05s ease-out forwards;
+  animation-delay: var(--delay, 0s);
 }
 
 .onboarding-shell {
@@ -272,6 +358,7 @@ h4 {
 @media (prefers-reduced-motion: reduce) {
   .animate-float,
   .fade-up,
+  .chat-launch-enter,
   .onboarding-aurora,
   .onboarding-panel-forward,
   .onboarding-panel-backward,
@@ -290,7 +377,78 @@ h4 {
 }
 
 .app-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
+  --app-sidebar-w: var(--fv-sidebar-width);
+  --app-header-h: var(--fv-header-height-mobile);
+  --app-mobile-nav-h: var(--fv-mobile-nav-height);
+}
+
+@media (min-width: 768px) {
+  .app-shell {
+    --app-header-h: var(--fv-header-height-desktop);
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-shell {
+    --app-mobile-nav-h: 0px;
+  }
+}
+
+.app-layout-root {
+  width: 100%;
+}
+
+.app-sidebar-rail {
+  width: var(--app-sidebar-w);
+}
+
+.app-main-shell {
+  width: 100%;
+  min-height: 100dvh;
+  height: 100dvh;
+}
+
+@media (min-width: 1024px) {
+  .app-main-shell {
+    margin-left: var(--app-sidebar-w);
+  }
+}
+
+.app-topbar {
+  min-height: var(--app-header-h);
+}
+
+.app-topbar-frame {
+  min-height: var(--app-header-h);
+}
+
+.app-content-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  padding: var(--fv-content-pad-mobile);
+  padding-bottom: calc(var(--app-mobile-nav-h) + 1.25rem + env(safe-area-inset-bottom, 0px));
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+@media (min-width: 768px) {
+  .app-content-scroll {
+    padding: var(--fv-content-pad-desktop);
+    padding-bottom: 2.5rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .app-content-scroll {
+    padding-inline: 1.75rem;
+  }
+}
+
+.app-mobile-nav {
+  height: var(--app-mobile-nav-h);
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
 }
 
 .app-panel {
@@ -398,5 +556,56 @@ h4 {
 
   .h-\[calc\(100vh-12rem\)\] {
     height: calc(100vh - 10rem) !important;
+  }
+}
+
+/* Admin responsive baseline: enforce one tablet/laptop behavior across modules */
+.admin-shell {
+  --admin-table-min-width: 740px;
+}
+
+.admin-shell .admin-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.admin-shell .admin-table {
+  width: 100%;
+  min-width: var(--admin-table-min-width);
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8125rem;
+}
+
+.admin-shell .admin-table th,
+.admin-shell .admin-table td {
+  white-space: nowrap;
+}
+
+@media (max-width: 1366px) {
+  .admin-shell {
+    --admin-table-min-width: 680px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .admin-shell {
+    --admin-table-min-width: 640px;
+  }
+
+  .admin-shell .admin-table th,
+  .admin-shell .admin-table td {
+    padding-left: 0.625rem !important;
+    padding-right: 0.625rem !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  .admin-shell {
+    --admin-table-min-width: 600px;
   }
 }

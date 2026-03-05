@@ -1,0 +1,23 @@
+name: Billing Message Processor Cron
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 min
+  workflow_dispatch:
+
+concurrency:
+  group: billing-message-processor
+  cancel-in-progress: false
+
+jobs:
+  run-processor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger billing message processor
+        run: |
+          curl --fail --silent --show-error \
+            -X POST "https://finvantage.vercel.app/api/billing/process-message-events" \
+            -H "Content-Type: application/json" \
+            -H "x-billing-processor-secret: ${{ secrets.BILLING_EVENT_PROCESSOR_SECRET }}" \
+            -d '{"limit":50}'

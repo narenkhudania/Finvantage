@@ -9,6 +9,11 @@ interface AdminPaymentsModuleProps {
   formatCurrency: (value: number) => string;
   formatNumber: (value: number) => string;
   formatDate: (value?: string | null) => string;
+  busy?: boolean;
+  onAdminSubscriptionAction?: (
+    action: 'cancel_at_period_end' | 'resume_auto_renew',
+    subscription: AdminSubscription
+  ) => Promise<void>;
 }
 
 const AdminPaymentsModule: React.FC<AdminPaymentsModuleProps> = ({
@@ -18,8 +23,22 @@ const AdminPaymentsModule: React.FC<AdminPaymentsModuleProps> = ({
   formatCurrency,
   formatNumber,
   formatDate,
+  busy = false,
+  onAdminSubscriptionAction,
 }) => {
+  const [search, setSearch] = React.useState('');
   const failedPayments = payments.filter((payment) => ['failed', 'declined'].includes(payment.status.toLowerCase()));
+  const filteredSubscriptions = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return subscriptions;
+    return subscriptions.filter((subscription) => (
+      subscription.user_id.toLowerCase().includes(q)
+      || subscription.plan_code.toLowerCase().includes(q)
+      || String(subscription.provider_subscription_id || '').toLowerCase().includes(q)
+      || String(subscription.provider_customer_id || '').toLowerCase().includes(q)
+      || subscription.status.toLowerCase().includes(q)
+    ));
+  }, [search, subscriptions]);
 
   return (
     <div className="grid grid-cols-1 gap-5 2xl:grid-cols-[1fr_1fr]">
@@ -64,8 +83,14 @@ const AdminPaymentsModule: React.FC<AdminPaymentsModuleProps> = ({
 
         <SurfaceCard variant="elevated" padding="none" className="p-5">
           <SectionHeader title="Subscription Monitoring" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by user ID, plan, provider IDs, status"
+            className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+          />
           <div className="max-h-[420px] mt-4 space-y-2 overflow-auto pr-1">
-            {subscriptions.map((subscription) => (
+            {filteredSubscriptions.map((subscription) => (
               <div key={subscription.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-black text-slate-800">{subscription.plan_code}</p>
@@ -75,8 +100,38 @@ const AdminPaymentsModule: React.FC<AdminPaymentsModuleProps> = ({
                 <p className="mt-2 text-xs font-semibold text-slate-600">
                   {formatCurrency(subscription.amount)} {subscription.currency} / {subscription.billing_cycle}
                 </p>
+                <p className="mt-1 text-[11px] font-semibold text-slate-600">
+                  Provider: {subscription.provider || 'internal'}
+                </p>
+                <p className="mt-1 text-[11px] font-semibold text-slate-500 break-all">
+                  Sub ID: {subscription.provider_subscription_id || '—'}
+                </p>
+                <p className="mt-1 text-[11px] font-semibold text-slate-500 break-all">
+                  Cust ID: {subscription.provider_customer_id || '—'}
+                </p>
+                {onAdminSubscriptionAction && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => void onAdminSubscriptionAction('cancel_at_period_end', subscription)}
+                      disabled={busy || subscription.cancel_at_period_end}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-amber-700 disabled:opacity-50"
+                    >
+                      Cancel at End
+                    </button>
+                    <button
+                      onClick={() => void onAdminSubscriptionAction('resume_auto_renew', subscription)}
+                      disabled={busy || !subscription.cancel_at_period_end}
+                      className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-700 disabled:opacity-50"
+                    >
+                      Resume
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
+            {!filteredSubscriptions.length && (
+              <p className="text-xs font-semibold text-slate-500">No subscriptions match the current search.</p>
+            )}
           </div>
         </SurfaceCard>
       </div>

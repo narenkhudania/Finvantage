@@ -170,8 +170,8 @@ const AdminOverviewModule: React.FC<AdminOverviewModuleProps> = ({
             title="Top Households by Net Worth"
             action={<span className="text-xs font-black uppercase tracking-wider text-slate-500">{overview.topCustomers.length} customers</span>}
           />
-          <div className="mt-4 overflow-auto">
-            <table className="min-w-[620px] lg:min-w-[760px] w-full text-sm">
+          <div className="mt-4 admin-table-wrap">
+            <table className="admin-table">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-3 py-2.5 text-left text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Customer</th>

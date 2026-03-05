@@ -6,6 +6,13 @@ import { StaticInfoPage, SupportDeskPage } from './components/site/PublicInfoPag
 const AdminPage = lazy(() => import('./components/admin/AdminPage'));
 const BlogIndexPage = lazy(() => import('./components/blog/BlogIndexPage'));
 const BlogPostPage = lazy(() => import('./components/blog/BlogPostPage'));
+const BillingResultPage = lazy(async () => ({
+  default: (await import('./components/site/BillingPages')).BillingResultPage,
+}));
+
+const BillingSuccessEntry: React.FC = () => <BillingResultPage status="success" />;
+const BillingFailedEntry: React.FC = () => <BillingResultPage status="failed" />;
+const BillingCancelledEntry: React.FC = () => <BillingResultPage status="cancelled" />;
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -23,6 +30,18 @@ const Entry: React.ComponentType =
     ? AdminPage
     : normalizedPath === '/support' || normalizedPath === '/contact' || normalizedPath === '/contact-us'
     ? SupportDeskPage
+    : normalizedPath === '/billing/manage' || normalizedPath === '/settings/billing' || normalizedPath === '/pricing' || normalizedPath === '/data-and-trust'
+    ? App
+    : normalizedPath === '/billing/success'
+    ? BillingSuccessEntry
+    : normalizedPath === '/billing/failed'
+    ? BillingFailedEntry
+    : normalizedPath === '/billing/cancelled'
+    ? BillingCancelledEntry
+    : normalizedPath === '/subscription-terms' || normalizedPath === '/legal/terms' ||
+      normalizedPath === '/refund-policy' || normalizedPath === '/legal/refund-policy' ||
+      normalizedPath === '/cancellation-policy' || normalizedPath === '/legal/cancellation-policy'
+    ? App
     : normalizedPath === '/faq'
     ? (() => <StaticInfoPage page="faq" />)
     : normalizedPath === '/privacy-policy' || normalizedPath === '/privacy'

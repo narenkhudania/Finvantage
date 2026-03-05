@@ -46,7 +46,7 @@ const InteriorPillars: React.FC = () => {
       title: "Multi-Earner Sync",
       desc: "Map complex household incomes, bonuses, and side-hustles into a single unified Strategy Lab.",
       icon: Users,
-      tech: "Household Node",
+      tech: "Household Profile",
       color: "emerald"
     }
   ];
