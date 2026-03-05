@@ -481,6 +481,15 @@ const Liabilities: React.FC<{ state: FinanceState, updateState: (data: Partial<F
         estimatedInterestDelta: 0,
         currentDti: 0,
         shockedDti: 0,
+        annualInterestBurden: 0,
+        debtToAssetRatio: 0,
+        baseWeightedMonths: 0,
+        projectedClosureMonths: 0,
+        closureGainMonths: 0,
+        investmentReturnAssumption: getRiskReturnAssumption(state.riskProfile?.level),
+        estimatedPrepayBenefitAnnual: 0,
+        estimatedInvestBenefitAnnual: 0,
+        prepayVsInvestDelta: 0,
       };
     }
 

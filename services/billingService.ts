@@ -926,10 +926,14 @@ export const getBillingSnapshot = async (): Promise<BillingSnapshot> => {
     throw new Error('Billing snapshot payload is invalid.');
   } catch (err) {
     const message = String((err as Error)?.message || '');
-    if (!isApiUnavailableMessage(message) && !isIgnorableDbError(err)) throw err;
+    const unavailable = isApiUnavailableMessage(message);
+    const ignorable = isIgnorableDbError(err);
+    if (!unavailable && !ignorable) throw err;
     const cachedSnapshot = getCachedServerBillingSnapshot();
     if (cachedSnapshot) return cachedSnapshot;
-    const serverPolicy = await readServerPolicyForFallback();
+    // If billing API itself is unavailable (local backend down/proxy unavailable),
+    // skip extra /api/billing/policy network call and use client policy defaults.
+    const serverPolicy = unavailable ? null : await readServerPolicyForFallback();
     return buildSafeGraceSnapshot(serverPolicy);
   }
 };

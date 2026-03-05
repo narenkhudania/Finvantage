@@ -13,6 +13,7 @@ import { Goal, GoalType, FinanceState, RelativeDate, RelativeDateType, ResourceB
 import { parseNumber } from '../lib/validation';
 import { formatCurrency, getCurrencySymbol } from '../lib/currency';
 import { annualIncomeFromDetailed } from '../lib/incomeMath';
+import PlanningAssistStrip from './common/PlanningAssistStrip';
 
 const GOAL_ICONS: Record<GoalType, any> = {
   'Retirement': Coffee,
@@ -192,6 +193,53 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
       'Optional: enable loan bridge and provide loan details.',
     ];
   }, [step, isRetirementGoal]);
+
+  const sortedGoals = useMemo(
+    () => [...state.goals].sort((a, b) => a.priority - b.priority),
+    [state.goals]
+  );
+
+  const goalsOverview = useMemo(() => {
+    const total = sortedGoals.length;
+    if (total === 0) {
+      return {
+        total,
+        recurring: 0,
+        avgFundingPct: 0,
+        funded: 0,
+        nextMilestoneYear: null as number | null,
+        avgInflation: 0,
+      };
+    }
+
+    const progressValues = sortedGoals.map((goal) => {
+      const startYear = resolveYear(goal.startDate);
+      const yearsToStart = Math.max(0, startYear - currentYear);
+      const targetFV = goal.targetAmountToday * Math.pow(1 + (goal.inflationRate / 100), yearsToStart);
+      const startGoalAmount = goal.startGoalAmount ?? targetFV;
+      return startGoalAmount > 0 ? Math.min(100, (goal.currentAmount / startGoalAmount) * 100) : 0;
+    });
+
+    const funded = progressValues.filter((value) => value >= 100).length;
+    const recurring = sortedGoals.filter((goal) => (goal.type === 'Retirement' ? true : goal.isRecurring)).length;
+    const upcomingYears = sortedGoals
+      .map((goal) => resolveYear(goal.startDate))
+      .filter((year) => year >= currentYear)
+      .sort((a, b) => a - b);
+    const avgInflation =
+      sortedGoals.reduce((sum, goal) => sum + Number(goal.inflationRate || 0), 0) / total;
+    const avgFundingPct =
+      progressValues.reduce((sum, value) => sum + value, 0) / progressValues.length;
+
+    return {
+      total,
+      recurring,
+      avgFundingPct,
+      funded,
+      nextMilestoneYear: upcomingYears[0] ?? null,
+      avgInflation,
+    };
+  }, [sortedGoals, currentYear]);
 
   const handleOpenAdd = () => {
     setEditingId(null);
@@ -701,25 +749,52 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
           {notice}
         </div>
       )}
-      {/* Strategic Header */}
-      <div className="surface-dark p-12 md:p-20 rounded-[5rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-teal-600/10 blur-[150px] rounded-full translate-x-1/4 -translate-y-1/4" />
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-12">
-          <div className="space-y-6 text-left">
-            <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
-              <Target size={14}/> Goal Intelligence
-            </div>
-            <h2 className="text-5xl md:text-7xl font-black tracking-tighter leading-[0.85]">Strategic <br/><span className="text-teal-500">Missions.</span></h2>
-            <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">
-              Consolidated life targets for <span className="text-white font-bold">{state.profile.firstName || 'User'}</span> with actuarial precision.
-            </p>
-          </div>
-          <button 
+      <PlanningAssistStrip
+        title="Life Goals"
+        description="Create clear milestones, prioritize what matters first, and track funding progress in one place."
+        tip="Start with 1-3 high-priority goals and keep timelines realistic before adding lower-priority missions."
+        actions={(
+          <button
+            type="button"
             onClick={() => (showAdd ? setShowAdd(false) : handleOpenAdd())}
-            className="px-12 py-8 bg-teal-600 hover:bg-teal-50 text-white hover:text-teal-600 rounded-[2.5rem] transition-all flex items-center gap-4 font-black uppercase text-sm tracking-[0.25em] shadow-2xl active:scale-95 shrink-0"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-2xl hover:bg-teal-500 transition-colors font-black uppercase text-[10px] tracking-widest shadow-lg"
           >
-            <Plus size={22} /> {showAdd ? 'Close Form' : 'New Milestone'}
+            <Plus size={14} /> {showAdd ? 'Close Form' : 'Add Goal'}
           </button>
+        )}
+        stats={[
+          { label: 'Total Goals', value: String(goalsOverview.total) },
+          { label: 'Recurring', value: String(goalsOverview.recurring) },
+          { label: 'Funded', value: `${goalsOverview.funded}/${goalsOverview.total || 0}`, tone: goalsOverview.funded === goalsOverview.total && goalsOverview.total > 0 ? 'positive' : 'warning' },
+          { label: 'Avg Funding', value: `${goalsOverview.avgFundingPct.toFixed(1)}%`, tone: goalsOverview.avgFundingPct >= 70 ? 'positive' : goalsOverview.avgFundingPct >= 40 ? 'warning' : 'critical' },
+          { label: 'Avg Inflation', value: `${goalsOverview.avgInflation.toFixed(1)}%`, tone: goalsOverview.avgInflation <= 7 ? 'positive' : 'warning' },
+        ]}
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Next Milestone</p>
+          <p className="mt-1 text-xl font-black text-slate-900">
+            {goalsOverview.nextMilestoneYear ?? 'Not set'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Priority Focus</p>
+          <p className="mt-1 text-xl font-black text-slate-900">
+            {sortedGoals[0]?.description || sortedGoals[0]?.type || 'No goals yet'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Funding Health</p>
+          <p className={`mt-1 text-xl font-black ${goalsOverview.avgFundingPct >= 70 ? 'text-emerald-600' : goalsOverview.avgFundingPct >= 40 ? 'text-amber-600' : 'text-rose-600'}`}>
+            {goalsOverview.avgFundingPct >= 70 ? 'Strong' : goalsOverview.avgFundingPct >= 40 ? 'Improving' : 'Needs Attention'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Estimated Gap Trend</p>
+          <p className="mt-1 text-xl font-black text-slate-900">
+            {goalsOverview.funded === goalsOverview.total && goalsOverview.total > 0 ? 'Closing' : 'Open'}
+          </p>
         </div>
       </div>
 
@@ -1268,7 +1343,7 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
              <div><h4 className="font-black text-slate-900 uppercase text-sm tracking-widest">No Active Missions</h4><p className="text-slate-400 font-medium">Define your goals to enable wealth trajectory tracking.</p></div>
           </div>
         ) : (
-          state.goals.sort((a,b) => a.priority - b.priority).map((goal) => {
+          sortedGoals.map((goal) => {
             const Icon = GOAL_ICONS[goal.type] || Target;
             const startYear = resolveYear(goal.startDate);
             const yearsToStart = Math.max(0, startYear - currentYear);
@@ -1279,9 +1354,9 @@ const Goals: React.FC<{ state: FinanceState, updateState: (data: Partial<Finance
             const progressPct = startGoalAmount > 0 ? Math.min(100, (goal.currentAmount / startGoalAmount) * 100) : 0;
 
             return (
-              <div key={goal.id} className="bg-white p-10 md:p-12 rounded-[4.5rem] border border-slate-200 shadow-sm hover:border-teal-400 transition-all flex flex-col gap-8 relative overflow-hidden group">
+              <div key={goal.id} className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-200 shadow-sm hover:border-teal-400 transition-all flex flex-col gap-6 relative overflow-hidden group">
                  <div className="flex gap-8 items-start mt-4 text-left">
-                    <div className={`w-20 h-20 bg-slate-50 text-teal-600 rounded-[2rem] flex items-center justify-center shrink-0 shadow-sm group-hover:bg-teal-600 group-hover:text-white transition-all`}>
+                    <div className={`w-16 h-16 bg-slate-50 text-teal-600 rounded-2xl flex items-center justify-center shrink-0 shadow-sm group-hover:bg-teal-600 group-hover:text-white transition-all`}>
                        <Icon size={32}/>
                     </div>
                     <div className="flex-1 space-y-2">
