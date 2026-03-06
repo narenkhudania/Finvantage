@@ -1,6 +1,7 @@
 import { withBillingAuth } from './_auth';
 import {
   assessReferralAbuseRisk,
+  getUsagePointEvents,
   getRequestClientContext,
   nowIso,
   queueBillingMessageEvent,
@@ -21,6 +22,22 @@ type RequestLike = {
 type ResponseLike = {
   status: (code: number) => ResponseLike;
   json: (payload: unknown) => void;
+};
+
+const isMissingFinalizeFunctionError = (error: unknown) => {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  const code = String((error as { code?: string })?.code || '').toLowerCase();
+  return (
+    message.includes('billing_finalize_payment') &&
+    (
+      message.includes('does not exist') ||
+      message.includes('could not find') ||
+      message.includes('schema cache') ||
+      message.includes('function') ||
+      code === 'pgrst202' ||
+      code === '404'
+    )
+  );
 };
 
 export default async function handler(req: RequestLike, res: ResponseLike) {
@@ -146,6 +163,15 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
 
     const effectiveReferrerPoints = forceReferralHold ? 0 : BILLING_POLICY.referralPoints.referrer;
     const effectiveReferredPoints = forceReferralHold ? 0 : BILLING_POLICY.referralPoints.referred;
+    const usagePointEvents = await getUsagePointEvents(ctx.client);
+    const paymentSuccessPoints = Math.max(
+      0,
+      Math.trunc(Number(
+        usagePointEvents.subscription_payment_success ??
+        USAGE_POINT_EVENTS.subscription_payment_success ||
+        0
+      ))
+    );
 
     if (payment.amount > 0) {
       if (!razorpayPaymentId || !signature || (!orderId && !razorpaySubscriptionId)) {
@@ -175,14 +201,26 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       p_referrer_points: effectiveReferrerPoints,
       p_referred_points: effectiveReferredPoints,
       p_referral_monthly_cap: BILLING_POLICY.referralMonthlyCap,
-      p_payment_success_points: USAGE_POINT_EVENTS.subscription_payment_success,
+      p_payment_success_points: paymentSuccessPoints,
       p_retry_days: BILLING_POLICY.retryDays,
     });
 
     if (finalizeError) {
       const message = String(finalizeError.message || 'Could not finalize payment transaction.');
-      if (message.toLowerCase().includes('billing_finalize_payment')) {
-        throw new Error('Billing finalization function is missing. Run the latest DB migration and retry.');
+      if (isMissingFinalizeFunctionError(finalizeError)) {
+        await recordBillingActivity(ctx.client, ctx.user.id, 'billing.verify_payment.pending_sync', {
+          payment_id: paymentId,
+          provider_payment_id: razorpayPaymentId || null,
+          provider_subscription_id: razorpaySubscriptionId || null,
+          reason: 'billing_finalize_payment_missing',
+        }).catch(() => undefined);
+
+        res.status(503).json({
+          error: 'Payment received. Activation is pending while billing services sync. Please retry in a few minutes.',
+          code: 'BILLING_FINALIZER_UNAVAILABLE',
+          retryable: true,
+        });
+        return;
       }
       throw new Error(message);
     }

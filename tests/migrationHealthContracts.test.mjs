@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 test('migration health endpoint is present', () => {
-  const source = read('api/health/migration.ts');
+  const source = read('apis/health/migration.ts');
   assert.match(source, /platform_migration_health_status/);
 });
 
@@ -16,4 +16,3 @@ test('migration health SQL checks required billing and finance objects', () => {
   assert.match(sql, /public\.save_finance_data_atomic/);
   assert.match(sql, /public\.billing_finalize_payment/);
 });
-

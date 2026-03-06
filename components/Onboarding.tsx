@@ -685,6 +685,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
       const normalizedIncomeSource = normalizeIncomeSource(formData.incomeSource);
       const termInsuranceAmount = formData.hasTermInsurance ? Number(formData.termInsuranceAmount) : 0;
       const healthInsuranceAmount = formData.hasHealthInsurance ? Number(formData.healthInsuranceAmount) : 0;
+      const normalizedPhone = normalizePhoneDigits(formData.phoneNumber);
+      const mobileE164 = normalizedPhone ? `${formData.phoneCountryCode}${normalizedPhone}` : '';
+      const referralCode = formData.hasReferralCode ? normalizeReferralCode(formData.referralCode) : '';
       if (formData.hasTermInsurance && termInsuranceAmount <= 0) {
         setError('Enter a valid term insurance amount.');
         setIsProcessing(false);
@@ -708,11 +711,13 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete, onBackToLanding, in
         iqScore: baselineIq,
         termInsuranceAmount,
         healthInsuranceAmount,
+        mobileE164,
+        phoneCountryCode: formData.phoneCountryCode,
+        phoneNumber: normalizedPhone,
+        referralCode: referralCode || undefined,
       });
 
       const normalizedEmail = formData.identifier.trim().toLowerCase();
-      const normalizedPhone = normalizePhoneDigits(formData.phoneNumber);
-      const mobileE164 = normalizedPhone ? `${formData.phoneCountryCode}${normalizedPhone}` : '';
 
       onComplete({
         isRegistered: true,

@@ -418,6 +418,9 @@ export type Insurance = {
 
 export type View = 
   | 'dashboard' 
+  | 'profile'
+  | 'rewards'
+  | 'planning-engine'
   | 'pricing'
   | 'billing-manage'
   | 'subscription-terms'

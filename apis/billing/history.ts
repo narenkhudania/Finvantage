@@ -32,6 +32,16 @@ const invoiceFromPayment = (payment: Record<string, any>) => {
   };
 };
 
+const buildProfileLabel = (profile: Record<string, any> | null) => {
+  if (!profile || typeof profile !== 'object') return null;
+  const first = String(profile.first_name || '').trim();
+  const last = String(profile.last_name || '').trim();
+  const full = `${first} ${last}`.trim();
+  if (full) return full;
+  const identifier = String(profile.identifier || '').trim();
+  return identifier || null;
+};
+
 export default async function handler(req: RequestLike, res: ResponseLike) {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method Not Allowed' });
@@ -50,6 +60,33 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     const invoices = payments
       .filter((row) => ['captured', 'paid', 'succeeded', 'authorized', 'refunded', 'failed', 'pending'].includes(String(row.status || '').toLowerCase()))
       .map(invoiceFromPayment);
+
+    const counterpartIds = Array.from(
+      new Set(
+        referralEvents.flatMap((row) => {
+          const ids: string[] = [];
+          const referrer = String(row.referrer_user_id || '');
+          const referred = String(row.referred_user_id || '');
+          if (referrer && referrer !== ctx.user.id) ids.push(referrer);
+          if (referred && referred !== ctx.user.id) ids.push(referred);
+          return ids;
+        })
+      )
+    );
+    const counterpartMap = new Map<string, Record<string, any>>();
+    if (counterpartIds.length > 0) {
+      const { data: counterpartProfiles, error: counterpartError } = await ctx.client
+        .from('profiles')
+        .select('id,first_name,last_name,identifier')
+        .in('id', counterpartIds);
+      if (!counterpartError && Array.isArray(counterpartProfiles)) {
+        for (const row of counterpartProfiles) {
+          const key = String((row as Record<string, any>).id || '');
+          if (!key) continue;
+          counterpartMap.set(key, row as Record<string, any>);
+        }
+      }
+    }
 
     res.status(200).json({
       data: {
@@ -111,6 +148,27 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           referredUserId: String(row.referred_user_id || ''),
           referralCode: String(row.referral_code || ''),
           status: String(row.status || 'rewarded'),
+          role: String(row.referrer_user_id || '') === ctx.user.id ? 'referrer' : 'referred',
+          counterpartUserId: String(row.referrer_user_id || '') === ctx.user.id
+            ? (row.referred_user_id ? String(row.referred_user_id) : null)
+            : (row.referrer_user_id ? String(row.referrer_user_id) : null),
+          counterpartLabel: (() => {
+            const counterpartUserId = String(row.referrer_user_id || '') === ctx.user.id
+              ? String(row.referred_user_id || '')
+              : String(row.referrer_user_id || '');
+            const profile = counterpartUserId ? counterpartMap.get(counterpartUserId) || null : null;
+            return buildProfileLabel(profile);
+          })(),
+          counterpartIdentifier: (() => {
+            const counterpartUserId = String(row.referrer_user_id || '') === ctx.user.id
+              ? String(row.referred_user_id || '')
+              : String(row.referrer_user_id || '');
+            const profile = counterpartUserId ? counterpartMap.get(counterpartUserId) || null : null;
+            return profile?.identifier ? String(profile.identifier) : null;
+          })(),
+          counterpartIdentifierMasked: (() => {
+            return null;
+          })(),
           metadata: row.metadata || {},
           createdAt: String(row.created_at || ''),
         })),

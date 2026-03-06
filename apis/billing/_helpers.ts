@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { BILLING_POLICY, PLAN_MONTHS } from './_config';
+import { BILLING_POLICY, PLAN_MONTHS, USAGE_POINT_EVENTS, USAGE_POINT_EVENT_TYPES } from './_config';
 import {
   calculateCouponDiscountRule,
   computeAccessStateRule,
@@ -32,6 +32,67 @@ export const safeNum = (value: unknown, fallback = 0) => {
 };
 
 export const nowIso = () => new Date().toISOString();
+
+const USAGE_POINT_RULE_CACHE_TTL_MS = 60_000;
+let usagePointRulesCache: { expiresAt: number; value: Record<string, number> } | null = null;
+
+const buildDefaultUsagePointRules = () => {
+  const baseline: Record<string, number> = {};
+  for (const eventType of USAGE_POINT_EVENT_TYPES) {
+    baseline[eventType] = Math.max(0, Math.trunc(Number(USAGE_POINT_EVENTS[eventType] || 0)));
+  }
+  return baseline;
+};
+
+export const getUsagePointEvents = async (
+  client: SupabaseClient,
+  options?: { forceRefresh?: boolean }
+) => {
+  const forceRefresh = Boolean(options?.forceRefresh);
+  const now = Date.now();
+  if (!forceRefresh && usagePointRulesCache && usagePointRulesCache.expiresAt > now) {
+    return usagePointRulesCache.value;
+  }
+
+  const defaults = buildDefaultUsagePointRules();
+  const { data, error } = await client
+    .from('billing_usage_point_rules')
+    .select('event_type,points,is_active')
+    .in('event_type', [...USAGE_POINT_EVENT_TYPES]);
+
+  if (error) {
+    const message = String(error.message || '').toLowerCase();
+    if (
+      message.includes('relation') ||
+      message.includes('does not exist') ||
+      message.includes('schema cache') ||
+      message.includes('permission denied') ||
+      message.includes('forbidden')
+    ) {
+      usagePointRulesCache = {
+        expiresAt: now + USAGE_POINT_RULE_CACHE_TTL_MS,
+        value: defaults,
+      };
+      return defaults;
+    }
+    throw new Error(error.message || 'Could not load billing usage point rules.');
+  }
+
+  const merged = { ...defaults };
+  for (const row of data || []) {
+    const eventType = String((row as Record<string, unknown>).event_type || '').trim();
+    if (!eventType || !Object.prototype.hasOwnProperty.call(merged, eventType)) continue;
+    const isActive = (row as Record<string, unknown>).is_active !== false;
+    const points = Math.max(0, Math.trunc(Number((row as Record<string, unknown>).points || 0)));
+    merged[eventType] = isActive ? points : 0;
+  }
+
+  usagePointRulesCache = {
+    expiresAt: now + USAGE_POINT_RULE_CACHE_TTL_MS,
+    value: merged,
+  };
+  return merged;
+};
 
 const REFERRAL_SIGNAL_SALT =
   process.env.BILLING_REFERRAL_SIGNAL_SALT ||

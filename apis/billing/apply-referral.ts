@@ -49,6 +49,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           applied: false,
           reason: 'already_linked',
           referredByCode: String(profile.referred_by_code),
+          immutable: true,
         },
       });
       return;

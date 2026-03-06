@@ -77,8 +77,24 @@ const Header: React.FC<HeaderProps> = ({
     ? 'Subscription Plans'
     : isBillingManageView
       ? 'Subscription Management'
-      : title.replace(/-/g, ' ');
-  const sectionLabel = isPricingView ? 'Pricing' : isBillingManageView ? 'Billing' : 'App';
+      : normalizedTitle === 'profile'
+        ? 'Profile'
+        : normalizedTitle === 'rewards'
+          ? 'Referral & Rewards'
+          : normalizedTitle === 'planning-engine'
+            ? 'Planning Engine'
+            : title.replace(/-/g, ' ');
+  const sectionLabel = isPricingView
+    ? 'Pricing'
+    : isBillingManageView
+      ? 'Billing'
+      : normalizedTitle === 'profile'
+        ? 'Profile'
+        : normalizedTitle === 'rewards'
+          ? 'Rewards'
+          : normalizedTitle === 'planning-engine'
+            ? 'Planning'
+            : 'App';
   const userName = state.profile.firstName?.trim() || 'Primary User';
   const userInitial = userName.charAt(0).toUpperCase();
   const normalizedAskQuery = askQuery.trim().toLowerCase();
@@ -222,13 +238,13 @@ const Header: React.FC<HeaderProps> = ({
 
           <div className="flex items-center gap-2 md:gap-2.5">
             <button
-              onClick={() => setView('settings')}
+              onClick={() => setView('rewards')}
               className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 transition md:h-10 md:rounded-2xl md:px-3 ${
                 pointsFrozen
                   ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
                   : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
               }`}
-              aria-label="Open rewards and points"
+              aria-label="Open referral and rewards"
             >
               <Gift size={14} />
               <span className="text-[10px] font-black uppercase tracking-[0.14em]">{normalizedPoints} pts</span>
@@ -275,12 +291,25 @@ const Header: React.FC<HeaderProps> = ({
                     <AppButton
                       tone="ghost"
                       size="md"
-                      onClick={() => { setView('settings'); setIsDropdownOpen(false); }}
+                      onClick={() => { setView('profile'); setIsDropdownOpen(false); }}
+                      className="w-full !justify-between !rounded-xl !px-4 !py-3 !text-slate-600 hover:!bg-teal-50 hover:!text-teal-600"
+                      leadingIcon={
+                        <span className="inline-flex items-center gap-3">
+                          <User size={18} />
+                          <span>Profile</span>
+                        </span>
+                      }
+                      trailingIcon={<ChevronRight size={14} className="opacity-30" />}
+                    />
+                    <AppButton
+                      tone="ghost"
+                      size="md"
+                      onClick={() => { setView('planning-engine'); setIsDropdownOpen(false); }}
                       className="w-full !justify-between !rounded-xl !px-4 !py-3 !text-slate-600 hover:!bg-teal-50 hover:!text-teal-600"
                       leadingIcon={
                         <span className="inline-flex items-center gap-3">
                           <Settings size={18} />
-                          <span>Settings</span>
+                          <span>Planning Engine</span>
                         </span>
                       }
                       trailingIcon={<ChevronRight size={14} className="opacity-30" />}

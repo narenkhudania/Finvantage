@@ -3,6 +3,7 @@ import {
   User,
   Shield,
   Gift,
+  MapPin,
   LogOut,
   Copy,
   CheckCircle2,
@@ -34,6 +35,8 @@ interface SettingsProps {
   onLogout: () => void;
   setView?: (view: View) => void;
   mode?: 'settings' | 'data-trust';
+  initialTab?: 'profile' | 'planning' | 'rewards';
+  hideTabBar?: boolean;
 }
 
 const buildBucket = (partial: Partial<DiscountBucket>, id: string): DiscountBucket => ({
@@ -75,14 +78,14 @@ const REWARD_EVENT_META: Array<{ eventType: string; label: string }> = [
   { eventType: 'subscription_payment_success', label: 'Subscription Payment Success' },
 ];
 
-const MILESTONE_POINTS: Array<{ eventType: string; label: string; points: number }> = [
-  { eventType: 'daily_login', label: 'Daily Login', points: 10 },
-  { eventType: 'profile_completion', label: 'Profile Completion', points: 20 },
-  { eventType: 'risk_profile_completed', label: 'Risk Profile Completed', points: 10 },
-  { eventType: 'goal_added', label: 'Goal Added', points: 20 },
-  { eventType: 'report_generated', label: 'Report Generated', points: 10 },
-  { eventType: 'subscription_payment_success', label: 'Subscription Payment Success', points: 30 },
-];
+const REWARD_EVENT_POINT_FALLBACK: Record<string, number> = {
+  daily_login: 10,
+  profile_completion: 20,
+  risk_profile_completed: 10,
+  goal_added: 20,
+  report_generated: 10,
+  subscription_payment_success: 30,
+};
 
 const MILESTONE_SEGMENT_CLASSES = [
   'bg-teal-500',
@@ -99,14 +102,24 @@ const toTitleCase = (value: string) =>
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
+const formatReferralStatusWithEta = (status: string | null | undefined) => {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!normalized) return 'Not Linked';
+  if (normalized === 'fraud_hold') return 'Under Manual Review (ETA 24-48 hours)';
+  if (normalized === 'applied_pending_first_paid') return 'Applied (Rewards Unlock After First Paid Subscription)';
+  return toTitleCase(normalized);
+};
+
 const Settings: React.FC<SettingsProps> = ({
   state,
   updateState,
   onLogout,
   setView,
   mode = 'settings',
+  initialTab = 'profile',
+  hideTabBar = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'planning' | 'rewards'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'planning' | 'rewards'>(initialTab);
   const [copied, setCopied] = useState(false);
   const [copiedReferralCode, setCopiedReferralCode] = useState(false);
   const [rewardsLoading, setRewardsLoading] = useState(false);
@@ -119,10 +132,25 @@ const Settings: React.FC<SettingsProps> = ({
   const [showPermissionDashboard, setShowPermissionDashboard] = useState(false);
   const [lastViewedAt] = useState(() => new Date().toISOString());
 
+  React.useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
   const retirementYear = getRetirementYear(state.profile.dob, state.profile.retirementAge);
   const lifeExpectancyYear = getLifeExpectancyYear(state.profile.dob, state.profile.lifeExpectancy);
   const currentYear = new Date().getFullYear();
   const retirementOffset = retirementYear ? retirementYear - currentYear : 30;
+  const yearsToRetirement = retirementYear ? Math.max(0, retirementYear - currentYear) : null;
+  const yearsInRetirement = retirementYear && lifeExpectancyYear ? Math.max(0, lifeExpectancyYear - retirementYear) : null;
+  const hasName = Boolean((state.profile.firstName || '').trim() && (state.profile.lastName || '').trim());
+  const hasDob = Boolean((state.profile.dob || '').trim());
+  const hasLocation = Boolean(
+    (state.profile.country || '').trim()
+    && (state.profile.state || '').trim()
+    && (state.profile.city || '').trim()
+    && (state.profile.pincode || '').trim()
+  );
+  const profileSignalCount = [hasName, hasDob, hasLocation].filter(Boolean).length;
 
   const discountSettings = state.discountSettings;
   const normalizedIncomeSource: IncomeSource = state.profile.incomeSource === 'business' ? 'business' : 'salaried';
@@ -193,6 +221,15 @@ const Settings: React.FC<SettingsProps> = ({
   };
 
   const bucketError = validateBuckets(discountSettings.buckets);
+  const bucketCoverageLabel = useMemo(() => {
+    if (!discountSettings.buckets.length) return 'No coverage yet';
+    const ranges = discountSettings.buckets.map((bucket) => resolveBucketOffsets(bucket));
+    const minStart = Math.min(...ranges.map((range) => range.start));
+    const maxEnd = ranges.some((range) => range.end === Infinity)
+      ? Infinity
+      : Math.max(...ranges.map((range) => range.end));
+    return `${minStart}Y -> ${maxEnd === Infinity ? 'Infinity' : `${maxEnd}Y`}`;
+  }, [discountSettings.buckets]);
 
   const updateDiscountSettings = (patch: Partial<typeof discountSettings>) => {
     updateState({
@@ -294,7 +331,7 @@ const Settings: React.FC<SettingsProps> = ({
   const isIncomeContextShared = normalizedIncomeSource === 'business';
   const openProfileSettings = () => {
     if (mode === 'data-trust' && setView) {
-      setView('settings');
+      setView('profile');
       return;
     }
     setActiveTab('profile');
@@ -440,30 +477,88 @@ const Settings: React.FC<SettingsProps> = ({
   );
 
   const milestoneProgressRows = useMemo(() => {
-    const byEvent = new Map(rewardsSummary.map((row) => [row.eventType, row]));
-    return MILESTONE_POINTS.map((item) => {
-      const matched = byEvent.get(item.eventType);
-      const completed = Boolean(matched?.completed);
+    return REWARD_EVENT_META.map((item) => {
+      const matched = rewardsSummary.find((row) => row.eventType === item.eventType);
+      const points = Math.max(
+        0,
+        Math.trunc(Number(matched?.pointsPerEvent || REWARD_EVENT_POINT_FALLBACK[item.eventType] || 0))
+      );
+      const earnedTotal = Math.max(0, Number(matched?.earnedPoints || 0));
+      const progressRatio = points > 0 ? Math.min(1, earnedTotal / points) : 0;
+      const completed = progressRatio >= 1;
       return {
         ...item,
+        points,
         completed,
-        earnedPoints: completed ? item.points : 0,
+        earnedTotal,
+        progressRatio,
       };
     });
   }, [rewardsSummary]);
 
   const milestoneTotalPoints = useMemo(
-    () => MILESTONE_POINTS.reduce((sum, item) => sum + item.points, 0),
-    [],
+    () => milestoneProgressRows.reduce((sum, item) => sum + Math.max(0, Number(item.points || 0)), 0),
+    [milestoneProgressRows],
   );
 
   const milestoneEarnedPoints = useMemo(
-    () => milestoneProgressRows.reduce((sum, row) => sum + row.earnedPoints, 0),
+    () => milestoneProgressRows.reduce((sum, row) => sum + row.earnedTotal, 0),
     [milestoneProgressRows],
   );
   const rewardsBalance = Number(rewardsSnapshot?.points?.balance || 0);
-  const rewardsCompletedCount = rewardsSummary.filter((row) => row.completed).length;
+  const rewardsCompletedCount = milestoneProgressRows.filter((row) => row.completed).length;
   const rewardsInviteCap = Number((rewardsSnapshot?.referral as any)?.monthlyInviteCap || 100);
+  const referralSummary = rewardsSnapshot?.referral?.summary;
+  const referrerSummary = referralSummary?.asReferrer || {
+    total: 0,
+    rewarded: 0,
+    fraudHold: 0,
+    reversed: 0,
+    pending: 0,
+    uniqueReferredUsers: 0,
+  };
+  const referredSummary = referralSummary?.asReferred || {
+    status: null,
+    referralCode: null,
+    referrerUserId: null,
+  };
+  const referralPointsEarned = rewardsSnapshot?.referral?.pointsEarned || {
+    asReferrer: 0,
+    asReferred: 0,
+    total: 0,
+  };
+  const referredByName = rewardsSnapshot?.referral?.referredByLabel || null;
+  const referredByIdentifier = rewardsSnapshot?.referral?.referredByIdentifier
+    || rewardsSnapshot?.referral?.referredByIdentifierMasked
+    || rewardsSnapshot?.referral?.referredByUserId
+    || null;
+  const referredByDisplay = referredByName || referredByIdentifier || 'Not linked';
+  const referredStatusLabel = formatReferralStatusWithEta(
+    String(rewardsSnapshot?.referral?.referredStatus || referredSummary.status || 'not linked')
+  );
+  const referralRecentActivity = useMemo(() => {
+    const fromSnapshot = Array.isArray(rewardsSnapshot?.referral?.recentEvents)
+      ? rewardsSnapshot.referral.recentEvents
+      : [];
+    if (fromSnapshot.length > 0) {
+      return fromSnapshot.slice(0, 8);
+    }
+    const fromHistory = Array.isArray(rewardsHistory?.referralEvents)
+      ? rewardsHistory.referralEvents
+      : [];
+    return fromHistory.slice(0, 8).map((row) => ({
+      id: String(row.id || ''),
+      role: row.role || 'referred',
+      referralCode: String(row.referralCode || ''),
+      status: String(row.status || ''),
+      counterpartUserId: row.counterpartUserId || null,
+      counterpartLabel: row.counterpartLabel || null,
+      counterpartIdentifier: row.counterpartIdentifier || null,
+      counterpartIdentifierMasked: row.counterpartIdentifierMasked || null,
+      createdAt: String(row.createdAt || new Date().toISOString()),
+      metadata: (row.metadata && typeof row.metadata === 'object') ? row.metadata : {},
+    }));
+  }, [rewardsHistory?.referralEvents, rewardsSnapshot?.referral?.recentEvents]);
   const rewardsActivePlanLabel = useMemo(() => {
     const sub = rewardsSnapshot?.subscription;
     if (!sub || sub.status !== 'active') return 'Not Active';
@@ -474,8 +569,8 @@ const Settings: React.FC<SettingsProps> = ({
     return sub.billingCycle || 'Active';
   }, [rewardsSnapshot?.plans, rewardsSnapshot?.subscription]);
   const rewardsLifetimeEarnings = useMemo(
-    () => recentRewardActivity.reduce((sum, row) => sum + Math.max(0, Number(row.points || 0)), 0),
-    [recentRewardActivity],
+    () => (rewardsHistory?.pointsLedger || []).reduce((sum, row) => sum + Math.max(0, Number(row.points || 0)), 0),
+    [rewardsHistory?.pointsLedger],
   );
 
   const loadRewards = async () => {
@@ -509,7 +604,7 @@ const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700 pb-24">
-      {mode === 'settings' && (
+      {mode === 'settings' && !hideTabBar && (
         <div className="-mx-4 md:-mx-6 px-4 md:px-6 py-3 bg-slate-50/95 border-y border-slate-200/70">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-1.5 bg-white rounded-2xl border border-slate-200 w-full max-w-5xl mx-auto">
             <button onClick={() => setActiveTab('profile')} className={`px-4 md:px-6 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all flex items-center justify-center gap-2 whitespace-nowrap ${activeTab === 'profile' ? 'bg-teal-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}><User size={14}/> Profile</button>
@@ -528,72 +623,174 @@ const Settings: React.FC<SettingsProps> = ({
               <p className="mt-1 text-xs font-semibold text-slate-600">Dedicated page for permissions, controls, and transparency.</p>
             </div>
             <button
-              onClick={() => (setView ? setView('settings') : undefined)}
+              onClick={() => (setView ? setView('profile') : undefined)}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold tracking-wide text-slate-700 hover:border-teal-300 hover:text-teal-700"
             >
-              Back to Settings
+              Back to Profile
             </button>
           </div>
         </div>
       )}
 
       {mode === 'settings' && activeTab === 'profile' && (
-        <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
-          <div className="bg-white p-8 md:p-12 rounded-[3rem] border border-slate-200 shadow-sm space-y-8">
-            <div className="flex items-start justify-between gap-6">
+        <div className="max-w-6xl mx-auto space-y-6 animate-in slide-in-from-bottom-6">
+          <section className="relative overflow-hidden rounded-[2rem] border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-5 md:p-7">
+            <div className="pointer-events-none absolute -top-12 -right-16 h-40 w-40 rounded-full bg-teal-100/70 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-14 -left-10 h-36 w-36 rounded-full bg-cyan-100/60 blur-2xl" />
+            <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
               <div>
-                <h3 className="text-2xl font-black text-slate-900">Onboarding Profile Editor</h3>
-                <p className="mt-1 text-xs font-semibold text-slate-500">These values directly update planning logic and timelines.</p>
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-teal-700">Profile</p>
+                <h3 className="mt-1 text-2xl md:text-3xl font-black tracking-tight text-slate-900">Personal Control Center</h3>
+                <p className="mt-1 text-sm font-semibold text-slate-600">Update identity, location, and planning horizon used across every module.</p>
               </div>
-              <div className="px-4 py-2 rounded-2xl bg-teal-50 border border-teal-100 text-right">
-                <p className="text-[11px] font-semibold tracking-wide text-teal-700">Profile Completion</p>
-                <p className="text-xl font-black text-slate-900">{onboardingCompletion}%</p>
+              <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white/85 px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-black tracking-wide text-slate-700">Profile Completion</p>
+                  <p className="text-xl font-black text-slate-900">{onboardingCompletion}%</p>
+                </div>
+                <div className="mt-2 h-2.5 rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-teal-500 to-cyan-500 transition-all duration-500"
+                    style={{ width: `${Math.max(0, Math.min(100, onboardingCompletion))}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-[11px] font-semibold text-slate-600">Core signals complete: {profileSignalCount}/3</p>
               </div>
             </div>
+            <div className="relative mt-5 grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-slate-500">Retirement Year</p>
+                <p className="mt-0.5 text-base font-black text-slate-900">{retirementYear ?? '—'}</p>
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-slate-500">Life Expectancy Year</p>
+                <p className="mt-0.5 text-base font-black text-slate-900">{lifeExpectancyYear ?? '—'}</p>
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-slate-500">Years to Retirement</p>
+                <p className="mt-0.5 text-base font-black text-emerald-700">{yearsToRetirement ?? '—'}</p>
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-slate-500">Post-Retirement Horizon</p>
+                <p className="mt-0.5 text-base font-black text-teal-700">{yearsInRetirement ?? '—'} yrs</p>
+              </div>
+            </div>
+          </section>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">First Name</label>
-                <input type="text" value={state.profile.firstName} onChange={e => updateProfile({ firstName: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none" />
+          <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 md:p-6 shadow-sm space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-teal-100 bg-teal-50 text-teal-600">
+                  <User size={16} />
+                </span>
+                <div>
+                  <p className="text-sm font-black text-slate-900">Identity Details</p>
+                  <p className="text-xs font-semibold text-slate-500">Used for personalization and records.</p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Last Name</label>
-                <input type="text" value={state.profile.lastName || ''} onChange={e => updateProfile({ lastName: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label className="space-y-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">First Name</span>
+                  <input
+                    type="text"
+                    value={state.profile.firstName}
+                    onChange={e => updateProfile({ firstName: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Last Name</span>
+                  <input
+                    type="text"
+                    value={state.profile.lastName || ''}
+                    onChange={e => updateProfile({ lastName: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                </label>
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date of Birth</label>
-                <input type="date" value={state.profile.dob || ''} onChange={e => updateProfile({ dob: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none" />
+              <label className="space-y-1.5 block">
+                <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Date of Birth</span>
+                <input
+                  type="date"
+                  value={state.profile.dob || ''}
+                  onChange={e => updateProfile({ dob: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                />
+              </label>
+            </div>
+
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 md:p-6 shadow-sm space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-cyan-100 bg-cyan-50 text-cyan-600">
+                  <MapPin size={16} />
+                </span>
+                <div>
+                  <p className="text-sm font-black text-slate-900">Location and Context</p>
+                  <p className="text-xs font-semibold text-slate-500">Used for planning assumptions and tax context.</p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Country</label>
-                <input type="text" value={state.profile.country || ''} onChange={e => updateProfile({ country: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label className="space-y-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Country</span>
+                  <input
+                    type="text"
+                    value={state.profile.country || ''}
+                    onChange={e => updateProfile({ country: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">State</span>
+                  <input
+                    type="text"
+                    value={state.profile.state || ''}
+                    onChange={e => updateProfile({ state: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">City</span>
+                  <input
+                    type="text"
+                    value={state.profile.city || ''}
+                    onChange={e => updateProfile({ city: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Pincode</span>
+                  <input
+                    type="text"
+                    value={state.profile.pincode || ''}
+                    onChange={e => updateProfile({ pincode: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                </label>
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">City</label>
-                <input type="text" value={state.profile.city || ''} onChange={e => updateProfile({ city: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">State</label>
-                <input type="text" value={state.profile.state || ''} onChange={e => updateProfile({ state: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pincode</label>
-                <input type="text" value={state.profile.pincode || ''} onChange={e => updateProfile({ pincode: e.target.value })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Income Source</label>
-                <select value={normalizedIncomeSource} onChange={e => updateProfile({ incomeSource: e.target.value as IncomeSource })} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 font-bold outline-none">
+              <label className="space-y-1.5 block">
+                <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Income Source</span>
+                <select
+                  value={normalizedIncomeSource}
+                  onChange={e => updateProfile({ incomeSource: e.target.value as IncomeSource })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                >
                   <option value="salaried">Salaried</option>
                   <option value="business">Business</option>
                 </select>
-              </div>
+              </label>
             </div>
+          </section>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50">
+          <section className="rounded-[2rem] border border-slate-200 bg-white p-5 md:p-6 shadow-sm space-y-5">
+            <div>
+              <p className="text-sm font-black text-slate-900">Planning Horizon Controls</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Adjust retirement and life expectancy to instantly update timeline math.</p>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Retirement Age</label>
-                  <span className="text-xl font-black text-emerald-600">{state.profile.retirementAge}</span>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Retirement Age</label>
+                  <span className="text-2xl font-black text-emerald-700">{state.profile.retirementAge}</span>
                 </div>
                 <input
                   type="range"
@@ -606,15 +803,15 @@ const Settings: React.FC<SettingsProps> = ({
                     const lifeExpectancy = Math.max(retirementAge + 1, state.profile.lifeExpectancy);
                     updateProfile({ retirementAge, lifeExpectancy });
                   }}
-                  className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-emerald-500 cursor-pointer"
+                  className="w-full h-1.5 bg-emerald-200 rounded-full appearance-none accent-emerald-600 cursor-pointer"
                 />
-                <p className="text-[10px] font-bold text-slate-500 mt-2">Retirement year: {retirementYear ?? '—'}</p>
+                <p className="mt-2 text-[11px] font-semibold text-emerald-800">Retirement Year: {retirementYear ?? '—'}</p>
               </div>
 
-              <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50">
+              <div className="rounded-2xl border border-teal-100 bg-teal-50/50 p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Life Expectancy Age</label>
-                  <span className="text-xl font-black text-teal-600">{state.profile.lifeExpectancy}</span>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-teal-700">Life Expectancy</label>
+                  <span className="text-2xl font-black text-teal-700">{state.profile.lifeExpectancy}</span>
                 </div>
                 <input
                   type="range"
@@ -626,14 +823,14 @@ const Settings: React.FC<SettingsProps> = ({
                     const lifeExpectancy = Number.parseInt(e.target.value, 10) || 85;
                     updateProfile({ lifeExpectancy: Math.max(state.profile.retirementAge + 1, lifeExpectancy) });
                   }}
-                  className="w-full h-1.5 bg-slate-200 rounded-full appearance-none accent-teal-600 cursor-pointer"
+                  className="w-full h-1.5 bg-teal-200 rounded-full appearance-none accent-teal-600 cursor-pointer"
                 />
-                <p className="text-[10px] font-bold text-slate-500 mt-2">Life expectancy year: {lifeExpectancyYear ?? '—'}</p>
+                <p className="mt-2 text-[11px] font-semibold text-teal-800">Life Expectancy Year: {lifeExpectancyYear ?? '—'}</p>
               </div>
             </div>
-          </div>
+          </section>
 
-          <div className="bg-rose-50 p-6 md:p-10 rounded-[3rem] border border-rose-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="bg-rose-50 p-6 md:p-8 rounded-[2rem] border border-rose-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="space-y-1">
               <h4 className="text-lg font-black text-rose-900">Session Termination</h4>
               <p className="text-sm font-medium text-rose-700">Logout will end your current session.</p>
@@ -654,8 +851,10 @@ const Settings: React.FC<SettingsProps> = ({
       )}
 
       {mode === 'settings' && activeTab === 'rewards' && (
-        <div className="max-w-5xl mx-auto space-y-6 animate-in slide-in-from-bottom-6">
-          <div className="bg-white p-5 md:p-8 rounded-[2rem] border border-slate-200 shadow-sm space-y-5">
+        <div className="max-w-6xl mx-auto space-y-6 animate-in slide-in-from-bottom-6">
+          <div className="relative overflow-hidden bg-white p-4 md:p-7 rounded-[2rem] border border-slate-200 shadow-sm space-y-5">
+            <div className="pointer-events-none absolute -top-14 -right-16 h-40 w-40 rounded-full bg-teal-100/70 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-14 -left-10 h-36 w-36 rounded-full bg-cyan-100/60 blur-2xl" />
             {rewardsError && (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">
                 {rewardsError}
@@ -668,16 +867,16 @@ const Settings: React.FC<SettingsProps> = ({
               </section>
             ) : (
               <>
-                <section className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-6 md:px-7 md:py-7">
+                <section className="relative rounded-[1.75rem] border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 px-5 py-6 md:px-7 md:py-7">
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
                     <div className="flex items-center gap-5">
                       <div className="h-16 w-16 rounded-2xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-600">
                         <Sparkles size={28} />
                       </div>
                       <div>
-                        <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">Referral &amp; Rewards</h3>
+                        <h3 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">Rewards Hub</h3>
                         <p className="mt-1 text-sm font-semibold text-slate-600">
-                          Track points earned from milestones and referrals in one place.
+                          Track referral lifecycle, points milestones, and plan benefits in one place.
                         </p>
                         <p className="mt-2 text-xs font-semibold text-slate-500">
                           Completed Milestones: {rewardsCompletedCount}/{rewardsSummary.length}
@@ -688,6 +887,25 @@ const Settings: React.FC<SettingsProps> = ({
                     <div className="self-start md:self-auto rounded-2xl border border-teal-200 bg-teal-50 px-6 py-5 min-w-[170px] text-center">
                       <p className="text-xs font-bold tracking-wide text-teal-700">Total Points</p>
                       <p className="mt-1 text-4xl font-black text-slate-900">{rewardsBalance}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold text-slate-500">Lifetime Earned</p>
+                      <p className="mt-0.5 text-lg font-black text-slate-900">{rewardsLifetimeEarnings}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold text-slate-500">Total Referrals</p>
+                      <p className="mt-0.5 text-lg font-black text-slate-900">{referrerSummary.total}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold text-slate-500">Rewarded</p>
+                      <p className="mt-0.5 text-lg font-black text-emerald-700">{referrerSummary.rewarded}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold text-slate-500">Your Status</p>
+                      <p className="mt-0.5 text-sm font-black text-slate-900 truncate">{referredStatusLabel}</p>
                     </div>
                   </div>
                 </section>
@@ -730,9 +948,17 @@ const Settings: React.FC<SettingsProps> = ({
                         {rewardsSnapshot?.referral?.referralReward?.referred || 0} points.
                       </span>
                     </p>
-                    <p className="mt-auto pt-4 text-[11px] font-semibold text-slate-500">
-                      Monthly invite cap: {rewardsInviteCap}
-                    </p>
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Who referred you</p>
+                      <p className="mt-1 text-sm font-black text-slate-900">{referredByDisplay}</p>
+                      {referredByName && referredByIdentifier && referredByIdentifier !== referredByName && (
+                        <p className="mt-1 text-[11px] font-semibold text-slate-600">{referredByIdentifier}</p>
+                      )}
+                      <p className="mt-1 text-[11px] font-semibold text-slate-600">
+                        Status: {referredStatusLabel}
+                        {rewardsSnapshot?.referral?.referredByCode ? ` • Code: ${rewardsSnapshot.referral.referredByCode}` : ''}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-6 md:p-7 min-h-[220px] flex flex-col">
@@ -756,14 +982,135 @@ const Settings: React.FC<SettingsProps> = ({
                 </section>
 
                 <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5 md:p-7">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-2xl font-black tracking-tight text-slate-900">Referral Lifecycle</h4>
+                      <p className="mt-1 text-sm font-semibold text-slate-600">Track who referred who, reward status, and credited points.</p>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 w-fit">
+                      Invite cap: {rewardsInviteCap}/month
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="text-[11px] font-semibold tracking-wide text-slate-500">Your Referral Code</p>
+                      <p className="mt-1 text-sm font-black text-slate-900">{rewardsSnapshot?.referral?.myCode || '—'}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-600">
+                        Referred by: {referredByDisplay}
+                      </p>
+                      {referredByName && referredByIdentifier && referredByIdentifier !== referredByName && (
+                        <p className="mt-1 text-[11px] font-semibold text-slate-600">
+                          {referredByIdentifier}
+                        </p>
+                      )}
+                      <p className="mt-1 text-[11px] font-semibold text-slate-600">
+                        Status: {referredStatusLabel}
+                        {rewardsSnapshot?.referral?.referredByCode ? ` • Code: ${rewardsSnapshot.referral.referredByCode}` : ''}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="text-[11px] font-semibold tracking-wide text-slate-500">Referral Rewards</p>
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                          <p className="text-[10px] font-bold text-emerald-700">As Referrer</p>
+                          <p className="text-sm font-black text-emerald-800">+{referralPointsEarned.asReferrer}</p>
+                        </div>
+                        <div className="rounded-lg border border-sky-100 bg-sky-50 px-3 py-2">
+                          <p className="text-[10px] font-bold text-sky-700">As Referred</p>
+                          <p className="text-sm font-black text-sky-800">+{referralPointsEarned.asReferred}</p>
+                        </div>
+                        <div className="rounded-lg border border-teal-100 bg-teal-50 px-3 py-2">
+                          <p className="text-[10px] font-bold text-teal-700">Total</p>
+                          <p className="text-sm font-black text-teal-800">+{referralPointsEarned.total}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2">
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">Invites</p>
+                      <p className="text-base font-black text-slate-900">{referrerSummary.total}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">Rewarded</p>
+                      <p className="text-base font-black text-emerald-700">{referrerSummary.rewarded}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">Fraud Hold</p>
+                      <p className="text-base font-black text-amber-700">{referrerSummary.fraudHold}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">Reversed</p>
+                      <p className="text-base font-black text-rose-700">{referrerSummary.reversed}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">Unique Users</p>
+                      <p className="text-base font-black text-slate-900">{referrerSummary.uniqueReferredUsers}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <table className="min-w-full text-left">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Role</th>
+                          <th className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Counterparty</th>
+                          <th className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Date</th>
+                          <th className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {referralRecentActivity.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="px-3 py-6 text-center text-sm font-semibold text-slate-500">
+                              No referral activity yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          referralRecentActivity.map((event) => (
+                            <tr key={`rewards-referral-${event.id}`} className="border-t border-slate-200">
+                              <td className="px-3 py-2 text-xs font-black text-slate-700 uppercase tracking-wide">
+                                {event.role === 'referrer' ? 'You Referred' : 'Referred You'}
+                              </td>
+                              <td className="px-3 py-2 text-xs font-semibold text-slate-700">
+                                <div className="space-y-0.5">
+                                  <p>{event.counterpartLabel || event.counterpartIdentifier || event.counterpartIdentifierMasked || event.counterpartUserId || 'Unknown'}</p>
+                                  {event.counterpartLabel && event.counterpartIdentifier && event.counterpartIdentifier !== event.counterpartLabel && (
+                                    <p className="text-[11px] font-medium text-slate-500">{event.counterpartIdentifier}</p>
+                                  )}
+                                  <p className="text-[11px] font-medium text-slate-500">Code: {event.referralCode || '—'}</p>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-xs font-semibold text-slate-700">
+                                {new Date(event.createdAt).toLocaleDateString()}
+                              </td>
+                              <td className="px-3 py-2 text-xs font-black text-slate-600">
+                                {formatReferralStatusWithEta(String(event.status || 'unknown'))}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5 md:p-7">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <h4 className="text-2xl font-black tracking-tight text-slate-900">Points Earned by Milestone</h4>
                       <p className="mt-1 text-xs font-semibold text-slate-600">Milestone completion progress and points unlocked.</p>
                     </div>
-                    <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-bold text-teal-700 w-fit">
-                      {milestoneEarnedPoints}/{milestoneTotalPoints} Points
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-bold text-teal-700 w-fit">
+                        Earned {milestoneEarnedPoints} pts
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 w-fit">
+                        Configured {milestoneTotalPoints} pts
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -777,7 +1124,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <div
                             className={`h-full transition-all duration-700 ease-out ${MILESTONE_SEGMENT_CLASSES[index % MILESTONE_SEGMENT_CLASSES.length]} ${row.completed ? 'opacity-100' : 'opacity-30'}`}
                             style={{
-                              width: animateMilestoneBars ? (row.completed ? '100%' : '0%') : '0%',
+                              width: animateMilestoneBars ? `${Math.max(0, Math.min(100, row.progressRatio * 100))}%` : '0%',
                               transitionDelay: `${index * 110}ms`,
                             }}
                           />
@@ -793,10 +1140,20 @@ const Settings: React.FC<SettingsProps> = ({
                         <div key={row.eventType} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className={`h-2.5 w-2.5 rounded-full ${MILESTONE_SEGMENT_CLASSES[index % MILESTONE_SEGMENT_CLASSES.length]}`} />
-                            <p className="text-xs font-black text-slate-800 truncate">{row.label}</p>
+                            <div className="min-w-0">
+                              <p className="text-xs font-black text-slate-800 truncate">{row.label}</p>
+                              {row.earnedTotal > row.points && (
+                                <p className="text-[10px] font-semibold text-slate-500">
+                                  Lifetime earned: {row.earnedTotal} pts
+                                </p>
+                              )}
+                              <p className="text-[10px] font-semibold text-slate-500">
+                                Configured per completion: {row.points} pts
+                              </p>
+                            </div>
                           </div>
-                          <p className={`text-[11px] font-black whitespace-nowrap ${row.completed ? 'text-emerald-700' : 'text-slate-500'}`}>
-                            {row.earnedPoints}/{row.points} pts
+                          <p className={`text-[11px] font-black whitespace-nowrap ${row.earnedTotal > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
+                            {row.earnedTotal}/{row.points} pts
                           </p>
                         </div>
                       ))}
@@ -852,15 +1209,16 @@ const Settings: React.FC<SettingsProps> = ({
       )}
 
       {mode === 'settings' && activeTab === 'planning' && (
-        <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
-          <div className="bg-white p-6 md:p-8 rounded-[3rem] border border-slate-200 shadow-sm space-y-6">
-            <section className="rounded-[2rem] border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-5 md:p-6">
+        <div className="max-w-6xl mx-auto space-y-6 animate-in slide-in-from-bottom-6">
+          <div className="relative overflow-hidden bg-white p-4 md:p-7 rounded-[2rem] border border-slate-200 shadow-sm space-y-6">
+            <div className="pointer-events-none absolute -top-14 -right-16 h-40 w-40 rounded-full bg-teal-100/70 blur-2xl" />
+            <div className="pointer-events-none absolute -bottom-14 -left-10 h-36 w-36 rounded-full bg-cyan-100/60 blur-2xl" />
+            <section className="relative rounded-[1.75rem] border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-5 md:p-6">
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div>
-                  <h3 className="text-2xl md:text-3xl font-black text-slate-900">Planner Assumptions</h3>
-                  <p className="mt-1 text-sm font-semibold text-slate-600">
-                    Set core return and inflation assumptions, then shape them by timeline buckets.
-                  </p>
+                  <p className="text-[11px] font-black uppercase tracking-[0.16em] text-teal-700">Planning Engine</p>
+                  <h3 className="mt-1 text-2xl md:text-3xl font-black tracking-tight text-slate-900">Planner Assumptions and Bucket Logic</h3>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Set return and inflation assumptions, then model their behavior across each timeline phase.</p>
                 </div>
                 <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black tracking-wide ${
                   bucketError ? 'border-rose-200 bg-rose-50 text-rose-600' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -870,16 +1228,20 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="rounded-xl border border-white/70 bg-white/70 p-3">
-                  <p className="text-[11px] font-semibold text-slate-500">Buckets Configured</p>
+              <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2">
+                <div className="rounded-xl border border-white/80 bg-white/85 p-3">
+                  <p className="text-[11px] font-semibold text-slate-500">Buckets</p>
                   <p className="mt-1 text-xl font-black text-slate-900">{discountSettings.buckets.length}</p>
                 </div>
-                <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+                <div className="rounded-xl border border-white/80 bg-white/85 p-3">
+                  <p className="text-[11px] font-semibold text-slate-500">Coverage</p>
+                  <p className="mt-1 text-sm font-black text-slate-900">{bucketCoverageLabel}</p>
+                </div>
+                <div className="rounded-xl border border-white/80 bg-white/85 p-3">
                   <p className="text-[11px] font-semibold text-slate-500">Discount Mode</p>
                   <p className="mt-1 text-sm font-black text-slate-900">{discountSettings.useBuckets ? 'Bucketed' : 'Single Default'}</p>
                 </div>
-                <div className="rounded-xl border border-white/70 bg-white/70 p-3">
+                <div className="rounded-xl border border-white/80 bg-white/85 p-3">
                   <p className="text-[11px] font-semibold text-slate-500">Inflation Mode</p>
                   <p className="mt-1 text-sm font-black text-slate-900">{discountSettings.useBucketInflation ? 'Bucketed' : 'Single Default'}</p>
                 </div>
@@ -887,15 +1249,15 @@ const Settings: React.FC<SettingsProps> = ({
             </section>
 
             <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="inline-flex items-center gap-2 text-[11px] font-black tracking-wide text-slate-600">
                       <SlidersHorizontal size={14} />
-                      Discount Settings
+                      Discount Curve
                     </div>
                     <p className="text-sm font-semibold text-slate-600">
-                      Use timeline-based discount rates or a single default rate across all years.
+                      Toggle between one default rate and timeline-based discount assumptions.
                     </p>
                   </div>
                   <button
@@ -924,22 +1286,22 @@ const Settings: React.FC<SettingsProps> = ({
                       step={0.1}
                       value={discountSettings.defaultDiscountRate}
                       onChange={(e) => updateDiscountSettings({ defaultDiscountRate: parseNumberInput(e.target.value, 0) })}
-                      className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-slate-900 outline-none"
+                      className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                     />
                     <span className="text-xs font-black text-slate-500">%</span>
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5 space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="inline-flex items-center gap-2 text-[11px] font-black tracking-wide text-slate-600">
                       <Layers size={14} />
-                      Inflation Settings
+                      Inflation Curve
                     </div>
                     <p className="text-sm font-semibold text-slate-600">
-                      Apply separate inflation curves by timeline bucket when long-horizon prices vary.
+                      Apply bucket-level inflation where long-term costs diverge from today.
                     </p>
                   </div>
                   <button
@@ -968,7 +1330,7 @@ const Settings: React.FC<SettingsProps> = ({
                       step={0.1}
                       value={discountSettings.defaultInflationRate}
                       onChange={(e) => updateDiscountSettings({ defaultInflationRate: parseNumberInput(e.target.value, 0) })}
-                      className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-slate-900 outline-none"
+                      className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                     />
                     <span className="text-xs font-black text-slate-500">%</span>
                   </div>
@@ -982,7 +1344,7 @@ const Settings: React.FC<SettingsProps> = ({
                   <CalendarRange size={18} />
                   Bucket Templates
                 </h4>
-                <p className="text-xs font-semibold text-slate-500">Click a template to auto-fill bucket setup</p>
+                <p className="text-xs font-semibold text-slate-500">Apply a starter preset, then fine-tune in editor</p>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <button
@@ -1013,7 +1375,7 @@ const Settings: React.FC<SettingsProps> = ({
             </section>
 
             {bucketError && (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 shadow-sm">
                 <p className="inline-flex items-center gap-2 text-sm font-black text-rose-700">
                   <AlertTriangle size={16} />
                   {bucketError}
@@ -1021,11 +1383,11 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             )}
 
-            <section className="space-y-4">
+            <section className="space-y-4 rounded-[1.5rem] border border-slate-200 bg-slate-50/70 p-4 md:p-5">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <h4 className="text-xl font-black text-slate-900">Bucket Editor</h4>
-                  <p className="text-xs font-semibold text-slate-500 mt-1">Define year coverage, rates, and inflation per horizon block.</p>
+                  <p className="text-xs font-semibold text-slate-500 mt-1">Define boundaries, rates, and inflation for each horizon block.</p>
                 </div>
                 <button
                   type="button"
@@ -1038,7 +1400,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
 
               {discountSettings.buckets.length > 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <p className="text-[11px] font-semibold text-slate-500">Coverage Preview</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {discountSettings.buckets.map((bucket) => {
@@ -1057,7 +1419,7 @@ const Settings: React.FC<SettingsProps> = ({
               )}
 
               {discountSettings.buckets.length === 0 ? (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600">
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-5 text-sm font-semibold text-slate-600">
                   No buckets configured yet. Add your first bucket to start timeline-based assumptions.
                 </div>
               ) : (
@@ -1065,7 +1427,7 @@ const Settings: React.FC<SettingsProps> = ({
                   {discountSettings.buckets.map((bucket, index) => {
                     const { start, end } = resolveBucketOffsets(bucket);
                     return (
-                      <div key={bucket.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:p-5">
+                      <div key={bucket.id} className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 shadow-sm">
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                           <div>
                             <p className="text-[11px] font-black text-slate-500">Bucket {index + 1}</p>
@@ -1090,7 +1452,7 @@ const Settings: React.FC<SettingsProps> = ({
                               type="text"
                               value={bucket.name}
                               onChange={(e) => updateBucket(index, { name: e.target.value })}
-                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none"
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                               placeholder="Eg. Early Career"
                             />
                           </div>
@@ -1101,7 +1463,7 @@ const Settings: React.FC<SettingsProps> = ({
                               <select
                                 value={bucket.startType}
                                 onChange={(e) => updateBucket(index, { startType: e.target.value as DiscountBucket['startType'] })}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                               >
                                 <option value="Offset">Offset</option>
                                 <option value="Retirement">Retirement</option>
@@ -1110,7 +1472,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 type="number"
                                 value={bucket.startOffset}
                                 onChange={(e) => updateBucket(index, { startOffset: parseIntegerInput(e.target.value, 0) })}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none"
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                               />
                             </div>
                             <p className="text-[11px] font-semibold text-slate-500">
@@ -1124,7 +1486,7 @@ const Settings: React.FC<SettingsProps> = ({
                               <select
                                 value={bucket.endType}
                                 onChange={(e) => updateBucket(index, { endType: e.target.value as DiscountBucket['endType'] })}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700"
+                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                               >
                                 <option value="Offset">Offset</option>
                                 <option value="Retirement">Retirement</option>
@@ -1135,7 +1497,7 @@ const Settings: React.FC<SettingsProps> = ({
                                   type="number"
                                   value={bucket.endOffset ?? 0}
                                   onChange={(e) => updateBucket(index, { endOffset: parseIntegerInput(e.target.value, 0) })}
-                                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none"
+                                  className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                                 />
                               ) : (
                                 <div className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm font-black text-slate-500">
@@ -1156,7 +1518,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 step={0.1}
                                 value={bucket.discountRate ?? ''}
                                 onChange={(e) => updateBucket(index, { discountRate: parseNumberInput(e.target.value, discountSettings.defaultDiscountRate) })}
-                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-sm font-bold text-slate-900 outline-none"
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                               />
                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-500">%</span>
                             </div>
@@ -1170,7 +1532,7 @@ const Settings: React.FC<SettingsProps> = ({
                                 step={0.1}
                                 value={bucket.inflationRate ?? ''}
                                 onChange={(e) => updateBucket(index, { inflationRate: parseNumberInput(e.target.value, discountSettings.defaultInflationRate) })}
-                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-sm font-bold text-slate-900 outline-none"
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-8 text-sm font-bold text-slate-900 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
                               />
                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-500">%</span>
                             </div>

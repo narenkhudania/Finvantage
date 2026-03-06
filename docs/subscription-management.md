@@ -4,8 +4,8 @@
 
 ### Architecture
 - Client: React + TypeScript (`/pricing`, `/billing/manage`, `/settings/billing`, `/billing/success`, `/billing/failed`, `/billing/cancelled`)
-- API: Serverless handlers under `/api/billing/*`
-- Auth: Supabase Auth bearer token (validated in `api/billing/_auth.ts`)
+- API: Serverless handlers under `apis/billing/*` (public route alias remains `/api/billing/*`)
+- Auth: Supabase Auth bearer token (validated in `apis/billing/_auth.ts`)
 - Data: Supabase Postgres (plans, subscriptions, payments, coupons, points, referrals, overrides)
 - Gateway: Razorpay Subscriptions + Orders fallback + signature verification + webhook processing
 - Access control: Dashboard paywall reads billing `accessState` from `/api/billing/snapshot` and keeps non-dashboard pages open.
@@ -65,15 +65,15 @@ One-time migration behavior:
 ## 3. Backend Implementation
 
 Core files:
-- `api/billing/_auth.ts`: token validation and Supabase service client context
-- `api/billing/_helpers.ts`: pricing helpers, access-state logic, points balance/FIFO, history loaders, billing activity writes
-- `api/billing/_config.ts`: policy constants (retry windows, caps, referral values, override cap)
-- `api/billing/create-order.ts`: coupon + points + referral attachment + Razorpay order creation
-- `api/billing/verify-payment.ts`: signature verification, idempotent payment finalization, subscription creation, points and referral rewards
-- `api/billing/history.ts`: customer-visible billing timeline and invoice feed
-- `api/billing/subscription-action.ts`: cancel at period end / resume auto-renew
-- `api/billing/webhook.ts`: idempotent webhook intake and payment/subscription status updates
-- `api/billing/award-points.ts`: usage points + monthly cap + points-freeze enforcement
+- `apis/billing/_auth.ts`: token validation and Supabase service client context
+- `apis/billing/_helpers.ts`: pricing helpers, access-state logic, points balance/FIFO, history loaders, billing activity writes
+- `apis/billing/_config.ts`: policy constants (retry windows, caps, referral values, override cap)
+- `apis/billing/create-order.ts`: coupon + points + referral attachment + Razorpay order creation
+- `apis/billing/verify-payment.ts`: signature verification, idempotent payment finalization, subscription creation, points and referral rewards
+- `apis/billing/history.ts`: customer-visible billing timeline and invoice feed
+- `apis/billing/subscription-action.ts`: cancel at period end / resume auto-renew
+- `apis/billing/webhook.ts`: idempotent webhook intake and payment/subscription status updates
+- `apis/billing/award-points.ts`: usage points + monthly cap + points-freeze enforcement
 
 Security controls:
 - Bearer token required for all customer billing endpoints

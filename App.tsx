@@ -5,32 +5,11 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
-import Dashboard from './components/Dashboard';
-import Transactions from './components/Transactions';
-import Goals from './components/Goals';
-import GoalSummary from './components/GoalSummary';
 import Onboarding from './components/Onboarding';
-import TaxEstate from './components/TaxEstate';
-import RetirementPlan from './components/RetirementPlan';
-import Family from './components/Family';
-import InflowProfile from './components/InflowProfile';
-import OutflowProfile from './components/OutflowProfile';
-import Insurances from './components/Insurances';
-import Assets from './components/Assets';
-import Liabilities from './components/Liabilities';
-import RiskProfile from './components/RiskProfile';
 import Landing from './components/Landing';
-import GoalFunding from './components/GoalFunding';
-import InvestmentPlan from './components/InvestmentPlan';
-import ActionPlan from './components/ActionPlan';
-import MonthlySavingsPlan from './components/MonthlySavingsPlan';
 import Settings from './components/Settings';
-import Notifications from './components/Notifications';
-import Cashflow from './components/Cashflow';
-import SupportCenter from './components/SupportCenter';
-import { StaticInfoPage, SupportDeskPage } from './components/site/PublicInfoPages';
 import RewardCelebration, { type RewardCelebrationPayload } from './components/RewardCelebration';
-import { FinanceState, View, DetailedIncome, IncomeSource } from './types';
+import { FinanceState, View, DetailedIncome } from './types';
 import { LayoutDashboard, Bell, ListChecks, Cloud, CloudOff, Loader2 } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { signOut } from './services/authService';
@@ -52,6 +31,30 @@ const LOCAL_KEY        = 'finvantage_active_session';
 const SAVE_DEBOUNCE_MS = 1500;
 
 const AIAdvisor = lazy(() => import('./components/AIAdvisor'));
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const Transactions = lazy(() => import('./components/Transactions'));
+const Goals = lazy(() => import('./components/Goals'));
+const GoalSummary = lazy(() => import('./components/GoalSummary'));
+const TaxEstate = lazy(() => import('./components/TaxEstate'));
+const RetirementPlan = lazy(() => import('./components/RetirementPlan'));
+const Family = lazy(() => import('./components/Family'));
+const InflowProfile = lazy(() => import('./components/InflowProfile'));
+const OutflowProfile = lazy(() => import('./components/OutflowProfile'));
+const Insurances = lazy(() => import('./components/Insurances'));
+const Assets = lazy(() => import('./components/Assets'));
+const Liabilities = lazy(() => import('./components/Liabilities'));
+const RiskProfile = lazy(() => import('./components/RiskProfile'));
+const InvestmentPlan = lazy(() => import('./components/InvestmentPlan'));
+const ActionPlan = lazy(() => import('./components/ActionPlan'));
+const MonthlySavingsPlan = lazy(() => import('./components/MonthlySavingsPlan'));
+const Notifications = lazy(() => import('./components/Notifications'));
+const Cashflow = lazy(() => import('./components/Cashflow'));
+const SupportDeskPage = lazy(async () => ({
+  default: (await import('./components/site/PublicInfoPages')).SupportDeskPage,
+}));
+const StaticInfoPage = lazy(async () => ({
+  default: (await import('./components/site/PublicInfoPages')).StaticInfoPage,
+}));
 const BillingManagePage = lazy(async () => ({
   default: (await import('./components/site/BillingPages')).BillingManagePage,
 }));
@@ -170,6 +173,9 @@ const normalizeState = (raw: Partial<FinanceState> | null | undefined): FinanceS
 };
 
 const BILLING_APP_PATHS = new Set([
+  '/profile',
+  '/rewards',
+  '/planning-engine',
   '/pricing',
   '/billing/manage',
   '/settings/billing',
@@ -198,6 +204,9 @@ const normalizePathname = (value: string) => value.replace(/\/+$/, '').toLowerCa
 
 const getBillingViewFromPath = (pathname: string): View | null => {
   const normalized = normalizePathname(pathname);
+  if (normalized === '/profile') return 'profile';
+  if (normalized === '/rewards') return 'rewards';
+  if (normalized === '/planning-engine') return 'planning-engine';
   if (normalized === '/pricing') return 'pricing';
   if (normalized === '/billing/manage' || normalized === '/settings/billing') return 'billing-manage';
   if (normalized === '/data-and-trust') return 'data-trust';
@@ -208,6 +217,9 @@ const getBillingViewFromPath = (pathname: string): View | null => {
 };
 
 const getPathForBillingView = (view: View): string | null => {
+  if (view === 'profile') return '/profile';
+  if (view === 'rewards') return '/rewards';
+  if (view === 'planning-engine') return '/planning-engine';
   if (view === 'pricing') return '/pricing';
   if (view === 'billing-manage') return '/billing/manage';
   if (view === 'data-trust') return '/data-and-trust';
@@ -993,9 +1005,21 @@ const App: React.FC = () => {
         title: 'Monthly Savings Plan | FinVantage',
         description: 'Calibrate monthly savings targets and execution priorities.',
       },
+      profile: {
+        title: 'Profile | FinVantage',
+        description: 'Manage your account profile and onboarding details.',
+      },
+      rewards: {
+        title: 'Referral & Rewards | FinVantage',
+        description: 'Track points, milestones, and referral rewards.',
+      },
+      'planning-engine': {
+        title: 'Planning Engine | FinVantage',
+        description: 'Control planner assumptions and bucket strategy.',
+      },
       settings: {
-        title: 'Settings | FinVantage',
-        description: 'Manage account preferences and planning configuration.',
+        title: 'Profile | FinVantage',
+        description: 'Manage your account profile and onboarding details.',
       },
       'data-trust': {
         title: 'Data and Trust | FinVantage',
@@ -1087,8 +1111,8 @@ const App: React.FC = () => {
   const renderView = () => {
     switch (view) {
       case 'dashboard':       return <Dashboard state={financeState} setView={setView} billingAccessState={effectiveBillingAccessState} onOpenBilling={openBillingManage} showProUpgradeCta={shouldShowFreeToProUpgrade} onOpenPricing={openPricing} pointsBalance={billingSnapshot?.points?.balance || 0} pointsFrozen={Boolean(billingSnapshot?.points?.frozen)} pointsFormula={billingSnapshot?.points?.formula || undefined} pointsEarnedEvents={billingSnapshot?.points?.earnedEvents || []} referralCode={billingSnapshot?.referral?.myCode || null} referralRewardReferrer={billingSnapshot?.referral?.referralReward?.referrer || 25} referralRewardReferred={billingSnapshot?.referral?.referralReward?.referred || 50} hasPaidSubscription={hasPaidSubscription} />;
-      case 'pricing':         return <BillingManagePage mode="pricing" />;
-      case 'billing-manage':  return <BillingManagePage mode="manage" />;
+      case 'pricing':         return <BillingManagePage mode="pricing" externalSnapshot={billingSnapshot} onSnapshotSync={setBillingSnapshot} />;
+      case 'billing-manage':  return <BillingManagePage mode="manage" externalSnapshot={billingSnapshot} onSnapshotSync={setBillingSnapshot} />;
       case 'subscription-terms': return <BillingLegalPage type="subscription-terms" />;
       case 'refund-policy':      return <BillingLegalPage type="refund-policy" />;
       case 'cancellation-policy': return <BillingLegalPage type="cancellation-policy" />;
@@ -1106,7 +1130,43 @@ const App: React.FC = () => {
       case 'investment-plan': return <InvestmentPlan state={financeState} />;
       case 'action-plan':     return <ActionPlan state={financeState} />;
       case 'monthly-savings': return <MonthlySavingsPlan state={financeState} />;
-      case 'settings':        return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} setView={setView} mode="settings" />;
+      case 'profile':
+      case 'settings':
+        return (
+          <Settings
+            state={financeState}
+            updateState={handleUpdateState}
+            onLogout={handleLogout}
+            setView={setView}
+            mode="settings"
+            initialTab="profile"
+            hideTabBar
+          />
+        );
+      case 'rewards':
+        return (
+          <Settings
+            state={financeState}
+            updateState={handleUpdateState}
+            onLogout={handleLogout}
+            setView={setView}
+            mode="settings"
+            initialTab="rewards"
+            hideTabBar
+          />
+        );
+      case 'planning-engine':
+        return (
+          <Settings
+            state={financeState}
+            updateState={handleUpdateState}
+            onLogout={handleLogout}
+            setView={setView}
+            mode="settings"
+            initialTab="planning"
+            hideTabBar
+          />
+        );
       case 'data-trust':      return <Settings state={financeState} updateState={handleUpdateState} onLogout={handleLogout} setView={setView} mode="data-trust" />;
       case 'notifications':   return <Notifications state={financeState} updateState={handleUpdateState} setView={setView} />;
       case 'support':         return <SupportDeskPage />;

@@ -133,12 +133,12 @@ const WIDGET_META: Record<WidgetId, { title: string; description: string }> = {
 
 const clampPct = (value: number) => Math.max(0, Math.min(100, value));
 const REWARD_EVENT_FALLBACK_POINTS: Record<string, number> = {
-  daily_login: 1,
-  profile_completion: 5,
-  risk_profile_completed: 5,
-  goal_added: 5,
-  report_generated: 5,
-  subscription_payment_success: 50,
+  daily_login: 10,
+  profile_completion: 20,
+  risk_profile_completed: 10,
+  goal_added: 20,
+  report_generated: 10,
+  subscription_payment_success: 30,
 };
 
 const normalizeWidgetOrder = (input: WidgetId[]): WidgetId[] => {
@@ -517,7 +517,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         eventType: 'profile_completion',
         message: `Complete your profile and earn ${eventPoints('profile_completion')} points.`,
         actionLabel: 'Complete Profile',
-        actionView: journey.nextStep?.view || 'settings',
+        actionView: journey.nextStep?.view || 'profile',
         points: eventPoints('profile_completion'),
       });
     }
@@ -1397,7 +1397,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 Customize Widgets
               </AppButton>
               <AppButton
-                onClick={() => setView('settings')}
+                onClick={() => setView('profile')}
                 tone="dark"
                 size="md"
                 className="border-slate-700 bg-slate-800 text-slate-200"

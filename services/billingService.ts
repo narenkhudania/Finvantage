@@ -82,6 +82,45 @@ export interface BillingSnapshot {
     myCode: string;
     shareLink?: string;
     referredByCode: string | null;
+    referredByUserId?: string | null;
+    referredByLabel?: string | null;
+    referredByIdentifier?: string | null;
+    referredByIdentifierMasked?: string | null;
+    referredAt?: string | null;
+    referredStatus?: string | null;
+    monthlyInviteCap?: number;
+    pointsEarned?: {
+      asReferrer: number;
+      asReferred: number;
+      total: number;
+    };
+    summary?: {
+      asReferrer: {
+        total: number;
+        rewarded: number;
+        fraudHold: number;
+        reversed: number;
+        pending: number;
+        uniqueReferredUsers: number;
+      };
+      asReferred: {
+        status: string | null;
+        referralCode: string | null;
+        referrerUserId: string | null;
+      };
+    };
+    recentEvents?: Array<{
+      id: string;
+      role: 'referrer' | 'referred';
+      referralCode: string;
+      status: string;
+      counterpartUserId: string | null;
+      counterpartLabel?: string | null;
+      counterpartIdentifier?: string | null;
+      counterpartIdentifierMasked?: string | null;
+      createdAt: string;
+      metadata: Record<string, unknown>;
+    }>;
     referralReward: {
       referrer: number;
       referred: number;
@@ -163,6 +202,11 @@ export interface BillingHistoryResponse {
     referredUserId: string;
     referralCode: string;
     status: string;
+    role?: 'referrer' | 'referred';
+    counterpartUserId?: string | null;
+    counterpartLabel?: string | null;
+    counterpartIdentifier?: string | null;
+    counterpartIdentifierMasked?: string | null;
     metadata: Record<string, unknown>;
     createdAt: string;
   }>;
@@ -179,13 +223,22 @@ export interface BillingHistoryResponse {
 }
 
 const CLIENT_USAGE_POINT_EVENTS: Record<string, number> = {
-  daily_login: 1,
-  profile_completion: 5,
-  risk_profile_completed: 5,
-  goal_added: 5,
-  report_generated: 5,
-  subscription_payment_success: 50,
+  daily_login: 10,
+  profile_completion: 20,
+  risk_profile_completed: 10,
+  goal_added: 20,
+  report_generated: 10,
+  subscription_payment_success: 30,
 };
+
+const POINTS_EVENT_ORDER: Array<keyof typeof CLIENT_USAGE_POINT_EVENTS> = [
+  'daily_login',
+  'profile_completion',
+  'risk_profile_completed',
+  'goal_added',
+  'report_generated',
+  'subscription_payment_success',
+];
 
 const BILLING_API_UNAVAILABLE_MESSAGE =
   'Billing service is temporarily unavailable. Please retry in a moment.';
@@ -200,6 +253,7 @@ const CLIENT_POLICY = {
   pointsMonthlyCap: 1000,
   pointsToInr: 1,
   pointsExpiryMonths: 12,
+  referralMonthlyCap: 100,
   referralReward: { referrer: 25, referred: 50 },
 };
 
@@ -210,7 +264,9 @@ type ServerBillingPolicy = {
   pointsMonthlyCap: number;
   pointsToRupee: number;
   pointsExpiryMonths: number;
+  referralMonthlyCap: number;
   referralReward: { referrer: number; referred: number };
+  usagePointEvents: Record<string, number>;
 };
 
 type CheckoutOrderRequest = {
@@ -231,7 +287,9 @@ type VerifyPaymentRequest = {
 };
 
 const AUTH_RETRY_DELAYS_MS = [120, 260, 480];
+const BILLING_API_UNAVAILABLE_COOLDOWN_MS = 10_000;
 const POINTS_API_UNAVAILABLE_STORAGE_KEY = 'finvantage_points_api_unavailable';
+const POINTS_RPC_MISSING_STORAGE_KEY = 'finvantage_points_rpc_missing';
 const BILLING_PLANS_CACHE_STORAGE_KEY = 'finvantage_billing_plans_cache_v1';
 const BILLING_PLANS_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
 const BILLING_SNAPSHOT_CACHE_STORAGE_KEY = 'finvantage_billing_snapshot_server_cache_v1';
@@ -239,6 +297,18 @@ const BILLING_SNAPSHOT_CACHE_MAX_AGE_MS = 1000 * 60 * 15;
 const BILLING_LAST_ENTITLEMENT_CACHE_STORAGE_KEY = 'finvantage_billing_last_entitlement_v1';
 const BILLING_FAIL_OPEN_GRACE_MS = 1000 * 60 * 30;
 let serverPolicyCache: ServerBillingPolicy | null = null;
+let billingApiUnavailableUntil = 0;
+
+const isBillingApiCooldownActive = (path: string) =>
+  path.startsWith('/api/') && Date.now() < billingApiUnavailableUntil;
+
+const markBillingApiUnavailable = () => {
+  billingApiUnavailableUntil = Date.now() + BILLING_API_UNAVAILABLE_COOLDOWN_MS;
+};
+
+const clearBillingApiUnavailable = () => {
+  billingApiUnavailableUntil = 0;
+};
 
 const readPointsApiUnavailableFlag = () => {
   if (typeof window === 'undefined') return false;
@@ -262,8 +332,32 @@ const persistPointsApiUnavailableFlag = (unavailable: boolean) => {
   }
 };
 
+const readPointsRpcMissingFlag = () => {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(POINTS_RPC_MISSING_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
+const persistPointsRpcMissingFlag = (missing: boolean) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (missing) {
+      window.localStorage.setItem(POINTS_RPC_MISSING_STORAGE_KEY, '1');
+    } else {
+      window.localStorage.removeItem(POINTS_RPC_MISSING_STORAGE_KEY);
+    }
+  } catch {
+    // ignore localStorage write failures
+  }
+};
+
 let pointsAwardApiState: 'untested' | 'testing' | 'available' | 'unavailable' =
   readPointsApiUnavailableFlag() ? 'unavailable' : 'untested';
+let pointsRpcAvailability: 'unknown' | 'available' | 'missing' =
+  readPointsRpcMissingFlag() ? 'missing' : 'unknown';
 
 const wait = async (ms: number) =>
   await new Promise<void>((resolve) => {
@@ -542,17 +636,29 @@ const readLastEntitlementCache = (): {
 
 const readServerPolicyForFallback = async (): Promise<ServerBillingPolicy | null> => {
   if (serverPolicyCache) return serverPolicyCache;
+  if (isBillingApiCooldownActive('/api/billing/policy')) return null;
   try {
     const response = await fetch('/api/billing/policy', {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      if ([500, 502, 503, 504].includes(response.status)) {
+        markBillingApiUnavailable();
+      }
+      return null;
+    }
     const payload = await response.json().catch(() => ({}));
     const data = payload?.data && typeof payload.data === 'object' ? payload.data : null;
     if (!data) return null;
     const retryDays = Array.isArray(data.retryDays) ? data.retryDays.map((value: unknown) => Number(value || 0)).filter((v: number) => v > 0) : [];
+    const usagePointEvents = (data.usagePointEvents && typeof data.usagePointEvents === 'object')
+      ? Object.entries(data.usagePointEvents as Record<string, unknown>).reduce<Record<string, number>>((acc, [eventType, points]) => {
+          acc[eventType] = Math.max(0, Math.trunc(Number(points || 0)));
+          return acc;
+        }, {})
+      : { ...CLIENT_USAGE_POINT_EVENTS };
     const normalized: ServerBillingPolicy = {
       retryDays: retryDays.length ? retryDays : CLIENT_POLICY.retryDays,
       limitedAfterDays: Number(data.limitedAfterDays ?? CLIENT_POLICY.limitedAfterDays),
@@ -560,14 +666,18 @@ const readServerPolicyForFallback = async (): Promise<ServerBillingPolicy | null
       pointsMonthlyCap: Number(data.pointsMonthlyCap ?? CLIENT_POLICY.pointsMonthlyCap),
       pointsToRupee: Number(data.pointsToRupee ?? CLIENT_POLICY.pointsToInr),
       pointsExpiryMonths: Number(data.pointsExpiryMonths ?? CLIENT_POLICY.pointsExpiryMonths),
+      referralMonthlyCap: Number(data.referralMonthlyCap ?? CLIENT_POLICY.referralMonthlyCap),
       referralReward: {
         referrer: Number(data?.referralReward?.referrer ?? CLIENT_POLICY.referralReward.referrer),
         referred: Number(data?.referralReward?.referred ?? CLIENT_POLICY.referralReward.referred),
       },
+      usagePointEvents,
     };
     serverPolicyCache = normalized;
+    clearBillingApiUnavailable();
     return normalized;
   } catch {
+    markBillingApiUnavailable();
     return null;
   }
 };
@@ -576,9 +686,10 @@ const buildSafeGraceSnapshot = (serverPolicy: ServerBillingPolicy | null): Billi
   const nowIso = new Date().toISOString();
   const cachedPlans = getCachedBillingPlans()?.plans || [];
   const entitlement = readLastEntitlementCache();
-  const fallbackEvents = Object.entries(CLIENT_USAGE_POINT_EVENTS).map(([eventType, pointsPerEvent]) => ({
+  const usagePointEvents = serverPolicy?.usagePointEvents || CLIENT_USAGE_POINT_EVENTS;
+  const fallbackEvents = Object.entries(usagePointEvents).map(([eventType, pointsPerEvent]) => ({
     eventType,
-    pointsPerEvent,
+    pointsPerEvent: Number(pointsPerEvent || 0),
     earnedPoints: 0,
     completionCount: 0,
     completed: false,
@@ -620,11 +731,382 @@ const buildSafeGraceSnapshot = (serverPolicy: ServerBillingPolicy | null): Billi
           ? `${window.location.origin}/pricing`
           : '/pricing',
       referredByCode: null,
+      referredByUserId: null,
+      referredByLabel: null,
+      referredByIdentifier: null,
+      referredByIdentifierMasked: null,
+      referredAt: null,
+      referredStatus: null,
+      monthlyInviteCap: CLIENT_POLICY.referralMonthlyCap,
+      pointsEarned: {
+        asReferrer: 0,
+        asReferred: 0,
+        total: 0,
+      },
+      summary: {
+        asReferrer: {
+          total: 0,
+          rewarded: 0,
+          fraudHold: 0,
+          reversed: 0,
+          pending: 0,
+          uniqueReferredUsers: 0,
+        },
+        asReferred: {
+          status: null,
+          referralCode: null,
+          referrerUserId: null,
+        },
+      },
+      recentEvents: [],
       referralReward: CLIENT_POLICY.referralReward,
     },
     webhookBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
     entitlementSignature: entitlement?.entitlementSignature || null,
   };
+};
+
+const inferBillingCycleFromPlan = (
+  billingMonths: number,
+  fallback: string
+) => {
+  const months = Math.max(1, Math.floor(Number(billingMonths) || 1));
+  if (months === 1) return 'monthly';
+  if (months === 3) return 'quarterly';
+  if (months === 6) return 'half_yearly';
+  if (months === 12) return 'yearly';
+  return fallback || `${months}_months`;
+};
+
+const resolveAccessStateFromSnapshotFallback = (
+  trialActive: boolean,
+  subscriptionStatus: string,
+  pastDueDays: number,
+  policy: {
+    limitedAfterDays: number;
+    blockedAfterDays: number;
+  }
+): BillingAccessState => {
+  if (trialActive) return 'active';
+  const normalizedStatus = String(subscriptionStatus || '').toLowerCase();
+  if (normalizedStatus === 'active' || normalizedStatus === 'trialing') return 'active';
+  if (normalizedStatus === 'past_due') {
+    if (pastDueDays > Number(policy.blockedAfterDays || CLIENT_POLICY.blockedAfterDays)) return 'blocked';
+    if (pastDueDays > Number(policy.limitedAfterDays || CLIENT_POLICY.limitedAfterDays)) return 'limited';
+    return 'active';
+  }
+  if (normalizedStatus === 'cancelled' || normalizedStatus === 'completed' || normalizedStatus === 'expired') {
+    return 'blocked';
+  }
+  return 'blocked';
+};
+
+const resolveLifecycleStateFromSnapshotFallback = (
+  trialActive: boolean,
+  subscriptionStatus: string,
+  accessState: BillingAccessState,
+  hasSubscription: boolean
+): BillingLifecycleState => {
+  if (trialActive) return 'trial';
+  const normalizedStatus = String(subscriptionStatus || '').toLowerCase();
+  if (accessState === 'limited') return 'limited_access';
+  if (normalizedStatus === 'past_due') return 'payment_failed';
+  if (normalizedStatus === 'active' || normalizedStatus === 'trialing') return 'active';
+  if (normalizedStatus === 'cancelled' || normalizedStatus === 'completed') return 'cancelled';
+  if (!hasSubscription || accessState === 'blocked') return 'expired';
+  return 'active';
+};
+
+const buildSnapshotViaSupabaseFallback = async (
+  serverPolicy: ServerBillingPolicy | null
+): Promise<BillingSnapshot | null> => {
+  const userId = await getCurrentUserId();
+  const now = new Date();
+  const nowIsoValue = now.toISOString();
+  const nowMs = now.getTime();
+  const policy = {
+    retryDays: serverPolicy?.retryDays || CLIENT_POLICY.retryDays,
+    limitedAfterDays: Number(serverPolicy?.limitedAfterDays ?? CLIENT_POLICY.limitedAfterDays),
+    blockedAfterDays: Number(serverPolicy?.blockedAfterDays ?? CLIENT_POLICY.blockedAfterDays),
+  };
+  const referralReward = serverPolicy?.referralReward || CLIENT_POLICY.referralReward;
+  const pointsToInr = Number(serverPolicy?.pointsToRupee ?? CLIENT_POLICY.pointsToInr);
+
+  const [history, billingProfileRes, profileRes, plansRes, usageRulesRes] = await Promise.all([
+    getHistoryViaSupabase(),
+    supabase
+      .from('user_billing_profiles')
+      .select('country,billing_currency,referral_code,referred_by_code,referred_by_user_id,points_frozen,trial_started_at,trial_end_at,trial_consumed')
+      .eq('user_id', userId)
+      .maybeSingle(),
+    supabase
+      .from('profiles')
+      .select('country')
+      .eq('id', userId)
+      .maybeSingle(),
+    supabase
+      .from('billing_plans')
+      .select('*')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('billing_months', { ascending: true }),
+    supabase
+      .from('billing_usage_point_rules')
+      .select('event_type,points,is_active')
+      .in('event_type', POINTS_EVENT_ORDER as unknown as string[]),
+  ]);
+
+  if (billingProfileRes.error && !isIgnorableDbError(billingProfileRes.error)) {
+    throw billingProfileRes.error;
+  }
+  if (profileRes.error && !isIgnorableDbError(profileRes.error)) {
+    throw profileRes.error;
+  }
+  if (plansRes.error && !isIgnorableDbError(plansRes.error)) {
+    throw plansRes.error;
+  }
+  if (usageRulesRes.error && !isIgnorableDbError(usageRulesRes.error)) {
+    throw usageRulesRes.error;
+  }
+
+  const billingProfile = (billingProfileRes.data && typeof billingProfileRes.data === 'object')
+    ? billingProfileRes.data as Record<string, unknown>
+    : null;
+  const profileRow = (profileRes.data && typeof profileRes.data === 'object')
+    ? profileRes.data as Record<string, unknown>
+    : null;
+  const plansRows = Array.isArray(plansRes.data)
+    ? plansRes.data as Array<Record<string, unknown>>
+    : [];
+  const usageRulesRows = Array.isArray(usageRulesRes.data)
+    ? usageRulesRes.data as Array<Record<string, unknown>>
+    : [];
+  const normalizedPlans = normalizeBillingPlans(plansRows);
+  const cachedPlans = getCachedBillingPlans()?.plans || [];
+  const plans = normalizedPlans.length > 0 ? normalizedPlans : cachedPlans;
+  const usagePointEvents = {
+    ...(serverPolicy?.usagePointEvents || CLIENT_USAGE_POINT_EVENTS),
+  };
+  for (const row of usageRulesRows) {
+    const eventType = String(row.event_type || '').trim();
+    if (!eventType) continue;
+    const isActive = row.is_active !== false;
+    usagePointEvents[eventType] = isActive
+      ? Math.max(0, Math.trunc(Number(row.points || 0)))
+      : 0;
+  }
+
+  const activeSubscription =
+    history.subscriptions.find((row) => row.id && row.id === history.activeSubscriptionId) ||
+    history.subscriptions.find((row) => {
+      const status = String(row.status || '').toLowerCase();
+      return status === 'active' || status === 'trialing' || status === 'past_due';
+    }) ||
+    null;
+  const pastDueDays = Number(history.pastDueDays || 0);
+  const trialStart = billingProfile?.trial_started_at ? String(billingProfile.trial_started_at) : null;
+  const trialEnd = billingProfile?.trial_end_at ? String(billingProfile.trial_end_at) : null;
+  const trialConsumed = Boolean(billingProfile?.trial_consumed);
+  const trialActive = Boolean(trialEnd && new Date(trialEnd).getTime() > nowMs && !trialConsumed);
+  const trialDaysLeft = trialEnd
+    ? Math.max(0, Math.ceil((new Date(trialEnd).getTime() - nowMs) / (24 * 60 * 60 * 1000)))
+    : 0;
+  const subscriptionStatus = String(activeSubscription?.status || '');
+  const accessState = resolveAccessStateFromSnapshotFallback(
+    trialActive,
+    subscriptionStatus,
+    pastDueDays,
+    policy
+  );
+  const lifecycleState = resolveLifecycleStateFromSnapshotFallback(
+    trialActive,
+    subscriptionStatus,
+    accessState,
+    Boolean(activeSubscription)
+  );
+
+  const pointsBalance = Math.max(
+    0,
+    history.pointsLedger.reduce((sum, row) => {
+      const expiresAtMs = row.expiresAt ? new Date(row.expiresAt).getTime() : null;
+      if (expiresAtMs && expiresAtMs < nowMs) return sum;
+      return sum + Number(row.points || 0);
+    }, 0)
+  );
+  const referralEvents = Array.isArray(history.referralEvents) ? history.referralEvents : [];
+  const referralAsReferrer = referralEvents.filter((event) => String(event.referrerUserId || '') === userId);
+  const referralAsReferred = referralEvents.find((event) => String(event.referredUserId || '') === userId) || null;
+  const rewardedReferrals = referralAsReferrer.filter((event) => String(event.status || '').toLowerCase() === 'rewarded').length;
+  const fraudHoldReferrals = referralAsReferrer.filter((event) => String(event.status || '').toLowerCase() === 'fraud_hold').length;
+  const reversedReferrals = referralAsReferrer.filter((event) => String(event.status || '').toLowerCase() === 'reversed').length;
+  const pendingReferrals = referralAsReferrer.filter((event) => {
+    const normalized = String(event.status || '').toLowerCase();
+    return normalized === 'pending' || normalized === 'investigating';
+  }).length;
+  const referralPointsAsReferrer = Math.max(
+    0,
+    history.pointsLedger
+      .filter((entry) => String(entry.eventType || '') === 'referral_referrer_reward')
+      .reduce((sum, entry) => sum + Math.max(0, Number(entry.points || 0)), 0)
+  );
+  const referralPointsAsReferred = Math.max(
+    0,
+    history.pointsLedger
+      .filter((entry) => String(entry.eventType || '') === 'referral_referred_reward')
+      .reduce((sum, entry) => sum + Math.max(0, Number(entry.points || 0)), 0)
+  );
+  const latestReferralStatus = referralAsReferred
+    ? String(referralAsReferred.status || '')
+    : (billingProfile?.referred_by_code ? 'applied_pending_first_paid' : null);
+  const recentReferralEvents = referralEvents.slice(0, 20).map((event) => {
+    const role = String(event.referrerUserId || '') === userId ? 'referrer' : 'referred';
+    const counterpartUserId = role === 'referrer'
+      ? String(event.referredUserId || '')
+      : String(event.referrerUserId || '');
+    return {
+      id: String(event.id || ''),
+      role,
+      referralCode: String(event.referralCode || ''),
+      status: String(event.status || ''),
+      counterpartUserId: counterpartUserId || null,
+      counterpartLabel: null,
+      counterpartIdentifier: null,
+      counterpartIdentifierMasked: null,
+      createdAt: String(event.createdAt || nowIsoValue),
+      metadata: (event.metadata && typeof event.metadata === 'object')
+        ? event.metadata
+        : {},
+    };
+  });
+
+  const earnedPointsByEvent = history.pointsLedger.reduce<Record<string, number>>((acc, row) => {
+    const eventType = String(row.eventType || '');
+    if (!eventType || Number(row.points || 0) <= 0) return acc;
+    acc[eventType] = (acc[eventType] || 0) + Number(row.points || 0);
+    return acc;
+  }, {});
+  const earnedEvents = POINTS_EVENT_ORDER.map((eventType) => {
+    const pointsPerEvent = Number(
+      usagePointEvents[eventType] ?? CLIENT_USAGE_POINT_EVENTS[eventType] ?? 0
+    );
+    const earnedPoints = Number(earnedPointsByEvent[eventType] || 0);
+    const completionCount = pointsPerEvent > 0 ? Math.floor(earnedPoints / pointsPerEvent) : 0;
+    return {
+      eventType,
+      pointsPerEvent,
+      earnedPoints,
+      completionCount,
+      completed: earnedPoints > 0,
+    };
+  });
+
+  const activePlan = activeSubscription
+    ? plans.find((plan) => plan.planCode === activeSubscription.planCode) || null
+    : null;
+  const country = String(
+    billingProfile?.country ||
+    profileRow?.country ||
+    'India'
+  );
+  const currency = String(
+    billingProfile?.billing_currency ||
+    'INR'
+  );
+  const referralCode = String(billingProfile?.referral_code || '');
+
+  const snapshot: BillingSnapshot = {
+    now: nowIsoValue,
+    country,
+    currency,
+    lifecycleState,
+    accessState,
+    accessReason: 'supabase_snapshot_fallback',
+    policy,
+    retryTimeline: Array.isArray(history.retryTimeline) ? history.retryTimeline : [],
+    pastDueDays,
+    trial: {
+      active: trialActive,
+      startedAt: trialStart,
+      endsAt: trialEnd,
+      daysLeft: trialDaysLeft,
+      consumed: trialConsumed,
+    },
+    subscription: activeSubscription
+      ? {
+          id: String(activeSubscription.id || ''),
+          planCode: String(activeSubscription.planCode || ''),
+          status: String(activeSubscription.status || ''),
+          amount: Number(activeSubscription.amount || 0),
+          currency: String(activeSubscription.currency || 'INR'),
+          billingCycle: inferBillingCycleFromPlan(
+            Number(activePlan?.billingMonths || 0),
+            String(activeSubscription.billingCycle || '')
+          ),
+          startAt: String(activeSubscription.startAt || nowIsoValue),
+          endAt: activeSubscription.endAt ? String(activeSubscription.endAt) : null,
+          cancelAtPeriodEnd: Boolean(activeSubscription.cancelAtPeriodEnd),
+          autoRenew: Boolean(activeSubscription.autoRenew),
+          accessState,
+        }
+      : null,
+    plans,
+    points: {
+      balance: pointsBalance,
+      frozen: Boolean(billingProfile?.points_frozen),
+      pointsToInr,
+      formula: 'Points convert to extension days using effective daily plan value.',
+      earnedEvents,
+    },
+    referral: {
+      myCode: referralCode,
+      shareLink:
+        typeof window !== 'undefined'
+          ? `${window.location.origin}/pricing${referralCode ? `?ref=${encodeURIComponent(referralCode)}` : ''}`
+          : `/pricing${referralCode ? `?ref=${encodeURIComponent(referralCode)}` : ''}`,
+      referredByCode: billingProfile?.referred_by_code
+        ? String(billingProfile.referred_by_code)
+        : null,
+      referredByUserId: billingProfile?.referred_by_user_id
+        ? String(billingProfile.referred_by_user_id)
+        : null,
+      referredByLabel: null,
+      referredByIdentifier: null,
+      referredByIdentifierMasked: null,
+      referredAt: referralAsReferred?.createdAt || null,
+      referredStatus: latestReferralStatus,
+      monthlyInviteCap: Number(serverPolicy?.referralMonthlyCap ?? CLIENT_POLICY.referralMonthlyCap),
+      pointsEarned: {
+        asReferrer: referralPointsAsReferrer,
+        asReferred: referralPointsAsReferred,
+        total: referralPointsAsReferrer + referralPointsAsReferred,
+      },
+      summary: {
+        asReferrer: {
+          total: referralAsReferrer.length,
+          rewarded: rewardedReferrals,
+          fraudHold: fraudHoldReferrals,
+          reversed: reversedReferrals,
+          pending: pendingReferrals,
+          uniqueReferredUsers: new Set(referralAsReferrer.map((event) => String(event.referredUserId || ''))).size,
+        },
+        asReferred: {
+          status: latestReferralStatus,
+          referralCode: billingProfile?.referred_by_code
+            ? String(billingProfile.referred_by_code)
+            : null,
+          referrerUserId: billingProfile?.referred_by_user_id
+            ? String(billingProfile.referred_by_user_id)
+            : null,
+        },
+      },
+      recentEvents: recentReferralEvents,
+      referralReward,
+    },
+    webhookBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
+    entitlementSignature: null,
+  };
+
+  return snapshot;
 };
 
 const getCurrentUserId = async () => {
@@ -657,6 +1139,10 @@ const getAccessToken = async (attempt = 0): Promise<string> => {
 };
 
 const callBillingApi = async <T>(path: string, init?: RequestInit, attempt = 0): Promise<T> => {
+  if (isBillingApiCooldownActive(path)) {
+    throw new Error(BILLING_API_UNAVAILABLE_MESSAGE);
+  }
+
   const token = await getAccessToken();
   if (!token) {
     if (attempt < AUTH_RETRY_DELAYS_MS.length - 1) {
@@ -685,6 +1171,7 @@ const callBillingApi = async <T>(path: string, init?: RequestInit, attempt = 0):
       message.includes('load failed') ||
       message.includes('fetch');
     if (path.startsWith('/api/') && networkUnavailable) {
+      markBillingApiUnavailable();
       throw new Error(BILLING_API_UNAVAILABLE_MESSAGE);
     }
     throw err;
@@ -705,8 +1192,10 @@ const callBillingApi = async <T>(path: string, init?: RequestInit, attempt = 0):
   if (response.ok) {
     // Local Vite dev often returns index.html with status 200 for unknown /api routes.
     if (path.startsWith('/api/') && (!looksLikeJson || looksLikeHtml) && Object.keys(payload).length === 0) {
+      markBillingApiUnavailable();
       throw new Error(BILLING_API_UNAVAILABLE_MESSAGE);
     }
+    clearBillingApiUnavailable();
     return payload as T;
   }
 
@@ -735,6 +1224,11 @@ const callBillingApi = async <T>(path: string, init?: RequestInit, attempt = 0):
       ((response.status === 404 || response.status === 405) && path.startsWith('/api/')
         ? BILLING_API_UNAVAILABLE_MESSAGE
         : `Billing request failed (HTTP ${response.status}).`);
+
+    if (backendUnavailableViaProxy || message === BILLING_API_UNAVAILABLE_MESSAGE) {
+      markBillingApiUnavailable();
+    }
+
     const shouldRetryAuth =
       attempt < AUTH_RETRY_DELAYS_MS.length - 1 &&
       (response.status === 401 || response.status === 403 || isAuthErrorMessage(message));
@@ -885,6 +1379,13 @@ const getHistoryViaSupabase = async (): Promise<BillingHistoryResponse> => {
       referredUserId: String(row.referred_user_id || ''),
       referralCode: String(row.referral_code || ''),
       status: String(row.status || ''),
+      role: String(row.referrer_user_id || '') === userId ? 'referrer' : 'referred',
+      counterpartUserId: String(row.referrer_user_id || '') === userId
+        ? (row.referred_user_id ? String(row.referred_user_id) : null)
+        : (row.referrer_user_id ? String(row.referrer_user_id) : null),
+      counterpartLabel: null,
+      counterpartIdentifier: null,
+      counterpartIdentifierMasked: null,
       metadata: (row.metadata && typeof row.metadata === 'object') ? row.metadata as Record<string, unknown> : {},
       createdAt: String(row.created_at || nowIso),
     })),
@@ -934,12 +1435,30 @@ export const getBillingSnapshot = async (): Promise<BillingSnapshot> => {
     // If billing API itself is unavailable (local backend down/proxy unavailable),
     // skip extra /api/billing/policy network call and use client policy defaults.
     const serverPolicy = unavailable ? null : await readServerPolicyForFallback();
+    try {
+      const supabaseFallback = await buildSnapshotViaSupabaseFallback(serverPolicy);
+      if (supabaseFallback) {
+        persistBillingSnapshotCache(supabaseFallback);
+        persistLastEntitlementCache(supabaseFallback);
+        if (Array.isArray(supabaseFallback.plans) && supabaseFallback.plans.length > 0) {
+          persistBillingPlansCache(supabaseFallback.plans, supabaseFallback.now || new Date().toISOString());
+        }
+        return supabaseFallback;
+      }
+    } catch (fallbackErr) {
+      if (!isIgnorableDbError(fallbackErr)) {
+        throw fallbackErr;
+      }
+    }
     return buildSafeGraceSnapshot(serverPolicy);
   }
 };
 
 export const getPublicBillingPlans = async (): Promise<PublicBillingPlansResponse> => {
   try {
+    if (isBillingApiCooldownActive('/api/billing/plans')) {
+      throw new Error(PRICING_API_UNAVAILABLE_MESSAGE);
+    }
     let response: Response;
     try {
       response = await fetch('/api/billing/plans', {
@@ -956,6 +1475,7 @@ export const getPublicBillingPlans = async (): Promise<PublicBillingPlansRespons
         message.includes('load failed') ||
         message.includes('fetch');
       if (networkUnavailable) {
+        markBillingApiUnavailable();
         throw new Error(PRICING_API_UNAVAILABLE_MESSAGE);
       }
       throw err;
@@ -975,6 +1495,7 @@ export const getPublicBillingPlans = async (): Promise<PublicBillingPlansRespons
     }
 
     if (response.ok && (!looksLikeJson || looksLikeHtml) && Object.keys(payload).length === 0) {
+      markBillingApiUnavailable();
       throw new Error(PRICING_API_UNAVAILABLE_MESSAGE);
     }
 
@@ -999,6 +1520,9 @@ export const getPublicBillingPlans = async (): Promise<PublicBillingPlansRespons
         (response.status === 404
           ? PRICING_API_UNAVAILABLE_MESSAGE
           : `Pricing request failed (HTTP ${response.status}).`);
+      if (backendUnavailableViaProxy || message === PRICING_API_UNAVAILABLE_MESSAGE) {
+        markBillingApiUnavailable();
+      }
       throw new Error(message);
     }
 
@@ -1015,6 +1539,7 @@ export const getPublicBillingPlans = async (): Promise<PublicBillingPlansRespons
     if (plans.length > 0) {
       persistBillingPlansCache(plans, lastUpdatedAt);
     }
+    clearBillingApiUnavailable();
 
     return {
       plans,
@@ -1134,6 +1659,10 @@ export const applySubscriptionAction = async (action: 'cancel_at_period_end' | '
 
 export const awardUsagePoints = async (eventType: string, sourceRef?: string, metadata?: Record<string, unknown>) => {
   const awardViaRpcFallback = async () => {
+    if (pointsRpcAvailability === 'missing') {
+      return { awarded: 0, skipped: true, reason: 'rpc_unavailable' as const, remainingCap: 0 };
+    }
+
     const normalizePayload = (value: unknown) => {
       const payload = value && typeof value === 'object' && !Array.isArray(value)
         ? value as Record<string, unknown>
@@ -1155,6 +1684,8 @@ export const awardUsagePoints = async (eventType: string, sourceRef?: string, me
     });
 
     if (!atomicError) {
+      pointsRpcAvailability = 'available';
+      persistPointsRpcMissingFlag(false);
       return normalizePayload(atomicData);
     }
 
@@ -1188,11 +1719,17 @@ export const awardUsagePoints = async (eventType: string, sourceRef?: string, me
         text.includes('401') ||
         text.includes('403')
       ) {
+        if (isMissingRpcFunctionError(error, 'billing_award_points_client')) {
+          pointsRpcAvailability = 'missing';
+          persistPointsRpcMissingFlag(true);
+        }
         return { awarded: 0, skipped: true, reason: 'rpc_unavailable' as const, remainingCap: 0 };
       }
       throw error;
     }
 
+    pointsRpcAvailability = 'available';
+    persistPointsRpcMissingFlag(false);
     return {
       ...normalizePayload(data),
     };
@@ -1215,6 +1752,8 @@ export const awardUsagePoints = async (eventType: string, sourceRef?: string, me
     );
     pointsAwardApiState = 'available';
     persistPointsApiUnavailableFlag(false);
+    pointsRpcAvailability = 'available';
+    persistPointsRpcMissingFlag(false);
     return payload.data;
   } catch (err) {
     const message = String((err as Error)?.message || '');

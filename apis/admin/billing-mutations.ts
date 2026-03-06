@@ -1,4 +1,5 @@
 import { requireAdmin } from './_auth';
+import { USAGE_POINT_EVENT_TYPES } from '../billing/_config';
 
 type RequestLike = {
   method?: string;
@@ -34,6 +35,36 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   }
 
   try {
+    if (action === 'upsert_points_rule') {
+      const eventType = String(req.body?.eventType || '').trim();
+      if (!eventType) {
+        res.status(400).json({ error: 'eventType is required.' });
+        return;
+      }
+      if (!USAGE_POINT_EVENT_TYPES.includes(eventType)) {
+        res.status(400).json({ error: 'Unsupported points event type.' });
+        return;
+      }
+      const points = Math.max(0, Math.trunc(Number(req.body?.points || 0)));
+      const payload = {
+        event_type: eventType,
+        display_name: String(req.body?.displayName || '').trim() || eventType.replace(/_/g, ' '),
+        points,
+        is_active: req.body?.isActive !== false,
+        description: String(req.body?.description || '').trim() || null,
+        updated_by: ctx.user.id,
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await ctx.client
+        .from('billing_usage_point_rules')
+        .upsert(payload, { onConflict: 'event_type' })
+        .select('*')
+        .maybeSingle();
+      if (error) throw new Error(error.message || 'Could not save points rule.');
+      res.status(200).json({ data });
+      return;
+    }
+
     if (action === 'upsert_coupon') {
       const code = String(req.body?.code || '').trim().toUpperCase();
       if (!code) {
@@ -241,4 +272,3 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     res.status(500).json({ error: (err as Error).message || 'Admin billing mutation failed.' });
   }
 }
-

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
+  Clock3,
   FileText,
   HelpCircle,
   LifeBuoy,
@@ -9,6 +10,7 @@ import {
   Map,
   Scale,
   ShieldCheck,
+  Ticket,
   UserCircle2,
 } from 'lucide-react';
 import { applySeoMeta } from '../../services/seoMeta';
@@ -191,31 +193,62 @@ export const SupportDeskPage: React.FC = () => {
       description="Use our complaint desk for service issues and contact support channels for quick resolution."
       icon={<LifeBuoy size={22} />}
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5">
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Email</p>
-          <p className="mt-2 text-sm font-black text-slate-900">support@finvantage.app</p>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Best for account, bug, and billing support.</p>
+      <section className="relative overflow-hidden rounded-[1.75rem] border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-5 md:p-6">
+        <div className="pointer-events-none absolute -top-12 -right-10 h-36 w-36 rounded-full bg-teal-100/70 blur-2xl" />
+        <div className="pointer-events-none absolute -bottom-10 -left-8 h-32 w-32 rounded-full bg-cyan-100/60 blur-2xl" />
+
+        <div className="relative grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_1fr]">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-teal-200 bg-white/80 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-teal-700">
+              <Ticket size={12} /> Support Intake
+            </div>
+            <h2 className="mt-3 text-2xl md:text-3xl font-black tracking-tight text-slate-900">Fast Complaint Resolution Workflow</h2>
+            <p className="mt-2 text-sm font-semibold text-slate-600">
+              Raise a ticket, monitor SLA status, and receive updates as support operations process your request.
+            </p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-slate-500">Primary Channel</p>
+                <p className="mt-0.5 text-sm font-black text-slate-900">In-app Complaint Desk</p>
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+                <p className="text-[11px] font-semibold text-slate-500">Response Target</p>
+                <p className="mt-0.5 text-sm font-black text-slate-900">Within 1 Business Day</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2">
+            <div className="rounded-xl border border-white/80 bg-white/85 p-3">
+              <p className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                <Mail size={12} /> Email
+              </p>
+              <p className="mt-1 text-sm font-black text-slate-900">support@finvantage.app</p>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Best for account, billing, and issue follow-up.</p>
+            </div>
+            <div className="rounded-xl border border-white/80 bg-white/85 p-3">
+              <p className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                <Clock3 size={12} /> Operations Window
+              </p>
+              <p className="mt-1 text-sm font-black text-slate-900">Monday to Saturday, 09:00-19:00 IST</p>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Tickets can be filed anytime from this page.</p>
+            </div>
+            <div className="rounded-xl border border-white/80 bg-white/85 p-3">
+              <p className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                <ShieldCheck size={12} /> Privacy
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-600">All complaint details stay linked to your authenticated account.</p>
+            </div>
+          </div>
         </div>
-        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5">
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Priority Desk</p>
-          <p className="mt-2 text-sm font-black text-slate-900">Response target: within 1 business day</p>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Urgent complaints are queued with higher priority tags.</p>
-        </div>
-        <div className="rounded-[1.5rem] border border-slate-200 bg-white p-5">
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Operations Window</p>
-          <p className="mt-2 text-sm font-black text-slate-900">Monday to Saturday, 09:00-19:00 IST</p>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Tickets can be filed anytime through the desk.</p>
-        </div>
-      </div>
+      </section>
 
       {!authLoading && !isSignedIn && (
         <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-5 text-sm font-semibold text-amber-800">
-          Sign in to submit and track complaint tickets from this page. If you are not signed in, use
+          Sign in to submit and track complaint tickets from this page.
           {' '}
           <a href="/" className="font-black underline underline-offset-2">Open App</a>
-          {' '}
-          and then return to Support Desk.
+          {' '}to continue.
         </div>
       )}
 

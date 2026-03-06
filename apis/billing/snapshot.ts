@@ -10,6 +10,7 @@ import {
   getActivePlans,
   getAvailablePoints,
   getLatestSubscription,
+  getUsagePointEvents,
   nowIso,
 } from './_helpers';
 import { BILLING_POLICY, PUBLIC_APP_BASE_URL, PUBLIC_TEST_WEBHOOK_BASE, USAGE_POINT_EVENTS } from './_config';
@@ -89,6 +90,16 @@ const isRecoverableSnapshotError = (error: unknown) => {
   );
 };
 
+const buildProfileLabel = (profile: Record<string, any> | null) => {
+  if (!profile || typeof profile !== 'object') return null;
+  const first = String(profile.first_name || '').trim();
+  const last = String(profile.last_name || '').trim();
+  const full = `${first} ${last}`.trim();
+  if (full) return full;
+  const identifier = String(profile.identifier || '').trim();
+  return identifier || null;
+};
+
 export default async function handler(req: RequestLike, res: ResponseLike) {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method Not Allowed' });
@@ -99,7 +110,18 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   if (!ctx) return;
 
   try {
-    const [{ data: profileRow }, seededProfile, plans, subscription, pointsBalance, overrideUntil, pointsEarnedRes] = await Promise.all([
+    const [
+      { data: profileRow },
+      seededProfile,
+      plans,
+      subscription,
+      pointsBalance,
+      overrideUntil,
+      pointsEarnedRes,
+      usagePointEvents,
+      referralEventsRes,
+      referralRewardPointsRes,
+    ] = await Promise.all([
       ctx.client
         .from('profiles')
         .select('country')
@@ -116,10 +138,29 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         .eq('user_id', ctx.user.id)
         .in('event_type', POINTS_EVENT_ORDER as unknown as string[])
         .gt('points', 0),
+      getUsagePointEvents(ctx.client),
+      ctx.client
+        .from('referral_events')
+        .select('id,referrer_user_id,referred_user_id,referral_code,status,metadata,created_at')
+        .or(`referrer_user_id.eq.${ctx.user.id},referred_user_id.eq.${ctx.user.id}`)
+        .order('created_at', { ascending: false })
+        .limit(120),
+      ctx.client
+        .from('reward_points_ledger')
+        .select('event_type,points')
+        .eq('user_id', ctx.user.id)
+        .in('event_type', ['referral_referrer_reward', 'referral_referred_reward'])
+        .gt('points', 0),
     ]);
 
     if (pointsEarnedRes.error) {
       throw new Error(pointsEarnedRes.error.message || 'Could not load points earned summary.');
+    }
+    if (referralEventsRes.error) {
+      throw new Error(referralEventsRes.error.message || 'Could not load referral event summary.');
+    }
+    if (referralRewardPointsRes.error) {
+      throw new Error(referralRewardPointsRes.error.message || 'Could not load referral reward points summary.');
     }
 
     const earnedPointsByEvent = (pointsEarnedRes.data || []).reduce<Record<string, number>>((acc, row: any) => {
@@ -130,7 +171,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
     }, {});
 
     const earnedEvents = POINTS_EVENT_ORDER.map((eventType) => {
-      const pointsPerEvent = Number(USAGE_POINT_EVENTS[eventType] || 0);
+      const pointsPerEvent = Number(usagePointEvents[eventType] ?? USAGE_POINT_EVENTS[eventType] ?? 0);
       const earnedPoints = Number(earnedPointsByEvent[eventType] || 0);
       const completionCount = pointsPerEvent > 0
         ? Math.floor(earnedPoints / pointsPerEvent)
@@ -143,6 +184,53 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
         completed: earnedPoints > 0,
       };
     });
+
+    const referralEvents = Array.isArray(referralEventsRes.data)
+      ? (referralEventsRes.data as Array<Record<string, any>>)
+      : [];
+    const referralPointsRows = Array.isArray(referralRewardPointsRes.data)
+      ? (referralRewardPointsRes.data as Array<Record<string, any>>)
+      : [];
+    const referralAsReferrer = referralEvents.filter((row) => String(row.referrer_user_id || '') === ctx.user.id);
+    const referralAsReferred = referralEvents.find((row) => String(row.referred_user_id || '') === ctx.user.id) || null;
+    const referralStatusCounts = referralAsReferrer.reduce<Record<string, number>>((acc, row) => {
+      const status = String(row.status || '').toLowerCase() || 'unknown';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    const referralPointsAsReferrer = referralPointsRows
+      .filter((row) => String(row.event_type || '') === 'referral_referrer_reward')
+      .reduce((sum, row) => sum + Math.max(0, Number(row.points || 0)), 0);
+    const referralPointsAsReferred = referralPointsRows
+      .filter((row) => String(row.event_type || '') === 'referral_referred_reward')
+      .reduce((sum, row) => sum + Math.max(0, Number(row.points || 0)), 0);
+
+    const counterpartIds = new Set<string>();
+    for (const event of referralEvents) {
+      const referrerId = String(event.referrer_user_id || '');
+      const referredId = String(event.referred_user_id || '');
+      if (referrerId && referrerId !== ctx.user.id) counterpartIds.add(referrerId);
+      if (referredId && referredId !== ctx.user.id) counterpartIds.add(referredId);
+    }
+    if (seededProfile?.referred_by_user_id && String(seededProfile.referred_by_user_id) !== ctx.user.id) {
+      counterpartIds.add(String(seededProfile.referred_by_user_id));
+    }
+
+    const counterpartProfiles = new Map<string, Record<string, any>>();
+    if (counterpartIds.size > 0) {
+      const ids = Array.from(counterpartIds);
+      const { data: profileRows, error: profileRowsError } = await ctx.client
+        .from('profiles')
+        .select('id,first_name,last_name,identifier')
+        .in('id', ids);
+      if (!profileRowsError && Array.isArray(profileRows)) {
+        for (const row of profileRows) {
+          const key = String((row as Record<string, any>).id || '');
+          if (!key) continue;
+          counterpartProfiles.set(key, row as Record<string, any>);
+        }
+      }
+    }
 
     const profile = await activateMigrationTrialIfEligible(
       ctx.client,
@@ -168,6 +256,51 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       access.accessState,
       pastDueDays
     );
+    const referredByUserId = profile?.referred_by_user_id ? String(profile.referred_by_user_id) : null;
+    const referredByCounterparty = referredByUserId
+      ? counterpartProfiles.get(referredByUserId) || null
+      : null;
+    const referredByLabel = buildProfileLabel(referredByCounterparty);
+    const referredByIdentifier = referredByCounterparty?.identifier
+      ? String(referredByCounterparty.identifier)
+      : null;
+    const referredStatus = referralAsReferred
+      ? String(referralAsReferred.status || '')
+      : (profile?.referred_by_code ? 'applied_pending_first_paid' : null);
+    const referredAt = referralAsReferred?.created_at
+      ? String(referralAsReferred.created_at)
+      : null;
+    const recentReferralEvents = referralEvents.slice(0, 20).map((event) => {
+      const role: 'referrer' | 'referred' =
+        String(event.referrer_user_id || '') === ctx.user.id ? 'referrer' : 'referred';
+      const counterpartUserId = role === 'referrer'
+        ? String(event.referred_user_id || '')
+        : String(event.referrer_user_id || '');
+      const counterpartProfile = counterpartUserId
+        ? counterpartProfiles.get(counterpartUserId) || null
+        : null;
+      return {
+        id: String(event.id || ''),
+        role,
+        referralCode: String(event.referral_code || ''),
+        status: String(event.status || ''),
+        counterpartUserId: counterpartUserId || null,
+        counterpartLabel: buildProfileLabel(counterpartProfile),
+        counterpartIdentifier: counterpartProfile?.identifier
+          ? String(counterpartProfile.identifier)
+          : null,
+        counterpartIdentifierMasked: null,
+        createdAt: String(event.created_at || nowIso()),
+        metadata: (event.metadata && typeof event.metadata === 'object')
+          ? event.metadata
+          : {},
+      };
+    });
+    const uniqueReferredUsers = new Set(
+      referralAsReferrer
+        .map((event) => String(event.referred_user_id || ''))
+        .filter(Boolean)
+    ).size;
 
     const now = nowIso();
     const entitlementSignature = signEntitlement({
@@ -236,6 +369,34 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           myCode: String(profile.referral_code || ''),
           shareLink: `${PUBLIC_APP_BASE_URL}/pricing?ref=${encodeURIComponent(String(profile.referral_code || ''))}`,
           referredByCode: profile.referred_by_code ? String(profile.referred_by_code) : null,
+          referredByUserId,
+          referredByLabel,
+          referredByIdentifier,
+          referredByIdentifierMasked: null,
+          referredAt,
+          referredStatus,
+          monthlyInviteCap: BILLING_POLICY.referralMonthlyCap,
+          pointsEarned: {
+            asReferrer: referralPointsAsReferrer,
+            asReferred: referralPointsAsReferred,
+            total: referralPointsAsReferrer + referralPointsAsReferred,
+          },
+          summary: {
+            asReferrer: {
+              total: referralAsReferrer.length,
+              rewarded: Number(referralStatusCounts.rewarded || 0),
+              fraudHold: Number(referralStatusCounts.fraud_hold || 0),
+              reversed: Number(referralStatusCounts.reversed || 0),
+              pending: Number(referralStatusCounts.pending || 0) + Number(referralStatusCounts.investigating || 0),
+              uniqueReferredUsers,
+            },
+            asReferred: {
+              status: referredStatus,
+              referralCode: profile.referred_by_code ? String(profile.referred_by_code) : null,
+              referrerUserId: referredByUserId,
+            },
+          },
+          recentEvents: recentReferralEvents,
           referralReward: BILLING_POLICY.referralPoints,
         },
         webhookBaseUrl: PUBLIC_TEST_WEBHOOK_BASE,
@@ -257,9 +418,16 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       subscriptionEndAt: null,
     });
 
+    let usagePointEvents = { ...USAGE_POINT_EVENTS };
+    try {
+      usagePointEvents = await getUsagePointEvents(ctx.client);
+    } catch {
+      usagePointEvents = { ...USAGE_POINT_EVENTS };
+    }
+
     const earnedEvents = POINTS_EVENT_ORDER.map((eventType) => ({
       eventType,
-      pointsPerEvent: Number(USAGE_POINT_EVENTS[eventType] || 0),
+      pointsPerEvent: Number(usagePointEvents[eventType] ?? USAGE_POINT_EVENTS[eventType] ?? 0),
       earnedPoints: 0,
       completionCount: 0,
       completed: false,
@@ -300,6 +468,34 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           myCode: '',
           shareLink: `${PUBLIC_APP_BASE_URL}/pricing`,
           referredByCode: null,
+          referredByUserId: null,
+          referredByLabel: null,
+          referredByIdentifier: null,
+          referredByIdentifierMasked: null,
+          referredAt: null,
+          referredStatus: null,
+          monthlyInviteCap: BILLING_POLICY.referralMonthlyCap,
+          pointsEarned: {
+            asReferrer: 0,
+            asReferred: 0,
+            total: 0,
+          },
+          summary: {
+            asReferrer: {
+              total: 0,
+              rewarded: 0,
+              fraudHold: 0,
+              reversed: 0,
+              pending: 0,
+              uniqueReferredUsers: 0,
+            },
+            asReferred: {
+              status: null,
+              referralCode: null,
+              referrerUserId: null,
+            },
+          },
+          recentEvents: [],
           referralReward: BILLING_POLICY.referralPoints,
         },
         webhookBaseUrl: PUBLIC_TEST_WEBHOOK_BASE,

@@ -67,8 +67,18 @@ const getPathMeta = (pathname: string) => {
 
 const labelClass = 'text-[11px] font-semibold tracking-wide text-slate-500';
 
-export const BillingManagePage: React.FC<{ mode?: 'manage' | 'pricing' }> = ({ mode = 'manage' }) => {
-  const [snapshot, setSnapshot] = useState<BillingSnapshot | null>(null);
+interface BillingManagePageProps {
+  mode?: 'manage' | 'pricing';
+  externalSnapshot?: BillingSnapshot | null;
+  onSnapshotSync?: (snapshot: BillingSnapshot | null) => void;
+}
+
+export const BillingManagePage: React.FC<BillingManagePageProps> = ({
+  mode = 'manage',
+  externalSnapshot = null,
+  onSnapshotSync,
+}) => {
+  const [snapshot, setSnapshot] = useState<BillingSnapshot | null>(externalSnapshot);
   const [publicPlans, setPublicPlans] = useState<BillingPlan[]>(() => getCachedBillingPlans()?.plans || []);
   const [plansLoadedFromServer, setPlansLoadedFromServer] = useState<boolean>(() => {
     const cached = getCachedBillingPlans();
@@ -165,24 +175,34 @@ export const BillingManagePage: React.FC<{ mode?: 'manage' | 'pricing' }> = ({ m
     const run = async (attempt: number): Promise<void> => {
       try {
         setLoading(true);
-        const [snapshotResponse, historyResponse] = await Promise.all([getBillingSnapshot(), getBillingHistory()]);
-        const safeSnapshot = snapshotResponse && typeof snapshotResponse === 'object'
-          ? snapshotResponse
-          : null;
-        const safeHistory = historyResponse && typeof historyResponse === 'object'
-          ? historyResponse
-          : null;
+        const snapshotResponse = await getBillingSnapshot().catch(() => null);
+        const historyResponse = await getBillingHistory().catch(() => null);
+        const safeSnapshot =
+          snapshotResponse && typeof snapshotResponse === 'object'
+            ? snapshotResponse
+            : null;
+        const safeHistory =
+          historyResponse && typeof historyResponse === 'object'
+            ? historyResponse
+            : null;
         const snapshotPlans = Array.isArray((safeSnapshot as BillingSnapshot | null)?.plans)
           ? (safeSnapshot as BillingSnapshot).plans
           : [];
 
-        setSnapshot(safeSnapshot);
+        if (safeSnapshot) {
+          setSnapshot(safeSnapshot);
+          onSnapshotSync?.(safeSnapshot);
+        }
         setHistory(safeHistory);
         if (snapshotPlans.length > 0) {
           setPublicPlans(snapshotPlans);
           setPlansLoadedFromServer(true);
         }
-        setError('');
+        if (safeSnapshot || safeHistory) {
+          setError('');
+          return;
+        }
+        throw new Error('Could not load billing data.');
       } catch (err) {
         const msg = normalizeUiError(err) || 'Could not load billing data.';
         const authIssue = /sign in required|missing bearer token|invalid auth token/i.test(msg.toLowerCase());
@@ -194,15 +214,19 @@ export const BillingManagePage: React.FC<{ mode?: 'manage' | 'pricing' }> = ({ m
           });
           return run(attempt + 1);
         }
-        setSnapshot(null);
-        setHistory(null);
+        setHistory((prev) => prev);
         setError(mode === 'pricing' && (authIssue || apiUnavailableIssue) ? '' : msg);
       } finally {
         setLoading(false);
       }
     };
     await run(0);
-  }, [mode, normalizeUiError]);
+  }, [mode, normalizeUiError, onSnapshotSync]);
+
+  useEffect(() => {
+    if (!externalSnapshot) return;
+    setSnapshot(externalSnapshot);
+  }, [externalSnapshot]);
 
   useEffect(() => {
     let active = true;
@@ -441,7 +465,7 @@ export const BillingManagePage: React.FC<{ mode?: 'manage' | 'pricing' }> = ({ m
   const pointsToInr = Number(snapshot?.points?.pointsToInr || 1);
   const pointsAppliedValue = pointsEligible * pointsToInr;
   const pointsEarnRateOnPayment = Number(
-    snapshot?.points?.earnedEvents?.find((row) => row.eventType === 'subscription_payment_success')?.pointsPerEvent || 50,
+    snapshot?.points?.earnedEvents?.find((row) => row.eventType === 'subscription_payment_success')?.pointsPerEvent || 30,
   );
   const activePlanName = useMemo(() => {
     const code = String(activeSubscription?.planCode || '').trim();

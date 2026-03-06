@@ -30,13 +30,15 @@ export const PLAN_MONTHS: Record<string, number> = {
 };
 
 export const USAGE_POINT_EVENTS: Record<string, number> = {
-  daily_login: 1,
-  profile_completion: 5,
-  risk_profile_completed: 5,
-  goal_added: 5,
-  report_generated: 5,
-  subscription_payment_success: 50,
+  daily_login: 10,
+  profile_completion: 20,
+  risk_profile_completed: 10,
+  goal_added: 20,
+  report_generated: 10,
+  subscription_payment_success: 30,
 };
+
+export const USAGE_POINT_EVENT_TYPES = Object.freeze(Object.keys(USAGE_POINT_EVENTS));
 
 export const PUBLIC_TEST_WEBHOOK_BASE =
   process.env.WEBHOOK_BASE_URL ||

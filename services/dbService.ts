@@ -729,11 +729,13 @@ export async function loadFinanceData(
   if (!uid) return null;
 
   const [
+    authUserRes,
     profileRes, familyRes, incomeRes,
     expensesRes, cashflowsRes, commitmentsRes, assetsRes, loansRes, goalsRes,
     insuranceRes, transactionsRes, notificationsRes,
     riskProfileRes, estateRes, insuranceAnalysisRes, discountSettingsRes,
   ] = await Promise.all([
+    supabase.auth.getUser(),
     supabase
       .from('profiles')
       .select('identifier,first_name,last_name,dob,life_expectancy,retirement_age,pincode,city,state,country,income_source,iq_score,onboarding_done')
@@ -765,6 +767,16 @@ export async function loadFinanceData(
   const identifier = (p.identifier as string) ?? '';
   const isMobile   = !identifier.includes('@') ||
                      identifier.includes('@auth.finvantage.app');
+  const authUserMetadata =
+    authUserRes?.data?.user?.user_metadata && typeof authUserRes.data.user.user_metadata === 'object'
+      ? authUserRes.data.user.user_metadata as Record<string, any>
+      : {};
+  const metadataPhoneE164 = String(authUserMetadata.phone_e164 || '').trim();
+  const metadataPhoneDigits = String(authUserMetadata.phone_number || '').replace(/\D/g, '');
+  const metadataCountryCode = String(authUserMetadata.phone_country_code || '').trim();
+  const mobileFromMetadata = metadataPhoneE164 || (
+    metadataPhoneDigits ? `${metadataCountryCode}${metadataPhoneDigits}` : ''
+  );
 
   // Build family with DB UUIDs
   const family: FamilyMember[] = (familyRes.data ?? []).map(rowToFamilyMember);
@@ -789,7 +801,7 @@ export async function loadFinanceData(
       lastName:       (p.last_name       as string) || fallback.profile.lastName,
       dob:            (p.dob             as string) || fallback.profile.dob,
       email:          isMobile ? '' : identifier,
-      mobile:         isMobile ? identifier : '',
+      mobile:         isMobile ? identifier : mobileFromMetadata,
       lifeExpectancy: (p.life_expectancy as number) || fallback.profile.lifeExpectancy,
       retirementAge:  (p.retirement_age  as number) || fallback.profile.retirementAge,
       pincode:        (p.pincode         as string) || fallback.profile.pincode,
@@ -836,6 +848,8 @@ export async function saveFinanceData(
 ): Promise<Partial<FinanceState>> {
   const uid = userId || (await supabase.auth.getSession()).data.session?.user.id || null;
   if (!uid) throw new Error('No active auth session.');
+
+  await saveProfile(uid, state.profile, state.isRegistered);
 
   const atomic = await trySaveFinanceDataAtomic(uid, state);
   if (atomic.applied) {
@@ -1778,4 +1792,72 @@ async function saveReportSnapshot(
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
   if (error) throw error;
+}
+
+async function saveProfile(
+  uid: string,
+  profile: FinanceState['profile'],
+  isRegistered: boolean,
+): Promise<void> {
+  const identifier = String(profile.email || profile.mobile || '').trim().toLowerCase();
+  const rawMobile = String(profile.mobile || '').trim();
+  const normalizedMobileDigits = rawMobile.replace(/\D/g, '');
+  const countryCodeMatch = rawMobile.match(/^(\+\d{1,4})/);
+  const normalizedCountryCode = countryCodeMatch ? countryCodeMatch[1] : '';
+  const normalizedCountryDigits = normalizedCountryCode.replace(/\D/g, '');
+  const normalizedPhoneNumber = normalizedCountryDigits && normalizedMobileDigits.startsWith(normalizedCountryDigits)
+    ? normalizedMobileDigits.slice(normalizedCountryDigits.length)
+    : normalizedMobileDigits;
+  const normalizedPhoneE164 = rawMobile.startsWith('+')
+    ? rawMobile
+    : (normalizedMobileDigits ? `+${normalizedMobileDigits}` : '');
+  const updatePayload: Record<string, any> = {
+    identifier: identifier || null,
+    first_name: String(profile.firstName || '').trim(),
+    last_name: String(profile.lastName || '').trim() || null,
+    dob: profile.dob || null,
+    life_expectancy: Number.isFinite(Number(profile.lifeExpectancy)) ? Number(profile.lifeExpectancy) : null,
+    retirement_age: Number.isFinite(Number(profile.retirementAge)) ? Number(profile.retirementAge) : null,
+    pincode: String(profile.pincode || '').trim() || null,
+    city: String(profile.city || '').trim() || null,
+    state: String(profile.state || '').trim() || null,
+    country: String(profile.country || 'India').trim() || 'India',
+    income_source: String(profile.incomeSource || 'salaried').trim() || 'salaried',
+    iq_score: Number.isFinite(Number(profile.iqScore)) ? Number(profile.iqScore) : null,
+    onboarding_done: Boolean(isRegistered),
+    updated_at: new Date().toISOString(),
+  };
+
+  let { error } = await supabase
+    .from('profiles')
+    .update(updatePayload)
+    .eq('id', uid);
+
+  if (
+    error &&
+    typeof error.message === 'string' &&
+    error.message.toLowerCase().includes('null value in column') &&
+    error.message.toLowerCase().includes('identifier')
+  ) {
+    const fallbackPayload = { ...updatePayload, identifier: uid };
+    const fallback = await supabase
+      .from('profiles')
+      .update(fallbackPayload)
+      .eq('id', uid);
+    error = fallback.error;
+  }
+
+  if (error) throw error;
+
+  // Keep phone metadata synchronized for email-first identifiers.
+  // Mobile lives in auth metadata so it can be loaded consistently across sessions.
+  if (rawMobile) {
+    await supabase.auth.updateUser({
+      data: {
+        phone_country_code: normalizedCountryCode || null,
+        phone_number: normalizedPhoneNumber || null,
+        phone_e164: normalizedPhoneE164 || null,
+      },
+    }).catch(() => undefined);
+  }
 }

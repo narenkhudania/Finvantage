@@ -1,11 +1,16 @@
 import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import { StaticInfoPage, SupportDeskPage } from './components/site/PublicInfoPages';
 
 const AdminPage = lazy(() => import('./components/admin/AdminPage'));
 const BlogIndexPage = lazy(() => import('./components/blog/BlogIndexPage'));
 const BlogPostPage = lazy(() => import('./components/blog/BlogPostPage'));
+const SupportDeskPage = lazy(async () => ({
+  default: (await import('./components/site/PublicInfoPages')).SupportDeskPage,
+}));
+const StaticInfoPage = lazy(async () => ({
+  default: (await import('./components/site/PublicInfoPages')).StaticInfoPage,
+}));
 const BillingResultPage = lazy(async () => ({
   default: (await import('./components/site/BillingPages')).BillingResultPage,
 }));
@@ -22,11 +27,31 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
 const normalizedPath = pathname.toLowerCase();
+const hostname = window.location.hostname.toLowerCase();
+const isLocalHost =
+  hostname === 'localhost' ||
+  hostname === '127.0.0.1' ||
+  hostname === '0.0.0.0' ||
+  hostname.endsWith('.local');
+const isAdminHost = hostname.startsWith('admin.');
+const wantsAdminPath = normalizedPath.startsWith('/admin');
+const useAdminSurface = isAdminHost || (isLocalHost && wantsAdminPath);
+
+// Enforce app-surface split:
+// - admin host => always admin control plane
+// - customer host => /admin is blocked in production hosts
+if (isAdminHost && normalizedPath !== '/admin') {
+  window.history.replaceState({}, '', '/admin');
+}
+if (!useAdminSurface && wantsAdminPath) {
+  window.history.replaceState({}, '', '/');
+}
+
 const pathParts = pathname.split('/').filter(Boolean);
 const blogSlug = pathParts.length >= 2 ? pathParts.slice(1).join('/') : '';
 
 const Entry: React.ComponentType =
-  normalizedPath.startsWith('/admin')
+  useAdminSurface
     ? AdminPage
     : normalizedPath === '/support' || normalizedPath === '/contact' || normalizedPath === '/contact-us'
     ? SupportDeskPage

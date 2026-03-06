@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, LifeBuoy, RefreshCw, Send, ShieldCheck } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, LifeBuoy, RefreshCw, Send, ShieldCheck, Ticket } from 'lucide-react';
 import type { CustomerComplaintTicket, FinanceState } from '../types';
 import { listMyComplaintTickets, registerComplaintTicket } from '../services/supportService';
 
@@ -76,6 +76,14 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
     return tickets.filter((ticket) => ticket.status === statusFilter);
   }, [tickets, statusFilter]);
 
+  const supportMetrics = useMemo(() => {
+    const open = tickets.filter((ticket) => ticket.status === 'open').length;
+    const inProgress = tickets.filter((ticket) => ticket.status === 'in_progress' || ticket.status === 'waiting_user').length;
+    const resolved = tickets.filter((ticket) => ticket.status === 'resolved' || ticket.status === 'closed').length;
+    const breached = tickets.filter((ticket) => String(ticket.slaStatus || '').toLowerCase() === 'breached').length;
+    return { open, inProgress, resolved, breached, total: tickets.length };
+  }, [tickets]);
+
   const handleSubmitComplaint = async () => {
     if (!form.subject.trim()) {
       setError('Please enter complaint subject.');
@@ -125,24 +133,53 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
 
   return (
     <div className="space-y-6 md:space-y-8 animate-in fade-in duration-500 pb-24">
-      <div className="surface-dark p-6 sm:p-8 md:p-12 rounded-[2rem] md:rounded-[3rem] text-white relative overflow-hidden shadow-2xl">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal-600/10 blur-[120px] rounded-full translate-x-1/4 -translate-y-1/4" />
-        <div className="relative z-10 space-y-4">
-          <div className="inline-flex items-center gap-3 px-4 py-2 bg-teal-500/10 text-teal-300 rounded-full text-[10px] font-black uppercase tracking-[0.3em] border border-teal-500/20">
-            <LifeBuoy size={14} /> Complaint Desk
+      <section className="relative overflow-hidden rounded-[2rem] border border-teal-100 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-5 sm:p-6 md:p-8">
+        <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full bg-teal-100/70 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 -left-12 h-40 w-40 rounded-full bg-cyan-100/60 blur-3xl" />
+        <div className="relative">
+          <div className="inline-flex items-center gap-2 rounded-full border border-teal-200 bg-white/80 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-teal-700">
+            <LifeBuoy size={12} /> Complaint Desk
           </div>
-          <h2 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight leading-tight">Raise & Track Complaints</h2>
-          <p className="text-slate-300 text-sm md:text-base font-medium max-w-3xl">
-            Register service complaints and track ticket status in real time. The same ticket is visible to customer support operations in admin.
+          <h2 className="mt-3 text-2xl sm:text-3xl md:text-4xl font-black tracking-tight text-slate-900">Raise and Track Complaints</h2>
+          <p className="mt-2 max-w-3xl text-sm md:text-base font-semibold text-slate-600">
+            Register issues, monitor SLA status, and track resolution updates from one place. Every ticket is synced with internal support operations.
           </p>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-6">
-        <div className="bg-white p-5 sm:p-6 md:p-8 rounded-[1.75rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4">
-          <div>
-            <h3 className="text-xl font-black text-slate-900">Complaint Registration Form</h3>
-            <p className="text-sm text-slate-500 mt-1">Please add clear details so support can resolve faster.</p>
+          <div className="mt-5 grid grid-cols-2 lg:grid-cols-5 gap-2">
+            <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+              <p className="text-[11px] font-semibold text-slate-500">Total Tickets</p>
+              <p className="mt-0.5 text-lg font-black text-slate-900">{supportMetrics.total}</p>
+            </div>
+            <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+              <p className="text-[11px] font-semibold text-slate-500">Open</p>
+              <p className="mt-0.5 text-lg font-black text-rose-700">{supportMetrics.open}</p>
+            </div>
+            <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+              <p className="text-[11px] font-semibold text-slate-500">In Progress</p>
+              <p className="mt-0.5 text-lg font-black text-amber-700">{supportMetrics.inProgress}</p>
+            </div>
+            <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+              <p className="text-[11px] font-semibold text-slate-500">Resolved</p>
+              <p className="mt-0.5 text-lg font-black text-emerald-700">{supportMetrics.resolved}</p>
+            </div>
+            <div className="rounded-xl border border-white/80 bg-white/85 px-3 py-2.5">
+              <p className="text-[11px] font-semibold text-slate-500">SLA Breach</p>
+              <p className="mt-0.5 text-lg font-black text-rose-700">{supportMetrics.breached}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-6">
+        <section className="rounded-[1.75rem] md:rounded-[2rem] border border-slate-200 bg-white p-5 sm:p-6 md:p-7 shadow-sm space-y-4">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-teal-100 bg-teal-50 text-teal-600">
+              <Ticket size={16} />
+            </span>
+            <div>
+              <h3 className="text-xl font-black tracking-tight text-slate-900">Complaint Registration</h3>
+              <p className="mt-1 text-sm font-semibold text-slate-500">Share clear context for faster triage and resolution.</p>
+            </div>
           </div>
 
           {error && (
@@ -166,7 +203,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
                 value={form.subject}
                 onChange={(event) => setForm((prev) => ({ ...prev, subject: event.target.value }))}
                 placeholder="Example: Incorrect goal projection after editing expenses"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-teal-400"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
               />
             </div>
 
@@ -177,7 +214,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
                 value={form.description}
                 onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
                 placeholder="Describe what happened, where it happened, and expected result."
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-teal-400"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
               />
             </div>
 
@@ -187,7 +224,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
                 <select
                   value={form.priority}
                   onChange={(event) => setForm((prev) => ({ ...prev, priority: event.target.value as 'low' | 'medium' | 'high' | 'urgent' }))}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-teal-400"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -201,7 +238,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
                   value={form.tags}
                   onChange={(event) => setForm((prev) => ({ ...prev, tags: event.target.value }))}
                   placeholder="billing, projection, app"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-teal-400"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-teal-300 focus:bg-white focus:ring-2 focus:ring-teal-100"
                 />
               </div>
             </div>
@@ -209,50 +246,58 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
             <button
               onClick={handleSubmitComplaint}
               disabled={submitting}
-              className="w-full rounded-2xl bg-teal-600 px-4 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              className="w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-teal-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
             >
               {submitting ? 'Submitting...' : 'Register Complaint'}
               <Send size={14} />
             </button>
           </div>
-        </div>
+        </section>
 
-        <div className="bg-white p-5 sm:p-6 md:p-8 rounded-[1.75rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4 h-fit">
-          <h3 className="text-xl font-black text-slate-900">Support Assurance</h3>
+        <aside className="rounded-[1.75rem] md:rounded-[2rem] border border-slate-200 bg-white p-5 sm:p-6 md:p-7 shadow-sm space-y-4 h-fit">
+          <h3 className="text-xl font-black tracking-tight text-slate-900">Support Assurance</h3>
           <div className="space-y-3">
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-black text-slate-900">Tracking Transparency</p>
-              <p className="text-xs text-slate-600 mt-1">Every complaint gets a ticket number and status timeline.</p>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Every complaint receives a ticket number with status updates and timestamps.</p>
             </div>
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-              <p className="text-sm font-black text-slate-900">Integrated Ops Queue</p>
-              <p className="text-xs text-slate-600 mt-1">Tickets appear directly in admin CRM complaint tracker for action.</p>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-black text-slate-900">Integrated Operations Queue</p>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Tickets are synced to internal CRM support queues for faster triage.</p>
             </div>
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-black text-slate-900">SLA Monitoring</p>
-              <p className="text-xs text-slate-600 mt-1">Each ticket is tracked against response and resolution deadlines with auto-escalation for overdue complaints.</p>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Resolution timelines are tracked with due-soon and breach indicators.</p>
             </div>
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="text-sm font-black text-slate-900">Data Security</p>
-              <p className="text-xs text-slate-600 mt-1 inline-flex items-center gap-1.5">
+              <p className="mt-1 text-xs font-semibold text-slate-600 inline-flex items-center gap-1.5">
                 <ShieldCheck size={12} className="text-emerald-600" /> Complaint details are linked only to your signed-in account.
               </p>
             </div>
           </div>
-        </div>
+
+          <div className="rounded-xl border border-teal-100 bg-teal-50 p-3">
+            <p className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.14em] text-teal-700">
+              <Clock3 size={12} /> Operations Window
+            </p>
+            <p className="mt-1 text-sm font-black text-slate-900">Mon-Sat, 09:00-19:00 IST</p>
+            <p className="mt-1 text-xs font-semibold text-slate-600">Urgent items are prioritized in the same business window.</p>
+          </div>
+        </aside>
       </div>
 
-      <div className="bg-white p-5 sm:p-6 md:p-8 rounded-[1.75rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm space-y-4">
+      <section className="bg-white p-5 sm:p-6 md:p-7 rounded-[1.75rem] md:rounded-[2rem] border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <h3 className="text-xl font-black text-slate-900">My Complaint Tickets</h3>
-            <p className="text-sm text-slate-500 mt-1">Track current status and latest updates.</p>
+            <h3 className="text-xl font-black tracking-tight text-slate-900">My Complaint Tickets</h3>
+            <p className="text-sm font-semibold text-slate-500 mt-1">Track live status, escalation level, and SLA movement.</p>
           </div>
           <div className="flex items-center gap-2">
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value as 'all' | CustomerComplaintTicket['status'])}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-600 outline-none transition focus:border-teal-300 focus:ring-2 focus:ring-teal-100"
             >
               <option value="all">All Status</option>
               <option value="open">Open</option>
@@ -263,7 +308,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
             </select>
             <button
               onClick={() => void loadTickets()}
-              className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-teal-700 inline-flex items-center gap-1.5"
+              className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-teal-700 inline-flex items-center gap-1.5 hover:bg-teal-100"
             >
               <RefreshCw size={12} />
               Refresh
@@ -321,7 +366,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
           )}
         </div>
 
-        <div className="hidden lg:block overflow-x-auto">
+        <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
           <table className="min-w-[1080px] w-full text-sm">
             <thead className="bg-slate-50">
               <tr>
@@ -385,7 +430,7 @@ const SupportCenter: React.FC<SupportCenterProps> = ({ state, updateState }) => 
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
     </div>
   );
 };

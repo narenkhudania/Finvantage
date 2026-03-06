@@ -27,6 +27,18 @@ export default defineConfig(({ mode }) => {
           }
         : undefined,
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return;
+            if (id.includes("recharts") || id.includes("d3-")) return "vendor-charts";
+            if (id.includes("@supabase/supabase-js")) return "vendor-supabase";
+            return "vendor";
+          },
+        },
+      },
+    },
     plugins: [react()],
     resolve: {
       alias: {

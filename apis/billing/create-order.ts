@@ -10,6 +10,7 @@ import {
   getReferrerRewardCountForCurrentMonth,
   getRequestClientContext,
   getLatestSubscription,
+  getUsagePointEvents,
   isPointsFrozenForUser,
   isUpgradeAllowed,
   getPlanByCode,
@@ -19,7 +20,7 @@ import {
   recordBillingActivity,
   logBillingErrorEvent,
 } from './_helpers';
-import { BILLING_POLICY, PLAN_MONTHS } from './_config';
+import { BILLING_POLICY, PLAN_MONTHS, USAGE_POINT_EVENTS } from './_config';
 import { resolveCheckoutModeRule } from '../../lib/billingCheckout.mjs';
 
 type RequestLike = {
@@ -34,6 +35,92 @@ type ResponseLike = {
 };
 
 const normalizeCouponCode = (value: unknown) => String(value || '').trim().toUpperCase();
+const FINALIZER_CHECK_TTL_MS = 5 * 60 * 1000;
+let finalizerCheckCache: { ok: boolean; checkedAt: number } | null = null;
+
+const isMissingCouponReserveRpcError = (error: unknown) => {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  const code = String((error as { code?: string })?.code || '').toLowerCase();
+  return (
+    message.includes('billing_reserve_coupon_for_payment') &&
+    (
+      message.includes('does not exist') ||
+      message.includes('could not find') ||
+      message.includes('schema cache') ||
+      message.includes('function') ||
+      code === 'pgrst202' ||
+      code === '404'
+    )
+  );
+};
+
+const isCouponInfrastructureError = (error: unknown) => {
+  const message = String((error as { message?: string })?.message || '').toLowerCase();
+  const code = String((error as { code?: string })?.code || '').toLowerCase();
+  return (
+    message.includes('coupon system is temporarily unavailable') ||
+    message.includes('subscription_coupons') ||
+    message.includes('subscription_coupon') ||
+    message.includes('billing_reserve_coupon_for_payment') ||
+    message.includes('schema cache') ||
+    message.includes('permission denied') ||
+    message.includes('forbidden') ||
+    code === 'pgrst202' ||
+    code === '42p01' ||
+    code === '42501'
+  );
+};
+
+const isMissingFinalizeFunctionError = (error: unknown) => {
+  const text = String((error as { message?: string })?.message || '').toLowerCase();
+  const code = String((error as { code?: string })?.code || '').toLowerCase();
+  return (
+    text.includes('billing_finalize_payment') &&
+    (
+      text.includes('does not exist') ||
+      text.includes('could not find') ||
+      text.includes('schema cache') ||
+      text.includes('function') ||
+      code === 'pgrst202' ||
+      code === '404'
+    )
+  );
+};
+
+const isProbeValidationError = (error: unknown) => {
+  const text = String((error as { message?: string })?.message || '').toLowerCase();
+  return (
+    text.includes('missing required parameters') ||
+    text.includes('null value') ||
+    text.includes('invalid input')
+  );
+};
+
+const ensureBillingFinalizerAvailable = async (client: any, paymentSuccessPoints: number) => {
+  const now = Date.now();
+  if (finalizerCheckCache && now - finalizerCheckCache.checkedAt < FINALIZER_CHECK_TTL_MS) {
+    return finalizerCheckCache.ok;
+  }
+
+  const { error } = await client.rpc('billing_finalize_payment', {
+    p_user_id: null,
+    p_payment_id: null,
+    p_order_id: null,
+    p_provider_payment_id: null,
+    p_provider_subscription_id: null,
+    p_points_expiry_months: BILLING_POLICY.pointsExpiryMonths,
+    p_referrer_points: BILLING_POLICY.referralPoints.referrer,
+    p_referred_points: BILLING_POLICY.referralPoints.referred,
+    p_referral_monthly_cap: BILLING_POLICY.referralMonthlyCap,
+    p_payment_success_points: paymentSuccessPoints,
+    p_retry_days: BILLING_POLICY.retryDays,
+  });
+
+  const available = !error || isProbeValidationError(error);
+  finalizerCheckCache = { ok: available, checkedAt: now };
+  return available;
+};
+
 const parseBillingMonthsFromCycle = (value: unknown) => {
   const cycle = String(value || '').toLowerCase();
   const match = cycle.match(/^(\d+)_month/);
@@ -64,6 +151,24 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
   }
 
   try {
+    const usagePointEvents = await getUsagePointEvents(ctx.client);
+    const paymentSuccessPoints = Math.max(
+      0,
+      Math.trunc(Number(
+        usagePointEvents.subscription_payment_success ??
+        USAGE_POINT_EVENTS.subscription_payment_success ||
+        0
+      ))
+    );
+    const finalizerReady = await ensureBillingFinalizerAvailable(ctx.client, paymentSuccessPoints);
+    if (!finalizerReady) {
+      res.status(503).json({
+        error: 'Checkout is temporarily unavailable while billing services sync. Please retry shortly.',
+        code: 'BILLING_FINALIZER_UNAVAILABLE',
+      });
+      return;
+    }
+
     const clientContext = getRequestClientContext(req);
     const deviceFingerprint = String(req.body?.deviceFingerprint || '').trim();
 
@@ -101,8 +206,20 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       }
     }
 
+    // Referral code is immutable once linked to the account.
+    const existingReferredByCode = profile?.referred_by_code
+      ? String(profile.referred_by_code).trim().toUpperCase()
+      : '';
+    if (referralCode && existingReferredByCode && referralCode !== existingReferredByCode) {
+      res.status(409).json({
+        error: `Referral code is already linked to ${existingReferredByCode} and cannot be changed.`,
+        code: 'REFERRAL_CODE_IMMUTABLE',
+      });
+      return;
+    }
+
     // Referral code attachment before first successful paid subscription.
-    if (referralCode && !profile.referred_by_code) {
+    if (referralCode && !existingReferredByCode) {
       const { data: refProfile, error: refError } = await ctx.client
         .from('user_billing_profiles')
         .select('user_id, referral_code')
@@ -238,8 +355,7 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       );
 
       if (reserveError) {
-        const message = String(reserveError.message || '').toLowerCase();
-        if (!message.includes('does not exist')) {
+        if (!isMissingCouponReserveRpcError(reserveError)) {
           throw new Error(reserveError.message || 'Could not reserve coupon.');
         }
         const { data: coupon, error: couponError } = await ctx.client
@@ -248,6 +364,12 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
           .eq('code', couponCode)
           .eq('is_active', true)
           .maybeSingle();
+        if (couponError) {
+          if (isCouponInfrastructureError(couponError)) {
+            throw new Error('Coupon system is temporarily unavailable. Please retry without coupon.');
+          }
+          throw new Error(couponError.message || 'Could not validate coupon code.');
+        }
         if (couponError || !coupon) {
           throw new Error('Invalid coupon code.');
         }
@@ -448,7 +570,9 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       normalized.includes('supabase_service_role_key') ||
       normalized.includes('missing razorpay_key_id') ||
       normalized.includes('missing razorpay_key_secret') ||
-      normalized.includes('server misconfiguration');
+      normalized.includes('server misconfiguration') ||
+      normalized.includes('billing_finalize_payment');
+    const isCouponInfraError = isCouponInfrastructureError(err);
 
     await logBillingErrorEvent(ctx.client, {
       source: 'billing.create_order',
@@ -464,6 +588,14 @@ export default async function handler(req: RequestLike, res: ResponseLike) {
       res.status(503).json({
         error: 'Checkout backend configuration is incomplete. Please contact support.',
         code: 'BILLING_BACKEND_CONFIG_MISSING',
+      });
+      return;
+    }
+
+    if (isCouponInfraError) {
+      res.status(503).json({
+        error: 'Coupon service is temporarily unavailable. Please retry without coupon.',
+        code: 'COUPON_BACKEND_UNAVAILABLE',
       });
       return;
     }

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:api": "vercel dev --listen 3001",
+    "dev:api": "npx vercel dev --listen 3001",
+    "health:migrations": "node scripts/check-migration-health.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests/**/*.test.mjs"

@@ -30,6 +30,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/1t-wNnRRqulGaXMOLQVelOi
    - `GEMINI_API_KEY` (server-side for `/api/ai-advice`; never use `VITE_GEMINI_API_KEY`)
    - `SUPABASE_URL` (server-side API routes)
    - `SUPABASE_SERVICE_ROLE_KEY` (server-side API routes)
+   - `SUPABASE_ANON_KEY` (optional server-side fallback for public `/api/billing/plans`)
    - `RAZORPAY_KEY_ID` (billing checkout public key)
    - `RAZORPAY_KEY_SECRET` (billing server auth secret)
    - `RAZORPAY_WEBHOOK_SECRET` (required, dedicated webhook signature secret)
@@ -89,7 +90,7 @@ Enable event types:
 
 ### Local API Dev (optional)
 If you want to use the AI route locally, run Vercel Functions alongside Vite:
-1. Terminal A: `vercel dev --listen 3001`
+1. Terminal A: `npm run dev:api`
 2. Terminal B: `npm run dev`
 3. Optional override in `.env.local`:
    - `VITE_API_PROXY_TARGET=http://localhost:3001`
@@ -97,6 +98,19 @@ If you want to use the AI route locally, run Vercel Functions alongside Vite:
 Notes:
 - `npm run dev` now defaults `/api` proxy to `http://localhost:3001` in development.
 - Use `VITE_API_PROXY_TARGET` to point `/api` to another host if needed.
+- If `npx vercel` is blocked in your environment, install Vercel CLI once:
+  - `npm i -g vercel` (or run through your package manager policy).
+
+### API-independent migration health check
+Use this when backend `/api` is down and you still need to validate billing/rewards schema:
+1. Ensure `.env.local` has:
+   - `SUPABASE_URL` (or `VITE_SUPABASE_URL`)
+   - `SUPABASE_SERVICE_ROLE_KEY`
+2. Run:
+   - `npm run health:migrations`
+3. Output:
+   - `Status: OK` if required objects are present
+   - `Status: MISSING OBJECTS` with an explicit list otherwise
 
 ## Admin Foundation (Tenant + Security)
 

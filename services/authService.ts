@@ -307,6 +307,10 @@ export async function saveOnboardingProfile(payload: {
   iqScore: number;
   termInsuranceAmount?: number;
   healthInsuranceAmount?: number;
+  mobileE164?: string;
+  phoneCountryCode?: string;
+  phoneNumber?: string;
+  referralCode?: string;
 }): Promise<void> {
   const dobDate = new Date(payload.dob);
   if (Number.isNaN(dobDate.getTime())) {
@@ -342,6 +346,20 @@ export async function saveOnboardingProfile(payload: {
     .eq('id', user.id);
 
   if (error) throw new Error(sanitizeProviderText(error.message || 'Could not save profile.'));
+
+  const normalizedPhoneDigits = String(payload.phoneNumber || '').replace(/\D/g, '');
+  const normalizedCountryCode = String(payload.phoneCountryCode || '').trim();
+  const normalizedPhoneE164 = String(payload.mobileE164 || '').trim();
+
+  if (normalizedPhoneE164 || normalizedPhoneDigits || normalizedCountryCode) {
+    await supabase.auth.updateUser({
+      data: {
+        phone_country_code: normalizedCountryCode || null,
+        phone_number: normalizedPhoneDigits || null,
+        phone_e164: normalizedPhoneE164 || null,
+      },
+    }).catch(() => undefined);
+  }
 
   const termInsuranceAmount = Number.isFinite(Number(payload.termInsuranceAmount))
     ? Math.max(0, Number(payload.termInsuranceAmount))
@@ -396,6 +414,10 @@ export async function saveOnboardingProfile(payload: {
   } catch {
     await persistInsurancePayload(fallbackPayload).catch(() => undefined);
   }
+
+  // Best-effort retry to ensure referral code link is persisted if it was deferred
+  // during signup due temporary API/session timing.
+  await applyPendingSignupReferralCode(payload.referralCode);
 }
 
 /**

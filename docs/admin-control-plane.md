@@ -145,8 +145,8 @@ Trade-off:
   - `services/admin/adminService.ts`
   - `services/admin/types.ts`
 - API sample (RBAC + analytics endpoint):
-  - `api/admin/_auth.ts`
-  - `api/admin/analytics.ts`
+  - `apis/admin/_auth.ts`
+  - `apis/admin/analytics.ts`
 - Database migration:
   - `supabase/migrations/20260227_admin_control_plane.sql`
   - `supabase/migrations/20260228_foundation_tenant_security.sql`

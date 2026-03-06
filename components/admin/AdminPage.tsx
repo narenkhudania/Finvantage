@@ -319,6 +319,21 @@ const formatCurrency = (value: number) => INR.format(Number.isFinite(value) ? va
 const formatNumber = (value: number) => NUM.format(Number.isFinite(value) ? value : 0);
 const formatSignedNumber = (value: number) => `${value > 0 ? '+' : ''}${formatNumber(value)}`;
 
+const BILLING_USAGE_POINT_RULE_DEFAULTS: Array<{
+  event_type: string;
+  display_name: string;
+  points: number;
+  is_active: boolean;
+  description: string;
+}> = [
+  { event_type: 'daily_login', display_name: 'Daily Login', points: 10, is_active: true, description: 'Awarded once per day when user logs in.' },
+  { event_type: 'profile_completion', display_name: 'Profile Completion', points: 20, is_active: true, description: 'Awarded once when onboarding profile is fully completed.' },
+  { event_type: 'risk_profile_completed', display_name: 'Risk Profile Completed', points: 10, is_active: true, description: 'Awarded once when risk profile is submitted.' },
+  { event_type: 'goal_added', display_name: 'Goal Added', points: 20, is_active: true, description: 'Awarded when a new goal is added.' },
+  { event_type: 'report_generated', display_name: 'Report Generated', points: 10, is_active: true, description: 'Awarded when customer generates a report/summary view.' },
+  { event_type: 'subscription_payment_success', display_name: 'Subscription Payment Success', points: 30, is_active: true, description: 'Awarded on successful paid subscription payment.' },
+];
+
 const formatDate = (value?: string | null) => {
   if (!value) return '-';
   const parsed = new Date(value);
@@ -622,6 +637,7 @@ const AdminPage: React.FC = () => {
   const [webhookEvents, setWebhookEvents] = useState<WebhookEvent[]>([]);
   const [billingCoupons, setBillingCoupons] = useState<Array<Record<string, any>>>([]);
   const [billingPlans, setBillingPlans] = useState<Array<Record<string, any>>>([]);
+  const [billingPointRules, setBillingPointRules] = useState<Array<Record<string, any>>>([]);
   const [billingReminders, setBillingReminders] = useState<Array<Record<string, any>>>([]);
   const [billingReferralEvents, setBillingReferralEvents] = useState<Array<Record<string, any>>>([]);
 
@@ -996,7 +1012,7 @@ const AdminPage: React.FC = () => {
   }, [blogSearch, blogStatusFilter]);
 
   const loadOperations = useCallback(async () => {
-    const [flags, events, couponsRes, plansRes, remindersRes, referralRes] = await Promise.all([
+    const [flags, events, couponsRes, plansRes, pointRulesRes, remindersRes, referralRes] = await Promise.all([
       getFeatureFlags(),
       getWebhookEvents(160),
       supabase
@@ -1009,6 +1025,10 @@ const AdminPage: React.FC = () => {
         .select('*')
         .order('sort_order', { ascending: true })
         .limit(40),
+      supabase
+        .from('billing_usage_point_rules')
+        .select('*')
+        .order('event_type', { ascending: true }),
       supabase
         .from('billing_internal_reminders')
         .select('*')
@@ -1024,10 +1044,35 @@ const AdminPage: React.FC = () => {
     setWebhookEvents(events);
     if (couponsRes.error) throw new Error(couponsRes.error.message || 'Could not load coupons.');
     if (plansRes.error) throw new Error(plansRes.error.message || 'Could not load billing plans.');
+    const pointRulesErrorText = String(pointRulesRes.error?.message || '').toLowerCase();
+    const pointRulesMissing =
+      pointRulesRes.error && (
+        pointRulesErrorText.includes('relation') ||
+        pointRulesErrorText.includes('does not exist') ||
+        pointRulesErrorText.includes('schema cache')
+      );
+    if (pointRulesRes.error && !pointRulesMissing) {
+      throw new Error(pointRulesRes.error.message || 'Could not load points rules.');
+    }
     if (remindersRes.error) throw new Error(remindersRes.error.message || 'Could not load billing reminders.');
     if (referralRes.error) throw new Error(referralRes.error.message || 'Could not load referral events.');
     setBillingCoupons((couponsRes.data || []) as Array<Record<string, any>>);
     setBillingPlans((plansRes.data || []) as Array<Record<string, any>>);
+    const fetchedRules = pointRulesMissing
+      ? []
+      : (pointRulesRes.data || []) as Array<Record<string, any>>;
+    const mergedRules = BILLING_USAGE_POINT_RULE_DEFAULTS.map((defaultRule) => {
+      const existing = fetchedRules.find((row) => String(row.event_type || '') === defaultRule.event_type);
+      return existing
+        ? {
+            ...defaultRule,
+            ...existing,
+            points: Number(existing.points ?? defaultRule.points),
+            is_active: existing.is_active !== false,
+          }
+        : { ...defaultRule };
+    });
+    setBillingPointRules(mergedRules);
     setBillingReminders((remindersRes.data || []) as Array<Record<string, any>>);
     setBillingReferralEvents((referralRes.data || []) as Array<Record<string, any>>);
   }, []);
@@ -4814,6 +4859,106 @@ const AdminPage: React.FC = () => {
                   </div>
                 </div>
               )})}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Milestone Points Rules</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">
+              Configure points per milestone. These values are used in rewards UI and awarding logic.
+            </p>
+            <div className="mt-3 space-y-2">
+              {billingPointRules.map((rule) => (
+                <div key={String(rule.event_type || '')} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-7">
+                    <input
+                      value={String(rule.display_name || '').trim()}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setBillingPointRules((prev) => prev.map((row) => (
+                          String(row.event_type || '') === String(rule.event_type || '')
+                            ? { ...row, display_name: value }
+                            : row
+                        )));
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 sm:col-span-2"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={Math.max(0, Math.trunc(Number(rule.points || 0)))}
+                      onChange={(event) => {
+                        const value = Math.max(0, Math.trunc(Number(event.target.value || 0)));
+                        setBillingPointRules((prev) => prev.map((row) => (
+                          String(row.event_type || '') === String(rule.event_type || '')
+                            ? { ...row, points: value }
+                            : row
+                        )));
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700"
+                    />
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={rule.is_active !== false}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setBillingPointRules((prev) => prev.map((row) => (
+                            String(row.event_type || '') === String(rule.event_type || '')
+                              ? { ...row, is_active: checked }
+                              : row
+                          )));
+                        }}
+                      />
+                      Active
+                    </label>
+                    <input
+                      value={String(rule.description || '')}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setBillingPointRules((prev) => prev.map((row) => (
+                          String(row.event_type || '') === String(rule.event_type || '')
+                            ? { ...row, description: value }
+                            : row
+                        )));
+                      }}
+                      placeholder="Rule note"
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 sm:col-span-2"
+                    />
+                    <button
+                      onClick={async () => {
+                        const eventType = String(rule.event_type || '').trim();
+                        if (!eventType) {
+                          setError('Points rule event type is required.');
+                          return;
+                        }
+                        setBusy(true);
+                        try {
+                          await callAdminBillingMutation('upsert_points_rule', {
+                            eventType,
+                            displayName: String(rule.display_name || '').trim() || eventType.replace(/_/g, ' '),
+                            points: Math.max(0, Math.trunc(Number(rule.points || 0))),
+                            isActive: rule.is_active !== false,
+                            description: String(rule.description || '').trim() || null,
+                          });
+                          setSuccess(`Saved points rule for ${eventType}.`);
+                          await loadOperations();
+                        } catch (err) {
+                          setError((err as Error).message || 'Could not save points rule.');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className={`${buttonBase} !px-2.5 !py-1.5 border-teal-200 bg-teal-50 text-teal-700`}
+                    >
+                      Save Rule
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    {String(rule.event_type || '')}
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
 

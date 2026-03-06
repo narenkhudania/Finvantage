@@ -12,12 +12,20 @@ type ResponseLike = {
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAnonKey =
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  '';
 
 const makeClient = () => {
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error('Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+  // Public plans endpoint can safely run with anon key fallback.
+  const key = supabaseServiceKey || supabaseAnonKey;
+  if (!supabaseUrl || !key) {
+    throw new Error(
+      'Missing SUPABASE_URL/VITE_SUPABASE_URL and a Supabase key (SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY/VITE_SUPABASE_ANON_KEY).'
+    );
   }
-  return createClient(supabaseUrl, supabaseServiceKey, {
+  return createClient(supabaseUrl, key, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
